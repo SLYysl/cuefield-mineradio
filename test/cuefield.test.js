@@ -373,6 +373,7 @@ test('recognizes lyric handoff when an outgoing phrase answers into the next pic
   assert.equal(evaluation.dimensions.lyricHandoff >= 0.75, true, JSON.stringify(evaluation));
   assert.equal(evaluation.dimensions.pairCompatibility >= 0.8, true, JSON.stringify(evaluation));
   assert.equal(evaluation.reasons.includes('lyric handoff'), true);
+  assert.equal(evaluation.tier, 'magic');
 });
 
 test('prefers lyric handoff exits over nearby anonymous release points', () => {
@@ -449,6 +450,37 @@ test('penalizes closed outgoing catchphrases even when they are late outro candi
   assert.equal(evaluation.dimensions.exitSuitability < 0.5, true, JSON.stringify(evaluation));
   assert.equal(evaluation.score < 0.75, true, JSON.stringify(evaluation));
   assert.equal(evaluation.risks.includes('closed outgoing phrase'), true);
+  assert.equal(evaluation.tier, 'reject');
+});
+
+test('marks stylistically stretched but workable transitions as usable but not magic', () => {
+  const evaluation = evaluateTransitionPair({
+    styleCompatibility: 0.54,
+    exit: {
+      type: 'outro',
+      role: 'exit',
+      time: 220,
+      confidence: 0.62,
+      text: 'Help me to break through',
+      energyAfter: 0.54,
+      lowDensity: 0.54,
+    },
+    entry: {
+      type: 'pre-section',
+      role: 'entry',
+      time: 2.8,
+      confidence: 0.72,
+      text: 'Take me to the highway',
+      resolvesTo: { type: 'chorus', time: 6.1, text: 'Highway to hell' },
+      energyAfter: 0.58,
+      lowDensity: 0.58,
+    },
+  });
+
+  assert.equal(evaluation.recipe, 'lyric-handoff');
+  assert.equal(evaluation.tier, 'usable_but_not_magic');
+  assert.equal(evaluation.risks.includes('style bridge mismatch'), true);
+  assert.equal(evaluation.score >= 0.7, true, JSON.stringify(evaluation));
 });
 
 test('does not bypass a closed outgoing phrase by choosing a nearby anonymous outro', () => {

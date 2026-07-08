@@ -121,6 +121,11 @@ function scoreDirectionality(exit, entry) {
   return 0.68;
 }
 
+function scoreStyleCompatibility(value) {
+  if (value == null) return null;
+  return round(clamp01(value));
+}
+
 function recipeFor(ctx) {
   if (ctx.lyricHandoff >= 0.75) return 'lyric-handoff';
   if (!ctx.hasExitText && ctx.hasEntryText && ctx.exitIsOutro && ctx.exitLateEnough && ctx.entryPromise >= 0.75) {
@@ -128,6 +133,24 @@ function recipeFor(ctx) {
   }
   if (ctx.entry && ctx.entry.type === 'pre-section') return 'outro-to-chorus';
   return 'section-jump';
+}
+
+function classifyTier(score, recipe, dimensions, risks) {
+  if ((risks || []).includes('closed outgoing phrase')) return 'reject';
+  if (score < 0.55) return 'reject';
+  if (score < 0.7) return 'weak';
+  if ((risks || []).includes('style bridge mismatch')) return 'usable_but_not_magic';
+  const magicRecipe = recipe === 'lyric-handoff' || recipe === 'instrumental-outro-to-vocal-hook';
+  if (
+    magicRecipe
+    && dimensions.pairCompatibility >= 0.8
+    && dimensions.entryPromise >= 0.75
+    && dimensions.directionality >= 0.6
+  ) {
+    return 'magic';
+  }
+  if (score < 0.84) return 'usable_but_not_magic';
+  return 'usable';
 }
 
 function evaluateTransitionPair(opts = {}) {
@@ -141,6 +164,8 @@ function evaluateTransitionPair(opts = {}) {
     lyricHandoff: scoreLyricHandoff(exit, entry),
     directionality: scoreDirectionality(exit, entry),
   };
+  const styleCompatibility = scoreStyleCompatibility(opts.styleCompatibility);
+  if (styleCompatibility != null) dimensions.styleCompatibility = styleCompatibility;
   const ctx = {
     entry,
     lyricHandoff: dimensions.lyricHandoff,
@@ -158,6 +183,7 @@ function evaluateTransitionPair(opts = {}) {
   if (dimensions.pairCompatibility >= 0.8) reasons.push('stable energy handoff');
   if (isClosedOutgoingPhrase(textOf(exit))) risks.push('closed outgoing phrase');
   if (dimensions.directionality < 0.5) risks.push('directionality mismatch');
+  if (styleCompatibility != null && styleCompatibility < 0.62) risks.push('style bridge mismatch');
 
   const recipeBonus = recipe === 'lyric-handoff'
     ? 0.1
@@ -170,10 +196,12 @@ function evaluateTransitionPair(opts = {}) {
     + dimensions.directionality * 0.1
     + recipeBonus,
   ));
+  const tier = classifyTier(score, recipe, dimensions, risks);
 
   return {
     recipe,
     score,
+    tier,
     dimensions,
     reasons,
     risks,

@@ -84,3 +84,25 @@ Implemented after this listening pass:
 - `Liang Zhu -> Moli Hua` is classified as `instrumental-outro-to-vocal-hook`.
 
 This is still heuristic. The next missing layer is real style/world compatibility, vocal density, and key detection.
+
+## Expanded Library Batch1
+
+After adding 16 more local tracks, a 12-pair listening batch produced:
+
+- Passed: 9
+- Usable but not magic: 3
+- Failed: 0
+
+Important feedback:
+
+- `3` means the transition is workable but not memorable; it should not be counted as a failure.
+- `Apashe -> ACDC` worked, but the middle felt like a third song/style bridge.
+- `Avicii -> Apashe` was usable but not magic because the emotional color shifts from uplifting to darker/gothic.
+- `Heat Waves -> Never Be Like You` was a strong positive for `instrumental-outro-to-vocal-hook`.
+- Large style jumps can still work, so genre mismatch should not be a hard reject by itself.
+
+Evaluator update:
+
+- `evaluateTransitionPair` now returns `tier`: `magic`, `usable`, `usable_but_not_magic`, `weak`, or `reject`.
+- Optional `styleCompatibility` can mark a transition as `usable_but_not_magic` with `style bridge mismatch`.
+- Automatic style/world compatibility is still not implemented; this is the next layer.
