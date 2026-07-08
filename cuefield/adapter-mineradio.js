@@ -4,6 +4,21 @@ function toNumber(value, fallback) {
 }
 
 function normalizeBeatEvent(raw, index, gridStep) {
+  if (Array.isArray(raw)) {
+    const time = toNumber(raw[0], 0);
+    return {
+      time,
+      index,
+      strength: toNumber(raw[1], 0.5),
+      confidence: toNumber(raw[2], 0.5),
+      impact: toNumber(raw[3], toNumber(raw[1], 0.25)),
+      low: toNumber(raw[4], toNumber(raw[9], 0)),
+      body: toNumber(raw[5], 0),
+      snap: toNumber(raw[6], toNumber(raw[10], 0)),
+      combo: toNumber(raw[7], 0) === 1 || toNumber(raw[8], 0) >= 7 ? 'downbeat' : '',
+      step: gridStep || 0,
+    };
+  }
   const time = typeof raw === 'number' ? raw : toNumber(raw && raw.time, 0);
   return {
     time,

@@ -54,6 +54,7 @@ const { once } = require('events');
 const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
 const { planTransitionFromPayload } = require('./cuefield/api');
+const { planCuefieldTransitionFromCache } = require('./cuefield/mineradio-bridge');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -3336,9 +3337,22 @@ const server = http.createServer(async (req, res) => {
 
     try {
       const body = await readRequestBody(req);
-      sendJSON(res, planTransitionFromPayload(body));
+      if (!body.fromKey && !body.toKey && !body.fromCacheKey && !body.toCacheKey) {
+        sendJSON(res, planTransitionFromPayload(body));
+        return;
+      }
+      const result = planCuefieldTransitionFromCache({
+        fromKey: body.fromKey || body.fromCacheKey || body.from,
+        toKey: body.toKey || body.toCacheKey || body.to,
+        fromLrc: body.fromLrc,
+        toLrc: body.toLrc,
+        exitBias: body.exitBias || 'late',
+        readBeatMapCache,
+      });
+      sendJSON(res, result);
     } catch (err) {
-      sendJSON(res, { ok: false, error: err.message || 'CUEFIELD_TRANSITION_FAILED' }, 400);
+      console.error('[CuefieldTransition]', err);
+      sendJSON(res, { ok: false, error: err.code || err.message || 'CUEFIELD_TRANSITION_FAILED' }, 400);
     }
     return;
   }
