@@ -26,6 +26,10 @@ const {
   findSectionEntries,
   parseLrc,
 } = require('../cuefield/lrc-anchors');
+const {
+  analyzeSectionCandidates,
+  chooseTransitionCandidates,
+} = require('../cuefield/section-candidates');
 
 function makeBeatMap(opts = {}) {
   const gridStep = opts.gridStep || 0.5;
@@ -535,6 +539,74 @@ test('builds a full simulation plan from the start of A to the end of B', () => 
   assert.equal(last.label, 'B section takes over and plays to end');
   assert.equal(last.to.start + last.duration, 140);
   assert.equal(plan.recipe.style, 'Section Jump Full Simulation');
+});
+
+test('analyzes peak and release candidates without treating the peak as an exit', () => {
+  const map = makeBeatMap({
+    duration: 128,
+    gridStep: 0.5,
+    low: (t) => (t >= 80 && t < 96 ? 0.88 : (t >= 108 ? 0.34 : 0.42)),
+    body: (t) => (t >= 80 && t < 96 ? 0.82 : (t >= 108 ? 0.30 : 0.38)),
+    snap: (t) => (t >= 80 && t < 96 ? 0.72 : (t >= 108 ? 0.24 : 0.32)),
+  });
+
+  const result = analyzeSectionCandidates({
+    fixture: { track: { title: 'A', duration: 128 }, map },
+    lrcLines: parseLrc(`
+[01:20.000] chorus line
+[01:28.000] chorus line
+[01:49.000] outro word
+`),
+  });
+
+  const peak = result.candidates.find((candidate) => candidate.type === 'peak');
+  const release = result.candidates.find((candidate) => candidate.type === 'release');
+  const outro = result.candidates.find((candidate) => candidate.type === 'outro');
+
+  assert.equal(Boolean(peak), true, JSON.stringify(result.candidates));
+  assert.equal(Boolean(release), true, JSON.stringify(result.candidates));
+  assert.equal(Boolean(outro), true, JSON.stringify(result.candidates));
+  assert.equal(peak.role, 'avoid-exit');
+  assert.equal(release.role, 'exit');
+  assert.equal(outro.role, 'exit');
+  assert.equal(release.time > peak.time, true);
+});
+
+test('chooses outro-to-chorus transition candidates from release and pre-section nodes', () => {
+  const fromMap = makeBeatMap({
+    duration: 128,
+    gridStep: 0.5,
+    low: (t) => (t >= 80 && t < 96 ? 0.86 : (t >= 112 ? 0.34 : 0.42)),
+    body: (t) => (t >= 80 && t < 96 ? 0.80 : (t >= 112 ? 0.3 : 0.38)),
+    snap: (t) => (t >= 80 && t < 96 ? 0.72 : (t >= 112 ? 0.24 : 0.32)),
+  });
+  const toMap = makeBeatMap({
+    duration: 128,
+    gridStep: 0.5,
+    low: (t) => (t >= 44 && t < 64 ? 0.84 : 0.36),
+    body: (t) => (t >= 44 && t < 64 ? 0.78 : 0.34),
+    snap: (t) => (t >= 44 && t < 64 ? 0.7 : 0.28),
+  });
+  const from = analyzeSectionCandidates({
+    fixture: { track: { title: 'A', duration: 128 }, map: fromMap },
+    lrcLines: parseLrc('[01:50.000] final release'),
+  });
+  const to = analyzeSectionCandidates({
+    fixture: { track: { title: 'B', duration: 128 }, map: toMap },
+    lrcLines: parseLrc(`
+[00:36.000] hands up
+[00:44.000] turn the bass up
+[01:20.000] turn the bass up
+`),
+  });
+
+  const chosen = chooseTransitionCandidates(from, to);
+
+  assert.equal(chosen.recipe, 'outro-to-chorus');
+  assert.equal(chosen.exit.type === 'release' || chosen.exit.type === 'outro', true, JSON.stringify(chosen));
+  assert.equal(chosen.entry.type, 'pre-section');
+  assert.equal(chosen.entry.resolvesTo.type === 'chorus' || chosen.entry.resolvesTo.type === 'hook', true);
+  assert.equal(chosen.score > 0.6, true, JSON.stringify(chosen));
 });
 
 test('builds an echo-out preview plan with a vocal tail bridge', () => {
