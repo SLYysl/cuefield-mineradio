@@ -72,3 +72,15 @@ Add structured scoring beyond BPM and section labels:
 - `lyric_handoff`: semantic handoff, repeated words, direction words, call-and-response, rhyme or phonetic continuity.
 - `directionality`: energy lift vs energy leak.
 - `fallback_confidence`: if the pair is poor, choose a conservative recipe instead of forcing a flashy mix.
+
+## Evaluator V1 Implementation
+
+Implemented after this listening pass:
+
+- New module: `cuefield/transition-evaluator.js`.
+- `chooseTransitionCandidates` now scores exit-entry combinations instead of selecting exit and entry independently.
+- Strong positive case `Rogue - Fortress -> D A N N Y - TAKE ME` is classified as `lyric-handoff`.
+- `What's Goin On` as an outgoing track is capped by `closed outgoing phrase`, including nearby anonymous exits that would otherwise bypass the lyric risk.
+- `Liang Zhu -> Moli Hua` is classified as `instrumental-outro-to-vocal-hook`.
+
+This is still heuristic. The next missing layer is real style/world compatibility, vocal density, and key detection.

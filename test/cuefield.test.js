@@ -31,6 +31,7 @@ const {
   analyzeSectionCandidates,
   chooseTransitionCandidates,
 } = require('../cuefield/section-candidates');
+const { evaluateTransitionPair } = require('../cuefield/transition-evaluator');
 
 function makeBeatMap(opts = {}) {
   const gridStep = opts.gridStep || 0.5;
@@ -343,6 +344,190 @@ test('can bias transition candidate choice toward a late outro exit', () => {
   assert.equal(balanced.exit.time, 168);
   assert.equal(late.exit.type, 'outro');
   assert.equal(late.exit.time >= 250, true, JSON.stringify(late));
+});
+
+test('recognizes lyric handoff when an outgoing phrase answers into the next pickup', () => {
+  const evaluation = evaluateTransitionPair({
+    exit: {
+      type: 'outro',
+      role: 'exit',
+      time: 217.6,
+      confidence: 0.62,
+      text: 'Help me to break through',
+      energyAfter: 0.543,
+      lowDensity: 0.543,
+    },
+    entry: {
+      type: 'pre-section',
+      role: 'entry',
+      time: 2.82,
+      confidence: 0.64,
+      text: 'Take me to...',
+      resolvesTo: { type: 'chorus', time: 6.035, text: 'the moon where we both fell in love...' },
+      energyAfter: 0.538,
+      lowDensity: 0.538,
+    },
+  });
+
+  assert.equal(evaluation.recipe, 'lyric-handoff');
+  assert.equal(evaluation.dimensions.lyricHandoff >= 0.75, true, JSON.stringify(evaluation));
+  assert.equal(evaluation.dimensions.pairCompatibility >= 0.8, true, JSON.stringify(evaluation));
+  assert.equal(evaluation.reasons.includes('lyric handoff'), true);
+});
+
+test('prefers lyric handoff exits over nearby anonymous release points', () => {
+  const fromAnalysis = {
+    duration: 236,
+    candidates: [
+      {
+        type: 'release',
+        role: 'exit',
+        time: 220,
+        confidence: 0.571,
+        energyBefore: 0.578,
+        energyAfter: 0.53,
+        lowDensity: 0.53,
+      },
+      {
+        type: 'outro',
+        role: 'exit',
+        time: 217.6,
+        confidence: 0.62,
+        text: 'Help me to break through',
+        energyBefore: 0.587,
+        energyAfter: 0.543,
+        lowDensity: 0.543,
+      },
+    ],
+  };
+  const toAnalysis = {
+    duration: 129,
+    candidates: [
+      {
+        type: 'pre-section',
+        role: 'entry',
+        time: 2.82,
+        confidence: 0.64,
+        text: 'Take me to...',
+        resolvesTo: { type: 'chorus', time: 6.035, text: 'the moon where we both fell in love...' },
+        energyAfter: 0.538,
+        lowDensity: 0.538,
+      },
+    ],
+  };
+
+  const chosen = chooseTransitionCandidates(fromAnalysis, toAnalysis);
+
+  assert.equal(chosen.recipe, 'lyric-handoff');
+  assert.equal(chosen.exit.text, 'Help me to break through');
+  assert.equal(chosen.evaluation.reasons.includes('lyric handoff'), true);
+});
+
+test('penalizes closed outgoing catchphrases even when they are late outro candidates', () => {
+  const evaluation = evaluateTransitionPair({
+    exit: {
+      type: 'outro',
+      role: 'exit',
+      time: 193.48,
+      confidence: 0.62,
+      text: "I said hey, what's going on",
+      energyAfter: 0.524,
+      lowDensity: 0.524,
+    },
+    entry: {
+      type: 'pre-section',
+      role: 'entry',
+      time: 21.01,
+      confidence: 0.85,
+      text: "Yeah, I'm built different",
+      resolvesTo: { type: 'chorus', time: 22.515, text: 'I just took a turn' },
+      energyAfter: 0.674,
+      lowDensity: 0.674,
+    },
+  });
+
+  assert.equal(evaluation.dimensions.exitSuitability < 0.5, true, JSON.stringify(evaluation));
+  assert.equal(evaluation.score < 0.75, true, JSON.stringify(evaluation));
+  assert.equal(evaluation.risks.includes('closed outgoing phrase'), true);
+});
+
+test('does not bypass a closed outgoing phrase by choosing a nearby anonymous outro', () => {
+  const fromAnalysis = {
+    duration: 204,
+    candidates: [
+      {
+        type: 'outro',
+        role: 'exit',
+        time: 188.384,
+        confidence: 0.58,
+        energyBefore: 0.573,
+        energyAfter: 0.521,
+        lowDensity: 0.521,
+      },
+      {
+        type: 'outro',
+        role: 'exit',
+        time: 193.48,
+        confidence: 0.62,
+        text: "I said hey, what's going on",
+        energyBefore: 0.527,
+        energyAfter: 0.524,
+        lowDensity: 0.524,
+      },
+    ],
+  };
+  const toAnalysis = {
+    duration: 169,
+    candidates: [
+      {
+        type: 'pre-section',
+        role: 'entry',
+        time: 21.01,
+        confidence: 0.85,
+        text: "Yeah, I'm built different",
+        resolvesTo: { type: 'chorus', time: 22.515, text: 'I just took a turn' },
+        energyAfter: 0.674,
+        lowDensity: 0.674,
+      },
+    ],
+  };
+
+  const chosen = chooseTransitionCandidates(fromAnalysis, toAnalysis);
+
+  assert.equal(chosen.score <= 0.74, true, JSON.stringify(chosen));
+  assert.equal(
+    chosen.evaluation.risks.includes('closed outgoing phrase')
+      || chosen.evaluation.risks.includes('near closed outgoing phrase'),
+    true,
+    JSON.stringify(chosen),
+  );
+});
+
+test('classifies instrumental outro into vocal hook as a stable recipe', () => {
+  const evaluation = evaluateTransitionPair({
+    exit: {
+      type: 'outro',
+      role: 'exit',
+      time: 252.251,
+      confidence: 0.58,
+      energyAfter: 0.522,
+      lowDensity: 0.522,
+    },
+    entry: {
+      type: 'pre-section',
+      role: 'entry',
+      time: 50.2,
+      confidence: 0.78,
+      text: '好一朵美丽的茉莉花',
+      resolvesTo: { type: 'hook', time: 56.08, text: '好一朵美丽的茉莉花' },
+      energyAfter: 0.546,
+      lowDensity: 0.546,
+    },
+  });
+
+  assert.equal(evaluation.recipe, 'instrumental-outro-to-vocal-hook');
+  assert.equal(evaluation.dimensions.entryPromise >= 0.75, true, JSON.stringify(evaluation));
+  assert.equal(evaluation.score >= 0.8, true, JSON.stringify(evaluation));
 });
 
 test('finds repeated hook entries from lrc instead of defaulting to intro', () => {

@@ -3,6 +3,11 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+const {
+  evaluateTransitionPair,
+  isClosedOutgoingPhrase,
+} = require('./transition-evaluator');
+
 function round(value, digits = 3) {
   const factor = 10 ** digits;
   return Math.round(toNumber(value) * factor) / factor;
@@ -218,6 +223,43 @@ function scoreEntry(candidate) {
   return score;
 }
 
+function hasNearbyClosedOutgoingPhrase(exit, exits) {
+  if (!exit || exit.text) return false;
+  return (exits || []).some((candidate) => (
+    candidate
+    && candidate.text
+    && Math.abs(toNumber(candidate.time) - toNumber(exit.time)) <= 8
+    && isClosedOutgoingPhrase(candidate.text)
+  ));
+}
+
+function scoreCandidatePair(exit, entry, fromAnalysis, toAnalysis, exitScore, exits = []) {
+  const baseScore = (exitScore(exit) * 0.5) + (scoreEntry(entry) * 0.5);
+  const evaluation = evaluateTransitionPair({
+    exit,
+    entry,
+    fromDuration: toNumber(fromAnalysis && fromAnalysis.duration),
+    toDuration: toNumber(toAnalysis && toAnalysis.duration),
+  });
+  const nearClosedPhrase = hasNearbyClosedOutgoingPhrase(exit, exits);
+  let pairScore = (baseScore * 0.7) + (evaluation.score * 0.3);
+  if (evaluation.recipe === 'lyric-handoff') pairScore += 0.22;
+  else if (evaluation.recipe === 'instrumental-outro-to-vocal-hook') pairScore += 0.07;
+  if (evaluation.risks.includes('closed outgoing phrase')) pairScore = Math.min(pairScore, 0.74);
+  if (nearClosedPhrase) {
+    pairScore = Math.min(pairScore, 0.74);
+    evaluation.risks = Array.from(new Set([...(evaluation.risks || []), 'near closed outgoing phrase']));
+  }
+  return {
+    exit,
+    entry,
+    recipe: evaluation.recipe || (entry && entry.type === 'pre-section' ? 'outro-to-chorus' : 'section-jump'),
+    score: round(Math.min(0.99, pairScore)),
+    evaluation,
+    baseScore,
+  };
+}
+
 function chooseTransitionCandidates(fromAnalysis, toAnalysis, opts = {}) {
   const exitScore = opts.exitBias === 'late'
     ? (candidate) => scoreLateExit(candidate, toNumber(fromAnalysis && fromAnalysis.duration))
@@ -226,14 +268,27 @@ function chooseTransitionCandidates(fromAnalysis, toAnalysis, opts = {}) {
     .sort((a, b) => exitScore(b) - exitScore(a) || (opts.exitBias === 'late' ? b.time - a.time : a.time - b.time));
   const entries = (toAnalysis.candidates || []).filter((candidate) => candidate.role === 'entry')
     .sort((a, b) => scoreEntry(b) - scoreEntry(a) || a.time - b.time);
-  const exit = exits[0] || null;
-  const entry = entries[0] || null;
-  const recipe = entry && entry.type === 'pre-section' ? 'outro-to-chorus' : 'section-jump';
+  const pairs = [];
+  const consideredExits = exits.slice(0, 6);
+  const consideredEntries = entries.slice(0, 6);
+  consideredExits.forEach((exit) => {
+    consideredEntries.forEach((entry) => {
+      pairs.push(scoreCandidatePair(exit, entry, fromAnalysis, toAnalysis, exitScore, exits));
+    });
+  });
+  pairs.sort((a, b) => (
+    b.score - a.score
+    || b.evaluation.dimensions.lyricHandoff - a.evaluation.dimensions.lyricHandoff
+    || exitScore(b.exit) - exitScore(a.exit)
+    || scoreEntry(b.entry) - scoreEntry(a.entry)
+  ));
+  const chosen = pairs[0] || scoreCandidatePair(exits[0] || null, entries[0] || null, fromAnalysis, toAnalysis, exitScore, exits);
   return {
-    recipe,
-    exit,
-    entry,
-    score: round(Math.min(0.99, (exitScore(exit) * 0.5) + (scoreEntry(entry) * 0.5))),
+    recipe: chosen.recipe,
+    exit: chosen.exit,
+    entry: chosen.entry,
+    score: chosen.score,
+    evaluation: chosen.evaluation,
   };
 }
 
