@@ -201,6 +201,14 @@ function scoreExit(candidate) {
   return score;
 }
 
+function scoreLateExit(candidate, duration) {
+  if (!candidate || candidate.role !== 'exit') return 0;
+  const lateRatio = duration > 0 ? Math.max(0, Math.min(1, candidate.time / duration)) : 0;
+  let score = scoreExit(candidate) + lateRatio * 0.42;
+  if (candidate.type === 'outro') score += 0.26;
+  return score;
+}
+
 function scoreEntry(candidate) {
   if (!candidate || candidate.role !== 'entry') return 0;
   let score = candidate.confidence || 0;
@@ -210,9 +218,12 @@ function scoreEntry(candidate) {
   return score;
 }
 
-function chooseTransitionCandidates(fromAnalysis, toAnalysis) {
+function chooseTransitionCandidates(fromAnalysis, toAnalysis, opts = {}) {
+  const exitScore = opts.exitBias === 'late'
+    ? (candidate) => scoreLateExit(candidate, toNumber(fromAnalysis && fromAnalysis.duration))
+    : scoreExit;
   const exits = (fromAnalysis.candidates || []).filter((candidate) => candidate.role === 'exit')
-    .sort((a, b) => scoreExit(b) - scoreExit(a) || a.time - b.time);
+    .sort((a, b) => exitScore(b) - exitScore(a) || (opts.exitBias === 'late' ? b.time - a.time : a.time - b.time));
   const entries = (toAnalysis.candidates || []).filter((candidate) => candidate.role === 'entry')
     .sort((a, b) => scoreEntry(b) - scoreEntry(a) || a.time - b.time);
   const exit = exits[0] || null;
@@ -222,7 +233,7 @@ function chooseTransitionCandidates(fromAnalysis, toAnalysis) {
     recipe,
     exit,
     entry,
-    score: round(Math.min(0.99, (scoreExit(exit) * 0.5) + (scoreEntry(entry) * 0.5))),
+    score: round(Math.min(0.99, (exitScore(exit) * 0.5) + (scoreEntry(entry) * 0.5))),
   };
 }
 

@@ -314,6 +314,37 @@ test('builds auto section choice context from fixtures and lrc files', () => {
   assert.equal(context.sectionChoice.entry.resolvesTo.text, 'turn the bass up');
 });
 
+test('can bias transition candidate choice toward a late outro exit', () => {
+  const fromAnalysis = {
+    duration: 284,
+    candidates: [
+      { type: 'release', role: 'exit', time: 168, confidence: 0.58, energyBefore: 0.57, energyAfter: 0.52 },
+      { type: 'outro', role: 'exit', time: 250.657, confidence: 0.62, energyBefore: 0.58, energyAfter: 0.59 },
+      { type: 'outro', role: 'exit', time: 268.604, confidence: 0.58, energyBefore: 0.57, energyAfter: 0.57 },
+      { type: 'peak', role: 'avoid-exit', time: 0, confidence: 0.81 },
+    ],
+  };
+  const toAnalysis = {
+    duration: 140,
+    candidates: [
+      {
+        type: 'pre-section',
+        role: 'entry',
+        time: 1.725,
+        confidence: 0.85,
+        resolvesTo: { type: 'hook', time: 3.538, text: 'falling in love is too easy' },
+      },
+    ],
+  };
+
+  const balanced = chooseTransitionCandidates(fromAnalysis, toAnalysis);
+  const late = chooseTransitionCandidates(fromAnalysis, toAnalysis, { exitBias: 'late' });
+
+  assert.equal(balanced.exit.time, 168);
+  assert.equal(late.exit.type, 'outro');
+  assert.equal(late.exit.time >= 250, true, JSON.stringify(late));
+});
+
 test('finds repeated hook entries from lrc instead of defaulting to intro', () => {
   const lines = parseLrc(`
 {"t":-1000,"c":[{"tx":"作词: someone"}]}

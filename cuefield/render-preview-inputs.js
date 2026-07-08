@@ -56,7 +56,7 @@ function buildAutoSectionChoice(opts = {}) {
     fixture: opts.toFixture,
     lrcLines: readLrcLines(lrcDir, opts.toFixture.track && opts.toFixture.track.title),
   });
-  return chooseTransitionCandidates(from, to);
+  return chooseTransitionCandidates(from, to, { exitBias: opts.exitBias || 'late' });
 }
 
 function buildSectionContext(opts = {}) {

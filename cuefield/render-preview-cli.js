@@ -26,6 +26,7 @@ function parseArgs(argv) {
     else if (arg === '--out') args.out = argv[++i];
     else if (arg === '--full') args.full = true;
     else if (arg === '--auto-sections') args.autoSections = true;
+    else if (arg === '--exit-bias') args.exitBias = argv[++i];
   }
   return args;
 }
@@ -50,6 +51,7 @@ function main() {
     toFixture,
     lrcDir: args.lrcDir,
     autoSections: args.autoSections,
+    exitBias: args.exitBias,
   });
   const buildPlan = args.full ? buildFullSimulationPlan : buildPreviewPlan;
   const plan = buildPlan({
