@@ -5,6 +5,7 @@ function toNumber(value, fallback = 0) {
 
 const {
   evaluateTransitionPair,
+  inferStyleCompatibility,
   isClosedOutgoingPhrase,
 } = require('./transition-evaluator');
 
@@ -240,6 +241,7 @@ function scoreCandidatePair(exit, entry, fromAnalysis, toAnalysis, exitScore, ex
     entry,
     fromDuration: toNumber(fromAnalysis && fromAnalysis.duration),
     toDuration: toNumber(toAnalysis && toAnalysis.duration),
+    styleCompatibility: inferStyleCompatibility(fromAnalysis, toAnalysis),
   });
   const nearClosedPhrase = hasNearbyClosedOutgoingPhrase(exit, exits);
   let pairScore = (baseScore * 0.7) + (evaluation.score * 0.3);

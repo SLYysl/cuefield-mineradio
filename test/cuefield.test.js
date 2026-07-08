@@ -31,7 +31,10 @@ const {
   analyzeSectionCandidates,
   chooseTransitionCandidates,
 } = require('../cuefield/section-candidates');
-const { evaluateTransitionPair } = require('../cuefield/transition-evaluator');
+const {
+  evaluateTransitionPair,
+  inferStyleCompatibility,
+} = require('../cuefield/transition-evaluator');
 
 function makeBeatMap(opts = {}) {
   const gridStep = opts.gridStep || 0.5;
@@ -481,6 +484,53 @@ test('marks stylistically stretched but workable transitions as usable but not m
   assert.equal(evaluation.tier, 'usable_but_not_magic');
   assert.equal(evaluation.risks.includes('style bridge mismatch'), true);
   assert.equal(evaluation.score >= 0.7, true, JSON.stringify(evaluation));
+});
+
+test('infers style bridge mismatch for uplifting electronic into darker cinematic tracks', () => {
+  const aviciiToApashe = inferStyleCompatibility(
+    { track: { title: 'Avicii - We Burn' } },
+    { track: { title: 'Apashe - Good News' } },
+  );
+  const heatWavesToFlume = inferStyleCompatibility(
+    { track: { title: 'Glass Animals - Heat Waves' } },
+    { track: { title: 'Flume,Kai - Never Be Like You' } },
+  );
+
+  assert.equal(aviciiToApashe < 0.62, true, String(aviciiToApashe));
+  assert.equal(heatWavesToFlume > aviciiToApashe, true, `${heatWavesToFlume} <= ${aviciiToApashe}`);
+  assert.equal(heatWavesToFlume >= 0.7, true, String(heatWavesToFlume));
+});
+
+test('passes inferred style compatibility into candidate evaluation tiers', () => {
+  const fromAnalysis = {
+    track: { title: 'Avicii - We Burn' },
+    duration: 258,
+    candidates: [
+      { type: 'outro', role: 'exit', time: 236, confidence: 0.62, energyAfter: 0.54, lowDensity: 0.54 },
+    ],
+  };
+  const toAnalysis = {
+    track: { title: 'Apashe - Good News' },
+    duration: 285,
+    candidates: [
+      {
+        type: 'pre-section',
+        role: 'entry',
+        time: 15.054,
+        confidence: 0.78,
+        text: 'Call me mystery',
+        resolvesTo: { type: 'hook', time: 18.536, text: 'I mystify' },
+        energyAfter: 0.61,
+        lowDensity: 0.61,
+      },
+    ],
+  };
+
+  const chosen = chooseTransitionCandidates(fromAnalysis, toAnalysis, { exitBias: 'late' });
+
+  assert.equal(chosen.evaluation.tier, 'usable_but_not_magic', JSON.stringify(chosen));
+  assert.equal(chosen.evaluation.risks.includes('style bridge mismatch'), true, JSON.stringify(chosen));
+  assert.equal(chosen.evaluation.dimensions.styleCompatibility < 0.62, true, JSON.stringify(chosen));
 });
 
 test('does not bypass a closed outgoing phrase by choosing a nearby anonymous outro', () => {

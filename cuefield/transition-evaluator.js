@@ -126,6 +126,64 @@ function scoreStyleCompatibility(value) {
   return round(clamp01(value));
 }
 
+function profileForTitle(title) {
+  const text = normalizedText(title);
+  const profiles = [
+    { patterns: ['avicii'], families: ['electronic', 'dance'], moods: ['uplifting', 'anthemic'] },
+    { patterns: ['bingo players'], families: ['electronic', 'dance'], moods: ['uplifting'] },
+    { patterns: ['odesza'], families: ['electronic', 'cinematic'], moods: ['uplifting', 'warm'] },
+    { patterns: ['apashe'], families: ['electronic', 'cinematic'], moods: ['dark', 'theatrical'] },
+    { patterns: ['acdc', 'highway to hell'], families: ['rock'], moods: ['raw', 'anthemic'] },
+    { patterns: ['nirvana'], families: ['rock'], moods: ['grunge', 'dark'] },
+    { patterns: ['marilyn manson', 'sweet dreams'], families: ['rock'], moods: ['gothic', 'dark'] },
+    { patterns: ['glass animals', 'heat waves'], families: ['alt-pop', 'electronic'], moods: ['warm', 'melodic'] },
+    { patterns: ['flume', 'never be like you'], families: ['electronic', 'alt-pop'], moods: ['warm', 'future'] },
+    { patterns: ['lorde'], families: ['alt-pop'], moods: ['melancholic'] },
+    { patterns: ['snakehips'], families: ['electronic', 'pop'], moods: ['warm'] },
+    { patterns: ['2hollis'], families: ['electronic', 'hyperpop'], moods: ['bright'] },
+    { patterns: ['doja', 'cardi', 'lizzo', 'lil wayne', 'drake', 'kanye', 'connor price'], families: ['rap'], moods: ['rhythmic'] },
+  ];
+  return profiles.find((profile) => profile.patterns.some((pattern) => text.includes(pattern))) || null;
+}
+
+function setOverlap(a, b) {
+  const bSet = new Set(b || []);
+  return (a || []).filter((item) => bSet.has(item));
+}
+
+function hasTag(profile, tag) {
+  return Boolean(profile && (
+    (profile.families || []).includes(tag)
+    || (profile.moods || []).includes(tag)
+  ));
+}
+
+function titleOfAnalysis(analysis) {
+  const track = analysis && analysis.track || {};
+  return [track.artist, track.title].filter(Boolean).join(' ');
+}
+
+function inferStyleCompatibility(fromAnalysis, toAnalysis) {
+  const from = profileForTitle(titleOfAnalysis(fromAnalysis));
+  const to = profileForTitle(titleOfAnalysis(toAnalysis));
+  if (!from || !to) return null;
+
+  const familyOverlap = setOverlap(from.families, to.families).length;
+  const moodOverlap = setOverlap(from.moods, to.moods).length;
+  let score = 0.5;
+  score += familyOverlap ? Math.min(0.3, familyOverlap * 0.16) : -0.04;
+  score += moodOverlap ? Math.min(0.18, moodOverlap * 0.12) : 0;
+
+  const upliftingIntoDark = hasTag(from, 'uplifting') && (hasTag(to, 'dark') || hasTag(to, 'gothic'));
+  const rawRockJump = hasTag(from, 'electronic') && hasTag(to, 'rock') && !familyOverlap;
+  const gothicJump = hasTag(to, 'gothic') && !moodOverlap;
+  if (upliftingIntoDark) score -= 0.18;
+  if (rawRockJump) score -= 0.08;
+  if (gothicJump) score -= 0.06;
+
+  return round(clamp01(score));
+}
+
 function recipeFor(ctx) {
   if (ctx.lyricHandoff >= 0.75) return 'lyric-handoff';
   if (!ctx.hasExitText && ctx.hasEntryText && ctx.exitIsOutro && ctx.exitLateEnough && ctx.entryPromise >= 0.75) {
@@ -210,5 +268,6 @@ function evaluateTransitionPair(opts = {}) {
 
 module.exports = {
   evaluateTransitionPair,
+  inferStyleCompatibility,
   isClosedOutgoingPhrase,
 };

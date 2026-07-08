@@ -104,5 +104,7 @@ Important feedback:
 Evaluator update:
 
 - `evaluateTransitionPair` now returns `tier`: `magic`, `usable`, `usable_but_not_magic`, `weak`, or `reject`.
-- Optional `styleCompatibility` can mark a transition as `usable_but_not_magic` with `style bridge mismatch`.
-- Automatic style/world compatibility is still not implemented; this is the next layer.
+- `styleCompatibility` now has an automatic title/profile heuristic for known artists in the current fixture library.
+- The heuristic marks cases like `Avicii -> Apashe` as `usable_but_not_magic` with `style bridge mismatch`.
+- This is a soft tiering signal, not a hard reject: large style jumps can still work when lyric handoff, rhythm, and section timing are strong.
+- The next deeper layer is real audio/embedding style-world detection instead of title/profile heuristics.
