@@ -9,6 +9,7 @@ const {
 } = require('./lrc-anchors');
 const {
   audioFileForTitle,
+  buildFullSimulationPlan,
   buildPreviewPlan,
   fixtureForTitle,
   parseEvalRow,
@@ -27,6 +28,7 @@ function parseArgs(argv) {
     else if (arg === '--fixtures-dir') args.fixturesDir = argv[++i];
     else if (arg === '--lrc-dir') args.lrcDir = argv[++i];
     else if (arg === '--out') args.out = argv[++i];
+    else if (arg === '--full') args.full = true;
   }
   return args;
 }
@@ -69,7 +71,8 @@ function main() {
   const dataLines = lines[0] && lines[0].startsWith('score\t') ? lines.slice(1) : lines;
   const row = parseEvalRow(dataLines[Math.max(0, args.row - 1)]);
   const fixtures = loadFixtures(fixturesDir);
-  const plan = buildPreviewPlan({
+  const buildPlan = args.full ? buildFullSimulationPlan : buildPreviewPlan;
+  const plan = buildPlan({
     mode: args.mode,
     row,
     sectionAnchors: buildSectionAnchors(args, row),

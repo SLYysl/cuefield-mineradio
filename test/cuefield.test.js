@@ -14,6 +14,7 @@ const {
   inferAudioExtension,
 } = require('../cuefield/decode-ncm');
 const {
+  buildFullSimulationPlan,
   buildPreviewPlan,
   buildFfmpegArgs,
   parseEvalRow,
@@ -430,6 +431,110 @@ test('delays section-jump exit when the planned point would cut off an upcoming 
   const leadIn = plan.segments.find((segment) => segment.label === 'A phrase before section jump');
   assert.equal(pickup.from.start > 88, true, JSON.stringify(plan.segments));
   assert.equal(leadIn.from.start + leadIn.duration, pickup.from.start);
+});
+
+test('builds a section-filter-push preview with stronger filtered pickup', () => {
+  const plan = buildPreviewPlan({
+    mode: 'section-filter-push',
+    row: { from: 'A', to: 'B', exitPoint: 96, entryPoint: 8, transitionBars: 16 },
+    sectionAnchors: {
+      toSectionEntry: { time: 42, text: 'incoming section', sectionType: 'repeated-vocal' },
+    },
+    fromFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'A' } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'B' } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  const pickup = plan.segments.find((segment) => segment.label === 'A outgoing phrase bridge under B section pickup');
+  const cleanPickup = plan.segments.find((segment) => segment.label === 'B clean section pickup');
+  const cut = plan.segments.find((segment) => segment.label === 'B section downbeat cut');
+
+  assert.equal(plan.recipe.style, 'Section Filter Push');
+  assert.equal(pickup.from.volume < 0.58, true);
+  assert.equal(pickup.to.highpassHz >= 320, true);
+  assert.equal(cleanPickup.to.highpassHz >= 240, true);
+  assert.equal(cut.to.effect, undefined);
+});
+
+test('builds a section-stutter-pickup preview with repeated B-only pickup slices', () => {
+  const plan = buildPreviewPlan({
+    mode: 'section-stutter-pickup',
+    row: { from: 'A', to: 'B', exitPoint: 96, entryPoint: 8, transitionBars: 16 },
+    sectionAnchors: {
+      toSectionEntry: { time: 42, text: 'incoming section', sectionType: 'repeated-vocal' },
+    },
+    fromFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'A' } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'B' } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  const stutters = plan.segments.filter((segment) => segment.label === 'B stutter pickup');
+  const cut = plan.segments.find((segment) => segment.label === 'B section downbeat cut');
+
+  assert.equal(plan.recipe.style, 'Section Stutter Pickup');
+  assert.equal(stutters.length, 2);
+  assert.equal(stutters.every((segment) => !segment.from && segment.to.role === 'section-stutter'), true);
+  assert.equal(stutters[0].to.start, stutters[1].to.start);
+  assert.equal(cut.to.start > stutters[1].to.start, true);
+});
+
+test('builds a section-hard-stutter preview with four short repeated B cue taps', () => {
+  const plan = buildPreviewPlan({
+    mode: 'section-hard-stutter',
+    row: { from: 'A', to: 'B', exitPoint: 96, entryPoint: 8, transitionBars: 16 },
+    sectionAnchors: {
+      toSectionEntry: { time: 42, text: 'incoming section', sectionType: 'repeated-vocal' },
+    },
+    fromFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'A' } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'B' } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  const bridge = plan.segments.find((segment) => segment.label === 'A outgoing phrase bridge under B section pickup');
+  const stutters = plan.segments.filter((segment) => segment.label === 'B hard stutter cue tap');
+  const cut = plan.segments.find((segment) => segment.label === 'B section downbeat cut');
+
+  assert.equal(plan.recipe.style, 'Section Hard Stutter');
+  assert.equal(stutters.length, 4);
+  assert.equal(stutters.every((segment) => segment.duration < plan.gridStep), true);
+  assert.equal(stutters.every((segment) => !segment.from && segment.to.role === 'section-hard-stutter'), true);
+  assert.equal(stutters.every((segment) => segment.to.start === stutters[0].to.start), true);
+  assert.equal(stutters[0].to.volume < stutters[3].to.volume, true);
+  assert.equal(stutters[0].to.highpassHz > stutters[3].to.highpassHz, true);
+  assert.equal(cut.to.start, 42 + bridge.duration + stutters.reduce((sum, segment) => sum + segment.duration, 0));
+});
+
+test('builds a full simulation plan from the start of A to the end of B', () => {
+  const plan = buildFullSimulationPlan({
+    mode: 'section-jump',
+    row: { from: 'A', to: 'B', exitPoint: 96, entryPoint: 8, transitionBars: 16 },
+    sectionAnchors: {
+      fromExitPhrase: { time: 88, text: 'last outgoing phrase' },
+      toSectionEntry: { time: 42, text: 'incoming section', sectionType: 'repeated-vocal' },
+    },
+    fromFixture: { map: makeBeatMap({ gridStep: 0.5, duration: 128 }), track: { title: 'A', duration: 128 } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5, duration: 140 }), track: { title: 'B', duration: 140 } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  const first = plan.segments[0];
+  const last = plan.segments[plan.segments.length - 1];
+
+  assert.equal(plan.fullSimulation, true);
+  assert.equal(first.label, 'A plays from start before transition');
+  assert.equal(first.from.start, 0);
+  assert.equal(first.duration, 80);
+  assert.equal(last.label, 'B section takes over and plays to end');
+  assert.equal(last.to.start + last.duration, 140);
+  assert.equal(plan.recipe.style, 'Section Jump Full Simulation');
 });
 
 test('builds an echo-out preview plan with a vocal tail bridge', () => {

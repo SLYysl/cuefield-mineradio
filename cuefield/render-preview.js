@@ -70,6 +70,16 @@ function makeSegment(label, duration, from, to) {
   return { label, duration: round(duration, 3), from: from || null, to: to || null };
 }
 
+function isSectionMode(mode) {
+  return [
+    'section-hook',
+    'section-jump',
+    'section-filter-push',
+    'section-stutter-pickup',
+    'section-hard-stutter',
+  ].includes(mode);
+}
+
 function beatEnergy(beat) {
   if (!beat) return 0;
   return Math.max(
@@ -211,7 +221,14 @@ function buildSectionJumpPlan(ctx) {
   const barSec = step * 4;
   const preSec = 4 * barSec;
   const loopSec = 2 * barSec;
-  const bridgeSec = Math.max(step, loopSec - 1);
+  const stutterMode = ctx.mode === 'section-stutter-pickup';
+  const hardStutterMode = ctx.mode === 'section-hard-stutter';
+  const filterPushMode = ctx.mode === 'section-filter-push';
+  const hardStutterTapSec = Math.max(0.125, step / 2);
+  const hardStutterSec = hardStutterTapSec * 4;
+  const bridgeSec = stutterMode
+    ? Math.max(step, loopSec - (step * 2))
+    : (hardStutterMode ? Math.max(step, loopSec - hardStutterSec) : Math.max(step, loopSec - 1));
   const cleanPickupSec = loopSec - bridgeSec;
   const cutSec = step;
   const postSec = 6 * barSec;
@@ -226,7 +243,7 @@ function buildSectionJumpPlan(ctx) {
     : (protectedExit || exitPoint - loopSec));
   const entryStart = clampStart(toEntry && toEntry.time != null ? toEntry.time : ctx.row.entryPoint);
 
-  return [
+  const segments = [
     makeSegment('A phrase before section jump', preSec, {
       start: clampStart(phraseStart - preSec),
       filter: 'full',
@@ -235,24 +252,63 @@ function buildSectionJumpPlan(ctx) {
     makeSegment('A outgoing phrase bridge under B section pickup', bridgeSec, {
       start: phraseStart,
       filter: 'full',
-      volume: 0.58,
+      volume: filterPushMode ? 0.46 : 0.58,
       role: 'outgoing-phrase-bridge',
       fadeOut: Math.min(1.2, bridgeSec * 0.45),
     }, {
       start: entryStart,
       filter: 'highpass',
-      highpassHz: 220,
-      volume: 0.5,
+      highpassHz: filterPushMode ? 360 : 220,
+      volume: filterPushMode ? 0.58 : 0.5,
       role: 'section-pickup',
       fadeIn: Math.min(0.8, bridgeSec * 0.25),
     }),
-    makeSegment('B clean section pickup', cleanPickupSec, null, {
+  ];
+
+  if (stutterMode) {
+    segments.push(
+      makeSegment('B stutter pickup', step, null, {
+        start: entryStart + bridgeSec,
+        filter: 'highpass',
+        highpassHz: 220,
+        volume: 0.72,
+        role: 'section-stutter',
+      }),
+      makeSegment('B stutter pickup', step, null, {
+        start: entryStart + bridgeSec,
+        filter: 'highpass',
+        highpassHz: 180,
+        volume: 0.84,
+        role: 'section-stutter',
+      }),
+    );
+  } else if (hardStutterMode) {
+    const tapStart = entryStart + bridgeSec;
+    [
+      { highpassHz: 420, volume: 0.48 },
+      { highpassHz: 320, volume: 0.62 },
+      { highpassHz: 240, volume: 0.78 },
+      { highpassHz: 160, volume: 0.92 },
+    ].forEach((tap) => {
+      segments.push(makeSegment('B hard stutter cue tap', hardStutterTapSec, null, {
+        start: tapStart,
+        filter: 'highpass',
+        highpassHz: tap.highpassHz,
+        volume: tap.volume,
+        role: 'section-hard-stutter',
+      }));
+    });
+  } else {
+    segments.push(makeSegment('B clean section pickup', cleanPickupSec, null, {
       start: entryStart + bridgeSec,
       filter: 'highpass',
-      highpassHz: 180,
-      volume: 0.76,
+      highpassHz: filterPushMode ? 260 : 180,
+      volume: filterPushMode ? 0.84 : 0.76,
       role: 'section-pickup',
-    }),
+    }));
+  }
+
+  segments.push(
     makeSegment('B section downbeat cut', cutSec, null, {
       start: entryStart + loopSec,
       filter: 'full',
@@ -265,13 +321,18 @@ function buildSectionJumpPlan(ctx) {
       volume: 1,
       role: 'section-entry',
     }),
-  ];
+  );
+
+  return segments;
 }
 
 function buildRecipe(mode, segments) {
-  const style = mode === 'echo-out'
-    ? 'Echo Out'
-    : (mode === 'section-hook' || mode === 'section-jump' ? 'Section Jump' : 'Bass Swap / Downbeat Cut');
+  let style = 'Bass Swap / Downbeat Cut';
+  if (mode === 'echo-out') style = 'Echo Out';
+  else if (mode === 'section-filter-push') style = 'Section Filter Push';
+  else if (mode === 'section-stutter-pickup') style = 'Section Stutter Pickup';
+  else if (mode === 'section-hard-stutter') style = 'Section Hard Stutter';
+  else if (isSectionMode(mode)) style = 'Section Jump';
   return {
     style,
     layer: 'transition-engine-preview',
@@ -305,7 +366,7 @@ function buildPreviewPlan(opts) {
   };
   let segments;
   if (mode === 'echo-out') segments = buildEchoOutPlan(ctx);
-  else if (mode === 'section-hook' || mode === 'section-jump') segments = buildSectionJumpPlan(ctx);
+  else if (isSectionMode(mode)) segments = buildSectionJumpPlan(ctx);
   else segments = buildBassSwapPlan(ctx);
   return {
     mode,
@@ -315,6 +376,48 @@ function buildPreviewPlan(opts) {
     row: opts.row || {},
     gridStep: gridStepFor(opts.fromFixture, opts.toFixture),
     recipe: buildRecipe(mode, segments),
+    segments,
+  };
+}
+
+function fixtureDuration(fixture) {
+  return Math.max(
+    toNumber(fixture && fixture.track && fixture.track.duration, 0),
+    toNumber(fixture && fixture.map && fixture.map.duration, 0),
+  );
+}
+
+function buildFullSimulationPlan(opts) {
+  const plan = buildPreviewPlan(opts);
+  const segments = plan.segments.slice();
+  const first = segments[0];
+  if (first && first.from && first.from.start > 0) {
+    segments.unshift(makeSegment('A plays from start before transition', first.from.start, {
+      start: 0,
+      filter: 'full',
+      volume: 1,
+    }, null));
+  }
+
+  const toDuration = fixtureDuration(opts.toFixture || {});
+  const last = segments[segments.length - 1];
+  if (last && last.to && toDuration > last.to.start) {
+    segments[segments.length - 1] = makeSegment(
+      `${last.label} and plays to end`,
+      toDuration - last.to.start,
+      last.from,
+      last.to,
+    );
+  }
+
+  return {
+    ...plan,
+    fullSimulation: true,
+    recipe: {
+      ...plan.recipe,
+      style: `${plan.recipe.style} Full Simulation`,
+      actions: buildRecipe(plan.mode, segments).actions,
+    },
     segments,
   };
 }
@@ -388,6 +491,7 @@ function renderPreview(plan, opts = {}) {
 module.exports = {
   audioFileForTitle,
   buildFfmpegArgs,
+  buildFullSimulationPlan,
   buildPreviewPlan,
   fixtureForTitle,
   parseEvalRow,
