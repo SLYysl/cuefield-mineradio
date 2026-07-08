@@ -80,6 +80,21 @@ function isSectionMode(mode) {
   ].includes(mode);
 }
 
+function presentNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function sectionChoiceEntryPoint(choice) {
+  const entry = choice && choice.entry;
+  return entry ? presentNumber(entry.time) : null;
+}
+
+function sectionChoiceResolvedEntryPoint(choice) {
+  const entry = choice && choice.entry;
+  return entry && entry.resolvesTo ? presentNumber(entry.resolvesTo.time) : null;
+}
+
 function beatEnergy(beat) {
   if (!beat) return 0;
   return Math.max(
@@ -220,28 +235,44 @@ function buildSectionJumpPlan(ctx) {
   const step = gridStepFor(ctx.fromFixture, ctx.toFixture);
   const barSec = step * 4;
   const preSec = 4 * barSec;
-  const loopSec = 2 * barSec;
   const stutterMode = ctx.mode === 'section-stutter-pickup';
   const hardStutterMode = ctx.mode === 'section-hard-stutter';
   const filterPushMode = ctx.mode === 'section-filter-push';
   const hardStutterTapSec = Math.max(0.125, step / 2);
   const hardStutterSec = hardStutterTapSec * 4;
+  const choiceExit = ctx.sectionChoice && ctx.sectionChoice.exit;
+  const choiceEntryTime = sectionChoiceEntryPoint(ctx.sectionChoice);
+  const choiceResolvedEntryTime = sectionChoiceResolvedEntryPoint(ctx.sectionChoice);
+  const defaultLeadSec = 2 * barSec;
+  const choiceLeadSec = choiceEntryTime != null
+    && choiceResolvedEntryTime != null
+    && choiceResolvedEntryTime > choiceEntryTime
+    ? choiceResolvedEntryTime - choiceEntryTime
+    : null;
+  const choiceEntryStart = choiceResolvedEntryTime != null && choiceLeadSec != null && choiceLeadSec < defaultLeadSec
+    ? choiceResolvedEntryTime - defaultLeadSec
+    : choiceEntryTime;
+  const loopSec = choiceResolvedEntryTime != null ? Math.max(defaultLeadSec, choiceLeadSec || 0) : defaultLeadSec;
   const bridgeSec = stutterMode
     ? Math.max(step, loopSec - (step * 2))
     : (hardStutterMode ? Math.max(step, loopSec - hardStutterSec) : Math.max(step, loopSec - 1));
-  const cleanPickupSec = loopSec - bridgeSec;
+  const cleanPickupSec = Math.max(0, loopSec - bridgeSec);
   const cutSec = step;
   const postSec = 6 * barSec;
   const exitPoint = toNumber(ctx.row.exitPoint);
   const fromPhrase = ctx.sectionAnchors && ctx.sectionAnchors.fromExitPhrase;
   const toEntry = ctx.sectionAnchors && (ctx.sectionAnchors.toSectionEntry || ctx.sectionAnchors.toHook);
-  const protectedExit = fromPhrase && fromPhrase.time != null
+  const protectedExit = (choiceExit && choiceExit.time != null) || (fromPhrase && fromPhrase.time != null)
     ? null
     : findReleaseAfterUpcomingPeak(ctx.fromFixture && ctx.fromFixture.map, exitPoint);
-  const phraseStart = clampStart(fromPhrase && fromPhrase.time != null
-    ? fromPhrase.time
-    : (protectedExit || exitPoint - loopSec));
-  const entryStart = clampStart(toEntry && toEntry.time != null ? toEntry.time : ctx.row.entryPoint);
+  const phraseStart = clampStart(
+    choiceExit && choiceExit.time != null
+      ? choiceExit.time
+      : (fromPhrase && fromPhrase.time != null ? fromPhrase.time : (protectedExit || exitPoint - loopSec)),
+  );
+  const entryStart = clampStart(choiceEntryStart != null
+    ? choiceEntryStart
+    : (toEntry && toEntry.time != null ? toEntry.time : ctx.row.entryPoint));
 
   const segments = [
     makeSegment('A phrase before section jump', preSec, {
@@ -298,7 +329,7 @@ function buildSectionJumpPlan(ctx) {
         role: 'section-hard-stutter',
       }));
     });
-  } else {
+  } else if (cleanPickupSec > 0) {
     segments.push(makeSegment('B clean section pickup', cleanPickupSec, null, {
       start: entryStart + bridgeSec,
       filter: 'highpass',
@@ -355,6 +386,13 @@ function buildRecipe(mode, segments) {
   };
 }
 
+function sectionChoiceStyle(choice) {
+  if (!choice || !choice.recipe) return null;
+  if (choice.recipe === 'outro-to-chorus') return 'Outro to Chorus';
+  if (choice.recipe === 'section-jump') return 'Section Jump';
+  return String(choice.recipe).split('-').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
 function buildPreviewPlan(opts) {
   const mode = opts.mode || 'bass-swap';
   const ctx = {
@@ -363,19 +401,25 @@ function buildPreviewPlan(opts) {
     fromFixture: opts.fromFixture || {},
     toFixture: opts.toFixture || {},
     sectionAnchors: opts.sectionAnchors || {},
+    sectionChoice: opts.sectionChoice || null,
   };
   let segments;
   if (mode === 'echo-out') segments = buildEchoOutPlan(ctx);
   else if (isSectionMode(mode)) segments = buildSectionJumpPlan(ctx);
   else segments = buildBassSwapPlan(ctx);
+  const recipe = buildRecipe(mode, segments);
   return {
     mode,
     fromAudio: opts.fromAudio,
     toAudio: opts.toAudio,
     output: opts.output,
     row: opts.row || {},
+    sectionChoice: opts.sectionChoice || null,
     gridStep: gridStepFor(opts.fromFixture, opts.toFixture),
-    recipe: buildRecipe(mode, segments),
+    recipe: {
+      ...recipe,
+      style: sectionChoiceStyle(opts.sectionChoice) || recipe.style,
+    },
     segments,
   };
 }

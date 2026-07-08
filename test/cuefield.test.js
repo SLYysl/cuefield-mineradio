@@ -19,6 +19,7 @@ const {
   buildFfmpegArgs,
   parseEvalRow,
 } = require('../cuefield/render-preview');
+const { buildSectionContext } = require('../cuefield/render-preview-inputs');
 const {
   findHookEntry,
   findOutgoingPhrase,
@@ -268,6 +269,51 @@ test('parses an eval row for preview rendering', () => {
   assert.deepEqual(row.risks, ['key data unavailable', 'vocal density unavailable']);
 });
 
+test('builds auto section choice context from fixtures and lrc files', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const lrcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuefield-lrc-'));
+  fs.writeFileSync(path.join(lrcDir, 'A.lrc'), `
+[01:20.000] peak line
+[01:50.000] final release
+`);
+  fs.writeFileSync(path.join(lrcDir, 'B.lrc'), `
+[00:36.000] hands up
+[00:44.000] turn the bass up
+[01:20.000] turn the bass up
+`);
+
+  const context = buildSectionContext({
+    row: { from: 'A', to: 'B', exitPoint: 64, entryPoint: 8 },
+    fromFixture: {
+      track: { title: 'A', duration: 128 },
+      map: makeBeatMap({
+        duration: 128,
+        low: (t) => (t >= 80 && t < 96 ? 0.86 : (t >= 112 ? 0.34 : 0.42)),
+        body: (t) => (t >= 80 && t < 96 ? 0.80 : (t >= 112 ? 0.3 : 0.38)),
+        snap: (t) => (t >= 80 && t < 96 ? 0.72 : (t >= 112 ? 0.24 : 0.32)),
+      }),
+    },
+    toFixture: {
+      track: { title: 'B', duration: 128 },
+      map: makeBeatMap({
+        duration: 128,
+        low: (t) => (t >= 44 && t < 64 ? 0.84 : 0.36),
+        body: (t) => (t >= 44 && t < 64 ? 0.78 : 0.34),
+        snap: (t) => (t >= 44 && t < 64 ? 0.7 : 0.28),
+      }),
+    },
+    lrcDir,
+    autoSections: true,
+  });
+
+  assert.equal(context.sectionChoice.recipe, 'outro-to-chorus');
+  assert.equal(context.sectionChoice.exit.role, 'exit');
+  assert.equal(context.sectionChoice.entry.type, 'pre-section');
+  assert.equal(context.sectionChoice.entry.resolvesTo.text, 'turn the bass up');
+});
+
 test('finds repeated hook entries from lrc instead of defaulting to intro', () => {
   const lines = parseLrc(`
 {"t":-1000,"c":[{"tx":"作词: someone"}]}
@@ -408,6 +454,39 @@ test('builds a section-jump preview that jumps B into a high-value section ancho
   assert.equal(pickup.from.fadeOut > 0, true);
   assert.equal(cut.from, null);
   assert.equal(takeover.to.role, 'section-entry');
+});
+
+test('builds a section preview from chosen section candidates without manual anchors', () => {
+  const plan = buildPreviewPlan({
+    mode: 'section-jump',
+    row: { from: 'A', to: 'B', exitPoint: 64, entryPoint: 8, transitionBars: 16 },
+    sectionChoice: {
+      recipe: 'outro-to-chorus',
+      score: 0.96,
+      exit: { type: 'outro', role: 'exit', time: 110.096, text: 'so alive' },
+      entry: {
+        type: 'pre-section',
+        role: 'entry',
+        time: 43.626,
+        text: '[Chorus]',
+        resolvesTo: { type: 'chorus', time: 44.823, text: 'Turn the bass up' },
+      },
+    },
+    fromFixture: { map: makeBeatMap({ gridStep: 0.5, duration: 128 }), track: { title: 'A', duration: 128 } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5, duration: 128 }), track: { title: 'B', duration: 128 } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  const pickup = plan.segments.find((segment) => segment.label === 'A outgoing phrase bridge under B section pickup');
+  const cut = plan.segments.find((segment) => segment.label === 'B section downbeat cut');
+
+  assert.equal(plan.recipe.style, 'Outro to Chorus');
+  assert.equal(plan.sectionChoice.recipe, 'outro-to-chorus');
+  assert.equal(pickup.from.start, 110.096);
+  assert.equal(pickup.to.start, 40.823);
+  assert.equal(cut.to.start, 44.823);
 });
 
 test('delays section-jump exit when the planned point would cut off an upcoming A peak', () => {
