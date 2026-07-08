@@ -13,6 +13,18 @@ const {
   decodeNcmFile,
   inferAudioExtension,
 } = require('../cuefield/decode-ncm');
+const {
+  buildPreviewPlan,
+  buildFfmpegArgs,
+  parseEvalRow,
+} = require('../cuefield/render-preview');
+const {
+  findHookEntry,
+  findOutgoingPhrase,
+  findSectionEntry,
+  findSectionEntries,
+  parseLrc,
+} = require('../cuefield/lrc-anchors');
 
 function makeBeatMap(opts = {}) {
   const gridStep = opts.gridStep || 0.5;
@@ -237,4 +249,221 @@ test('rejects non-ncm files before decoding', () => {
   fs.writeFileSync(file, 'not an ncm file');
 
   assert.throws(() => decodeNcmFile(file, dir), /INVALID_NCM_MAGIC/);
+});
+
+test('parses an eval row for preview rendering', () => {
+  const row = parseEvalRow('0.850\tusable\tA Song\tB Song\t157.4\t12.15\t16\tkey data unavailable|vocal density unavailable\t');
+
+  assert.equal(row.score, 0.85);
+  assert.equal(row.from, 'A Song');
+  assert.equal(row.to, 'B Song');
+  assert.equal(row.exitPoint, 157.4);
+  assert.equal(row.entryPoint, 12.15);
+  assert.equal(row.transitionBars, 16);
+  assert.deepEqual(row.risks, ['key data unavailable', 'vocal density unavailable']);
+});
+
+test('finds repeated hook entries from lrc instead of defaulting to intro', () => {
+  const lines = parseLrc(`
+{"t":-1000,"c":[{"tx":"作词: someone"}]}
+[00:00.000] falling in love is too easy
+[00:12.000] verse line one
+[00:28.000] verse line two
+[00:58.373] falling in love is too easy
+[01:53.176] falling in love is too easy
+`);
+
+  const hook = findHookEntry(lines, { preferAfter: 30 });
+
+  assert.equal(hook.text, 'falling in love is too easy');
+  assert.equal(hook.time, 58.373);
+  assert.equal(hook.kind, 'hook');
+});
+
+test('finds a repeated section entry without assuming it must be a hook', () => {
+  const lines = parseLrc(`
+[00:00.000] intro
+[00:20.000] build line
+[00:43.000] tonight
+[00:44.000] tonight
+[01:30.000] tonight
+`);
+
+  const entry = findSectionEntry(lines, { preferAfter: 30 });
+
+  assert.equal(entry.text, 'tonight');
+  assert.equal(entry.time, 43);
+  assert.equal(entry.kind, 'section-entry');
+  assert.equal(entry.sectionType, 'repeated-vocal');
+});
+
+test('lists repeated vocal and pre-section candidates for the next track', () => {
+  const lines = parseLrc(`
+[00:00.000] intro
+[00:20.000] build line
+[00:31.000] hands up
+[00:43.000] tonight
+[01:30.000] tonight
+`);
+
+  const candidates = findSectionEntries(lines, { preferAfter: 30 });
+
+  assert.equal(candidates.some((candidate) => candidate.sectionType === 'repeated-vocal' && candidate.time === 43), true);
+  assert.equal(candidates.some((candidate) => candidate.sectionType === 'pre-section' && candidate.time === 31), true);
+});
+
+test('finds outgoing phrase before the planned exit point', () => {
+  const lines = parseLrc(`
+[03:54.463] Call me mystery
+[03:57.997] I mystify
+[04:01.358] Don't be feel die
+[04:04.756] I mystify
+[04:08.636] Call me mystery
+`);
+
+  const phrase = findOutgoingPhrase(lines, { before: 248, maxLookback: 18 });
+
+  assert.equal(phrase.text, 'I mystify');
+  assert.equal(phrase.time, 244.756);
+  assert.equal(phrase.kind, 'outgoing-phrase');
+});
+
+test('builds a bass-swap preview plan that prevents full bass overlap', () => {
+  const plan = buildPreviewPlan({
+    mode: 'bass-swap',
+    row: { from: 'A', to: 'B', exitPoint: 64, entryPoint: 8, transitionBars: 16 },
+    fromFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'A' } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'B' } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  assert.equal(plan.mode, 'bass-swap');
+  assert.equal(plan.recipe.style, 'Bass Swap / Downbeat Cut');
+  assert.equal(plan.recipe.layer, 'transition-engine-preview');
+  assert.equal(plan.segments.length, 4);
+  assert.equal(plan.segments[1].from.filter, 'full');
+  assert.equal(plan.segments[1].to.filter, 'highpass');
+  assert.equal(plan.segments[2].from.filter, 'full');
+  assert.equal(plan.segments[2].to.filter, 'full');
+  assert.equal(plan.segments.every((segment) => (
+    !(segment.from && segment.to && segment.from.filter === 'full' && segment.to.filter === 'full')
+    || segment.duration <= plan.gridStep
+  )), true);
+});
+
+test('keeps bass-swap teaser and outgoing tail clean', () => {
+  const plan = buildPreviewPlan({
+    mode: 'bass-swap',
+    row: { from: 'A', to: 'B', exitPoint: 64, entryPoint: 8, transitionBars: 16 },
+    fromFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'A' } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'B' } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  assert.equal(plan.segments[1].from.volume >= 0.94, true);
+  assert.equal(plan.segments[1].to.volume <= 0.32, true);
+  assert.equal(plan.segments[1].to.highpassHz >= 320, true);
+  assert.equal(plan.segments[2].from.filter, 'full');
+  assert.equal(plan.segments[2].from.volume <= 0.45, true);
+  assert.equal(plan.segments[2].from.fadeOut <= plan.gridStep, true);
+  assert.equal(plan.segments[2].duration <= plan.gridStep, true);
+});
+
+test('builds a section-jump preview that jumps B into a high-value section anchor', () => {
+  const plan = buildPreviewPlan({
+    mode: 'section-jump',
+    row: { from: 'A', to: 'B', exitPoint: 244, entryPoint: 8, transitionBars: 16 },
+    sectionAnchors: {
+      fromExitPhrase: { time: 236, text: 'last phrase' },
+      toSectionEntry: { time: 58.373, text: 'falling in love is too easy', sectionType: 'repeated-vocal' },
+    },
+    fromFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'A' } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'B' } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  assert.equal(plan.mode, 'section-jump');
+  assert.equal(plan.recipe.style, 'Section Jump');
+  const pickup = plan.segments.find((segment) => segment.label === 'A outgoing phrase bridge under B section pickup');
+  const cleanPickup = plan.segments.find((segment) => segment.label === 'B clean section pickup');
+  const cut = plan.segments.find((segment) => segment.label === 'B section downbeat cut');
+  const takeover = plan.segments.find((segment) => segment.label === 'B section takes over');
+  assert.equal(Boolean(pickup && cleanPickup && cut && takeover), true);
+  assert.equal(pickup.to.start, 58.373);
+  assert.equal(cleanPickup.from, null);
+  assert.equal(cleanPickup.to.start, 58.373 + pickup.duration);
+  assert.equal(takeover.to.start, 58.373 + pickup.duration + cleanPickup.duration + cut.duration);
+  assert.equal(pickup.from.filter, 'full');
+  assert.equal(pickup.from.fadeOut > 0, true);
+  assert.equal(cut.from, null);
+  assert.equal(takeover.to.role, 'section-entry');
+});
+
+test('delays section-jump exit when the planned point would cut off an upcoming A peak', () => {
+  const fromMap = makeBeatMap({
+    duration: 128,
+    gridStep: 0.5,
+    low: (t) => (t >= 80 && t <= 88 ? 0.95 : 0.32),
+    body: (t) => (t >= 80 && t <= 88 ? 0.82 : 0.26),
+    snap: (t) => (t >= 80 && t <= 88 ? 0.72 : 0.22),
+  });
+  const plan = buildPreviewPlan({
+    mode: 'section-jump',
+    row: { from: 'A', to: 'B', exitPoint: 68, entryPoint: 8, transitionBars: 16 },
+    sectionAnchors: {
+      toSectionEntry: { time: 42, text: 'incoming section', sectionType: 'repeated-vocal' },
+    },
+    fromFixture: { map: fromMap, track: { title: 'A' } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'B' } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  const pickup = plan.segments.find((segment) => segment.label === 'A outgoing phrase bridge under B section pickup');
+  const leadIn = plan.segments.find((segment) => segment.label === 'A phrase before section jump');
+  assert.equal(pickup.from.start > 88, true, JSON.stringify(plan.segments));
+  assert.equal(leadIn.from.start + leadIn.duration, pickup.from.start);
+});
+
+test('builds an echo-out preview plan with a vocal tail bridge', () => {
+  const plan = buildPreviewPlan({
+    mode: 'echo-out',
+    row: { from: 'A', to: 'B', exitPoint: 64, entryPoint: 8, transitionBars: 16 },
+    fromFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'A' } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'B' } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  assert.equal(plan.mode, 'echo-out');
+  assert.equal(plan.segments.some((segment) => segment.from && segment.from.effect === 'echo-out'), true);
+  assert.equal(plan.segments.some((segment) => segment.to && segment.to.role === 'pickup-loop'), true);
+});
+
+test('builds ffmpeg args from a bass-swap plan without using acrossfade', () => {
+  const plan = buildPreviewPlan({
+    mode: 'bass-swap',
+    row: { from: 'A', to: 'B', exitPoint: 64, entryPoint: 8, transitionBars: 16 },
+    fromFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'A' } },
+    toFixture: { map: makeBeatMap({ gridStep: 0.5 }), track: { title: 'B' } },
+    fromAudio: '/tmp/a.mp3',
+    toAudio: '/tmp/b.mp3',
+    output: '/tmp/out.mp3',
+  });
+
+  const args = buildFfmpegArgs(plan);
+  const joined = args.join(' ');
+
+  assert.equal(joined.includes('acrossfade'), false);
+  assert.equal(joined.includes('highpass=f='), true);
+  assert.equal(joined.includes('amix=inputs=2'), true);
+  assert.equal(args.includes('/tmp/out.mp3'), true);
 });
