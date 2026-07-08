@@ -26,6 +26,7 @@
       "desktop/**/*",
       "public/**/*",
       "build/**/*",
+      "cuefield/**/*",
       "server.js",
       "dj-analyzer.js",
       "package.json",

@@ -4,6 +4,15 @@ const test = require('node:test');
 const { normalizeMineradioBeatMap } = require('../cuefield/adapter-mineradio');
 const { planTransition } = require('../cuefield/plan-transition');
 const { planTransitionFromPayload } = require('../cuefield/api');
+const {
+  discoverAudioFiles,
+  analyzeAudioFileToFixture,
+  evaluateFixturePairs,
+} = require('../cuefield/fixtures');
+const {
+  decodeNcmFile,
+  inferAudioExtension,
+} = require('../cuefield/decode-ncm');
 
 function makeBeatMap(opts = {}) {
   const gridStep = opts.gridStep || 0.5;
@@ -154,4 +163,78 @@ test('plans a transition from Mineradio API payload', () => {
   assert.equal(response.plan.score >= 0.95, true, JSON.stringify(response.plan));
   assert.equal(response.plan.from.title, 'Warm Track');
   assert.equal(response.plan.to.title, 'Incoming Track');
+});
+
+test('discovers mp3 files for local fixture analysis', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuefield-audio-'));
+  fs.writeFileSync(path.join(dir, 'A Song.mp3'), '');
+  fs.writeFileSync(path.join(dir, 'ignore.m4a'), '');
+  fs.mkdirSync(path.join(dir, 'nested'));
+  fs.writeFileSync(path.join(dir, 'nested', 'B Song.MP3'), '');
+
+  const files = discoverAudioFiles(dir).map((file) => path.basename(file));
+
+  assert.deepEqual(files, ['A Song.mp3', 'B Song.MP3']);
+});
+
+test('writes a fixture from a local audio file using an injected analyzer', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cuefield-fixture-'));
+  const audio = path.join(root, 'Warm Track.mp3');
+  const outDir = path.join(root, 'fixtures');
+  fs.writeFileSync(audio, 'fake mp3 bytes');
+
+  const result = await analyzeAudioFileToFixture(audio, outDir, {
+    analyzer: async (url) => {
+      assert.equal(url.startsWith('http://127.0.0.1:'), true);
+      return makeBeatMap();
+    },
+  });
+
+  assert.equal(result.fixture.track.title, 'Warm Track');
+  assert.equal(result.fixture.map.visualBeatCount > 20, true);
+  assert.equal(fs.existsSync(result.file), true);
+});
+
+test('evaluates ordered fixture pairs and sorts by score', () => {
+  const fixtures = [
+    { track: { id: 'a', title: 'A', duration: 96 }, map: makeBeatMap(), extra: { camelot: '8A', vocalWindows: [] } },
+    { track: { id: 'b', title: 'B', duration: 96 }, map: makeBeatMap(), extra: { camelot: '8A', vocalWindows: [] } },
+    { track: { id: 'c', title: 'C', duration: 96 }, map: makeBeatMap(), extra: { camelot: '2B', vocalWindows: [] } },
+  ];
+
+  const rows = evaluateFixturePairs(fixtures);
+
+  assert.equal(rows.length, 6);
+  assert.equal(rows[0].from !== rows[0].to, true);
+  assert.equal(rows[0].score >= rows[rows.length - 1].score, true);
+  assert.equal(rows.some((row) => row.grade === 'high-confidence'), true);
+});
+
+test('packages Cuefield modules with the Electron app', () => {
+  const pkg = require('../package.json');
+  assert.equal(pkg.build.files.includes('cuefield/**/*'), true);
+});
+
+test('infers decoded ncm audio extension from magic bytes', () => {
+  assert.equal(inferAudioExtension(Buffer.from('ID3\u0004\u0000\u0000')), '.mp3');
+  assert.equal(inferAudioExtension(Buffer.from([0xff, 0xfb, 0x90, 0x64])), '.mp3');
+  assert.equal(inferAudioExtension(Buffer.from('fLaC\u0000\u0000')), '.flac');
+  assert.equal(inferAudioExtension(Buffer.from('????')), '.bin');
+});
+
+test('rejects non-ncm files before decoding', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuefield-ncm-'));
+  const file = path.join(dir, 'not-ncm.ncm');
+  fs.writeFileSync(file, 'not an ncm file');
+
+  assert.throws(() => decodeNcmFile(file, dir), /INVALID_NCM_MAGIC/);
 });

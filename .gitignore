@@ -37,6 +37,8 @@ yarn-error.log*
 # Historical local experiment files
 public/index.*.html
 !public/index.html
+cuefield/fixtures/audio/
+cuefield/fixtures/tracks/
 
 # Screenshots and transient verification artifacts
 .playwright-cli/
