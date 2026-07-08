@@ -53,6 +53,7 @@ const tls = require('tls');
 const { once } = require('events');
 const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
+const { planTransitionFromPayload } = require('./cuefield/api');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -3324,6 +3325,21 @@ const server = http.createServer(async (req, res) => {
       reason: !info.allowed ? 'C_DRIVE_DISABLED' : (!info.available ? 'TARGET_DRIVE_UNAVAILABLE' : ''),
       mode: info.allowed && info.available ? 'disk' : 'memory-only',
     });
+    return;
+  }
+
+  if (pn === '/api/cuefield/transition') {
+    if (req.method !== 'POST') {
+      sendJSON(res, { ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
+      return;
+    }
+
+    try {
+      const body = await readRequestBody(req);
+      sendJSON(res, planTransitionFromPayload(body));
+    } catch (err) {
+      sendJSON(res, { ok: false, error: err.message || 'CUEFIELD_TRANSITION_FAILED' }, 400);
+    }
     return;
   }
 
