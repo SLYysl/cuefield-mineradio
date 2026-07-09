@@ -57,6 +57,7 @@ const { appendCuefieldFeedback, readCuefieldFeedbackStats } = require('./cuefiel
 const { planTransitionFromPayload } = require('./cuefield/api');
 const { planCuefieldTransitionFromCache } = require('./cuefield/mineradio-bridge');
 const { defaultBeatMapCacheDir } = require('./cuefield/beatmap-cache-path');
+const { forwardCuefieldFeedback } = require('./cuefield/feedback-remote');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -3388,6 +3389,11 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readRequestBody(req);
       const record = appendCuefieldFeedback(CUEFIELD_FEEDBACK_FILE, body);
+      forwardCuefieldFeedback(record).then(result => {
+        if (result && !result.skipped && !result.ok) {
+          console.warn('[CuefieldFeedbackRemote]', result.error || result.status || 'REMOTE_FORWARD_FAILED');
+        }
+      });
       sendJSON(res, { ok: true, record });
     } catch (err) {
       console.error('[CuefieldFeedback]', err);
