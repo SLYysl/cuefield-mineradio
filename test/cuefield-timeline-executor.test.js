@@ -1,0 +1,42 @@
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { buildCuefieldTimelineExecution } = require('../public/cuefield-timeline-executor');
+
+test('builds delayed execution actions from a Cuefield recipe timeline', () => {
+  const execution = buildCuefieldTimelineExecution({
+    exitTime: 40,
+    entryTime: 8,
+    targetVolume: 0.75,
+    timeline: [
+      { t: -8, deck: 'B', op: 'play', at: 8, volume: 0 },
+      { t: -8, deck: 'B', op: 'volume', value: 0.58, duration: 5200 },
+      { t: -3.2, deck: 'A', op: 'bass', value: 0.38, duration: 2200 },
+      { t: 0, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 900 },
+      { t: 0.8, deck: 'A', op: 'volume', value: 0, duration: 1600 },
+      { t: 2.6, deck: 'B', op: 'handoff' },
+    ],
+  });
+
+  assert.equal(execution.leadSec, 8);
+  assert.equal(execution.bStart, 8);
+  assert.equal(execution.actions[0].delayMs, 0);
+  assert.equal(execution.actions[1].target, 0.435);
+  assert.equal(execution.actions.find((action) => action.op === 'bass').delayMs, 4800);
+  assert.equal(execution.handoffDelayMs, 10600);
+});
+
+test('falls back to the current soft handoff curve when no timeline exists', () => {
+  const execution = buildCuefieldTimelineExecution({
+    exitTime: 30,
+    entryTime: 12,
+    targetVolume: 0.8,
+    timeline: [],
+    executionMode: 'intro-bed',
+  });
+
+  assert.equal(execution.leadSec, 5.2);
+  assert.equal(execution.bStart, 6.8);
+  assert.equal(execution.actions.some((action) => action.op === 'volume' && action.deck === 'B'), true);
+  assert.equal(execution.handoffDelayMs, 4140);
+});
