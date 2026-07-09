@@ -40,3 +40,17 @@ test('falls back to the current soft handoff curve when no timeline exists', () 
   assert.equal(execution.actions.some((action) => action.op === 'volume' && action.deck === 'B'), true);
   assert.equal(execution.handoffDelayMs, 4140);
 });
+
+test('marks timelines that need a B deck audio graph for filter or bass actions', () => {
+  const execution = buildCuefieldTimelineExecution({
+    entryTime: 4,
+    timeline: [
+      { t: -4, deck: 'B', op: 'play', at: 0, volume: 0 },
+      { t: -4, deck: 'B', op: 'filter', type: 'highpass', value: 900, duration: 1200 },
+      { t: -2, deck: 'B', op: 'bass', value: 0.25, duration: 800 },
+      { t: 0, deck: 'B', op: 'handoff' },
+    ],
+  });
+
+  assert.equal(execution.requiresBGraph, true);
+});

@@ -96,6 +96,9 @@
       .sort(function(a, b) {
         return a.delayMs - b.delayMs || a.t - b.t;
       });
+    var requiresBGraph = actions.some(function(action) {
+      return action.deck === 'B' && (action.op === 'filter' || action.op === 'bass');
+    });
     var handoff = actions.filter(function(action) { return action.op === 'handoff'; }).slice(-1)[0];
     var lastAction = actions[actions.length - 1] || null;
     var handoffDelayMs = handoff
@@ -106,6 +109,7 @@
       leadSec: round(leadSec),
       bStart: round(bStart),
       handoffDelayMs: Math.max(520, handoffDelayMs),
+      requiresBGraph: requiresBGraph,
       actions: actions,
     };
   }

@@ -2680,7 +2680,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 //  Global State
 // ============================================================
 var audio = null, audioCtx = null, source = null, analyser = null, beatAnalyser = null, gainNode = null, audioReady = false, audioGraphElement = null;
-var cuefieldFilterNode = null, cuefieldBassNode = null, cuefieldTimelineTimers = [];
+var cuefieldFilterNode = null, cuefieldBassNode = null, cuefieldTimelineTimers = [], cuefieldBDeckGraph = null;
 var uiSfxCtx = null, lastShelfSelectSfxAt = 0;
 var FFT_SIZE = 2048;
 var frequencyData = new Uint8Array(FFT_SIZE / 2);
@@ -10541,6 +10541,7 @@ async function runCuefieldAutoMixPrepare(token, currentIndex, nextIndex, attempt
 function stopCuefieldPreparedAudio(media) {
   media = media || cuefieldAutoMixPreparedAudio;
   if (!media) return;
+  releaseCuefieldBDeckGraph(media);
   try { media.pause(); } catch (e) {}
   try { media.removeAttribute('src'); media.load(); } catch (e) {}
   if (cuefieldAutoMixPreparedAudio === media) cuefieldAutoMixPreparedAudio = null;
@@ -10629,8 +10630,13 @@ function cuefieldScheduleTimeline(delayMs, fn) {
 
 function rampCuefieldParam(param, value, durationMs) {
   if (!param || !audioCtx) return;
+  rampCuefieldParamInContext(audioCtx, param, value, durationMs);
+}
+
+function rampCuefieldParamInContext(ctx, param, value, durationMs) {
+  if (!ctx || !param) return;
   durationMs = Math.max(0, Number(durationMs) || 0);
-  var now = audioCtx.currentTime || 0;
+  var now = ctx.currentTime || 0;
   try {
     if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(now);
     else {
@@ -10663,10 +10669,97 @@ function resetCuefieldToneControls(durationMs) {
   rampCuefieldBass(1, durationMs || 0);
 }
 
+function configureCuefieldDeckGraph(graph) {
+  if (!graph || !graph.ctx) return null;
+  var now = graph.ctx.currentTime || 0;
+  graph.analyser.fftSize = FFT_SIZE;
+  graph.analyser.smoothingTimeConstant = 0.58;
+  graph.beatAnalyser.fftSize = BEAT_FFT_SIZE;
+  graph.beatAnalyser.smoothingTimeConstant = 0.10;
+  graph.filter.type = 'highpass';
+  graph.filter.frequency.setValueAtTime(20, now);
+  graph.filter.Q.setValueAtTime(0.707, now);
+  graph.bass.type = 'lowshelf';
+  graph.bass.frequency.setValueAtTime(180, now);
+  graph.bass.gain.setValueAtTime(0, now);
+  graph.gain.gain.setValueAtTime(1, now);
+  return graph;
+}
+
+function connectCuefieldDeckGraph(graph) {
+  if (!graph || graph.connected) return graph;
+  graph.source.connect(graph.analyser);
+  graph.source.connect(graph.beatAnalyser);
+  graph.analyser.connect(graph.filter);
+  graph.filter.connect(graph.bass);
+  graph.bass.connect(graph.gain);
+  graph.gain.connect(graph.ctx.destination);
+  graph.connected = true;
+  return graph;
+}
+
+function ensureCuefieldBDeckGraph(media) {
+  if (!media) return null;
+  var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) return null;
+  if (!audioCtx || audioCtx.state === 'closed') audioCtx = new AudioContextCtor();
+  if (media._cuefieldDeckGraph && media._cuefieldDeckGraph.ctx === audioCtx) {
+    cuefieldBDeckGraph = media._cuefieldDeckGraph;
+    return connectCuefieldDeckGraph(cuefieldBDeckGraph);
+  }
+  try {
+    var graph = configureCuefieldDeckGraph({
+      media: media,
+      ctx: audioCtx,
+      source: audioCtx.createMediaElementSource(media),
+      analyser: audioCtx.createAnalyser(),
+      beatAnalyser: audioCtx.createAnalyser(),
+      filter: audioCtx.createBiquadFilter(),
+      bass: audioCtx.createBiquadFilter(),
+      gain: audioCtx.createGain(),
+      connected: false,
+    });
+    media._cuefieldDeckGraph = graph;
+    cuefieldBDeckGraph = graph;
+    return connectCuefieldDeckGraph(graph);
+  } catch (err) {
+    console.warn('[CuefieldAutoMix] B deck graph unavailable:', err && (err.message || err));
+    return null;
+  }
+}
+
+function releaseCuefieldBDeckGraph(media) {
+  var graph = media && media._cuefieldDeckGraph || cuefieldBDeckGraph;
+  if (!graph) return;
+  try { graph.source.disconnect(); } catch (e) {}
+  try { graph.analyser.disconnect(); } catch (e) {}
+  try { graph.beatAnalyser.disconnect(); } catch (e) {}
+  try { graph.filter.disconnect(); } catch (e) {}
+  try { graph.bass.disconnect(); } catch (e) {}
+  try { graph.gain.disconnect(); } catch (e) {}
+  graph.connected = false;
+  if (media && media._cuefieldDeckGraph === graph) {
+    try { delete media._cuefieldDeckGraph; } catch (e) { media._cuefieldDeckGraph = null; }
+  }
+  if (cuefieldBDeckGraph === graph) cuefieldBDeckGraph = null;
+}
+
+function rampCuefieldGraphHighpass(graph, type, value, durationMs) {
+  if (!graph || !graph.filter || !graph.filter.frequency) return;
+  rampCuefieldParamInContext(graph.ctx, graph.filter.frequency, type === 'none' ? 20 : clampRange(Number(value) || 20, 20, 6000), durationMs);
+}
+
+function rampCuefieldGraphBass(graph, value, durationMs) {
+  if (!graph || !graph.bass || !graph.bass.gain) return;
+  value = clampRange(Number(value), 0, 1);
+  rampCuefieldParamInContext(graph.ctx, graph.bass.gain, (value - 1) * 18, durationMs);
+}
+
 function applyCuefieldTimelineAction(action, pending, nextMedia) {
   if (!action || !pending || pending.token !== trackSwitchToken || pending.currentIndex !== currentIdx) return;
   if (action.op === 'handoff') return;
   if (action.deck === 'B') {
+    var bGraph = nextMedia && nextMedia._cuefieldDeckGraph || null;
     if (action.op === 'play') {
       cuefieldSetAudioTime(nextMedia, action.at);
       if (nextMedia && nextMedia.paused) {
@@ -10676,6 +10769,10 @@ function applyCuefieldTimelineAction(action, pending, nextMedia) {
       }
     } else if (action.op === 'volume') {
       fadeCuefieldMediaVolume(nextMedia, action.target == null ? targetVolume * (Number(action.value) || 0) : action.target, action.durationMs);
+    } else if (action.op === 'filter') {
+      rampCuefieldGraphHighpass(bGraph, action.type, action.value, action.durationMs);
+    } else if (action.op === 'bass') {
+      rampCuefieldGraphBass(bGraph, action.value, action.durationMs);
     } else if (action.op === 'stop') {
       stopCuefieldPreparedAudio(nextMedia);
     }
@@ -10697,6 +10794,7 @@ function runCuefieldVolumeCurve(pending, nextMedia) {
   if (!execution) return cuefieldCrossfadeMsForPending(pending);
   clearCuefieldTimelineTimers();
   pending.timelineExecution = execution;
+  if (execution.requiresBGraph) ensureCuefieldBDeckGraph(nextMedia);
   for (var i = 0; i < execution.actions.length; i++) {
     (function(action) {
       cuefieldScheduleTimeline(action.delayMs, function() {
@@ -18214,12 +18312,33 @@ async function doSearch(q, opts) {
 function initAudio() {
   if (!audio) return;
   if (audioReady && audioGraphElement === audio) return;
-  try { if (source) source.disconnect(); } catch (e) {}
-  try { if (analyser) analyser.disconnect(); } catch (e) {}
-  try { if (beatAnalyser) beatAnalyser.disconnect(); } catch (e) {}
-  try { if (cuefieldFilterNode) cuefieldFilterNode.disconnect(); } catch (e) {}
-  try { if (cuefieldBassNode) cuefieldBassNode.disconnect(); } catch (e) {}
-  try { if (gainNode) gainNode.disconnect(); } catch (e) {}
+  var existingCuefieldGraph = audio && audio._cuefieldDeckGraph && audio._cuefieldDeckGraph.source ? audio._cuefieldDeckGraph : null;
+  try { if (source && (!existingCuefieldGraph || source !== existingCuefieldGraph.source)) source.disconnect(); } catch (e) {}
+  try { if (analyser && (!existingCuefieldGraph || analyser !== existingCuefieldGraph.analyser)) analyser.disconnect(); } catch (e) {}
+  try { if (beatAnalyser && (!existingCuefieldGraph || beatAnalyser !== existingCuefieldGraph.beatAnalyser)) beatAnalyser.disconnect(); } catch (e) {}
+  try { if (cuefieldFilterNode && (!existingCuefieldGraph || cuefieldFilterNode !== existingCuefieldGraph.filter)) cuefieldFilterNode.disconnect(); } catch (e) {}
+  try { if (cuefieldBassNode && (!existingCuefieldGraph || cuefieldBassNode !== existingCuefieldGraph.bass)) cuefieldBassNode.disconnect(); } catch (e) {}
+  try { if (gainNode && (!existingCuefieldGraph || gainNode !== existingCuefieldGraph.gain)) gainNode.disconnect(); } catch (e) {}
+  if (existingCuefieldGraph) {
+    audioCtx = existingCuefieldGraph.ctx || audioCtx;
+    connectCuefieldDeckGraph(existingCuefieldGraph);
+    source = existingCuefieldGraph.source;
+    analyser = existingCuefieldGraph.analyser;
+    beatAnalyser = existingCuefieldGraph.beatAnalyser;
+    cuefieldFilterNode = existingCuefieldGraph.filter;
+    cuefieldBassNode = existingCuefieldGraph.bass;
+    gainNode = existingCuefieldGraph.gain;
+    applyVolumeToAudio();
+    resetCuefieldToneControls(180);
+    frequencyData.fill(0);
+    beatFrequencyData.fill(0);
+    beatTimeDomainData.fill(128);
+    resetRealtimeBeatEngine();
+    audioGraphElement = audio;
+    audioReady = true;
+    cuefieldBDeckGraph = null;
+    return;
+  }
   if (!audioCtx || audioCtx.state === 'closed') audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   source = audioCtx.createMediaElementSource(audio);
   analyser = audioCtx.createAnalyser();
@@ -18837,6 +18956,7 @@ function pauseCurrentAudioForTrackSwitch() {
     clearAudioFadeTimers();
     audio.onended = null;
     audio.pause();
+    if (audio._cuefieldDeckGraph && audio !== cuefieldAutoMixPreparedAudio) releaseCuefieldBDeckGraph(audio);
   } catch (e) {}
   playing = false;
   setPlayIcon(false);
