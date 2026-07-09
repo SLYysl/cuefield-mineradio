@@ -191,11 +191,25 @@ function saveQQCookie(c) {
 }
 
 // ---------- 工具 ----------
+function staticCacheHeaders(ext) {
+  if (ext === '.html' || ext === '.js' || ext === '.css') {
+    return {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    };
+  }
+  return {};
+}
+
 function serveStatic(res, filePath) {
   const ext = path.extname(filePath);
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not Found'); return; }
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'text/plain' });
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'text/plain',
+      ...staticCacheHeaders(ext),
+    });
     res.end(data);
   });
 }

@@ -9,6 +9,7 @@
     'closed outgoing phrase': true,
     'near closed outgoing phrase': true,
   };
+  var SAFETY_FALLBACK_TIERS = { weak: true, reject: true };
 
   function toNumber(value, fallback) {
     var n = Number(value);
@@ -36,27 +37,59 @@
     return false;
   }
 
+  function recipeOf(plan) {
+    var chosen = plan && plan.chosen || {};
+    return chosen.transitionRecipe || chosen.recipeCandidate && chosen.recipeCandidate.recipe || '';
+  }
+
+  function shouldUseSafetyFallback(plan, deps) {
+    if (!deps || !deps.allowSafetyFallback) return false;
+    if (recipeOf(plan) === 'safety-long-blend') return true;
+    return !!SAFETY_FALLBACK_TIERS[tierOf(plan)] && !hasHardRisk(plan);
+  }
+
   function isExecutablePlan(plan, deps) {
     var tier = tierOf(plan);
-    var chosen = plan && plan.chosen || {};
-    var recipe = chosen.transitionRecipe || chosen.recipeCandidate && chosen.recipeCandidate.recipe || '';
+    var recipe = recipeOf(plan);
     if (EXECUTABLE_TIERS[tier]) return true;
-    if (recipe === 'safety-long-blend') return !!deps.allowSafetyFallback;
+    if (shouldUseSafetyFallback(plan, deps)) return true;
     if (tier !== 'weak' || !deps.allowWeak) return false;
     if (hasHardRisk(plan)) return false;
     return scoreOf(plan) >= toNumber(deps.minWeakScore, 0.58);
   }
 
-  function executionModeFor(plan) {
-    var chosen = plan && plan.chosen || {};
-    var recipe = chosen.transitionRecipe || chosen.recipeCandidate && chosen.recipeCandidate.recipe || '';
+  function executionModeFor(plan, deps) {
+    var recipe = recipeOf(plan);
     if (recipe) return recipe;
+    if (shouldUseSafetyFallback(plan, deps)) return 'safety-long-blend';
     return tierOf(plan) === 'weak' ? 'intro-bed' : 'filtered-pickup';
   }
 
-  function timelineOf(plan) {
+  function safetyFallbackTimeline() {
+    return [
+      { t: -12, deck: 'B', op: 'play', at: 0, volume: 0 },
+      { t: -12, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
+      { t: -12, deck: 'B', op: 'filter', type: 'highpass', value: 1200, duration: 0 },
+      { t: -12, deck: 'B', op: 'volume', value: 0.24, duration: 2600 },
+      { t: -9.2, deck: 'A', op: 'filter', type: 'highpass', value: 420, duration: 3200 },
+      { t: -8.2, deck: 'A', op: 'bass', value: 0.55, duration: 2800 },
+      { t: -6.4, deck: 'B', op: 'volume', value: 0.46, duration: 3600 },
+      { t: -4.2, deck: 'B', op: 'filter', type: 'highpass', value: 520, duration: 2600 },
+      { t: -3.4, deck: 'A', op: 'bass', value: 0.18, duration: 2400 },
+      { t: -2.4, deck: 'B', op: 'volume', value: 0.74, duration: 2200 },
+      { t: -1.1, deck: 'B', op: 'bass', value: 0.72, duration: 1800 },
+      { t: 0, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 1600 },
+      { t: 0.4, deck: 'A', op: 'volume', value: 0.16, duration: 2400 },
+      { t: 2.9, deck: 'A', op: 'volume', value: 0, duration: 900 },
+      { t: 3.8, deck: 'B', op: 'bass', value: 1, duration: 1600 },
+      { t: 4.8, deck: 'B', op: 'handoff' },
+    ];
+  }
+
+  function timelineOf(plan, deps) {
     var chosen = plan && plan.chosen || {};
-    return Array.isArray(chosen.timeline) ? chosen.timeline : [];
+    if (Array.isArray(chosen.timeline) && chosen.timeline.length) return chosen.timeline;
+    return shouldUseSafetyFallback(plan, deps) ? safetyFallbackTimeline() : [];
   }
 
   function timelineLeadSec(timeline, fallback) {
@@ -150,8 +183,8 @@
         }
 
         var exitTime = toNumber(chosen.exit && chosen.exit.time, NaN);
-        var executionMode = executionModeFor(plan);
-        var timeline = timelineOf(plan);
+        var executionMode = executionModeFor(plan, deps);
+        var timeline = timelineOf(plan, deps);
         var fallbackLeadSec = executionMode === 'intro-bed'
           ? toNumber(ctx.introBedLeadSec, toNumber(ctx.leadSec, 1))
           : toNumber(ctx.leadSec, 1);
