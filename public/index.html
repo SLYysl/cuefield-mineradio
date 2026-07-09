@@ -989,6 +989,13 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .source-fallback-close{width:24px;height:24px;border-radius:50%;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.045);color:rgba(255,255,255,.62);cursor:pointer;line-height:20px;font-size:15px;transition:background .2s,color .2s}
 .source-fallback-close:hover{background:rgba(255,255,255,.10);color:#fff}
 .source-fallback-body{font-size:11.5px;line-height:1.55;color:rgba(255,255,255,.58)}
+#cuefield-feedback{position:fixed;z-index:202;top:72px;left:24px;width:min(360px,calc(100vw - 48px));padding:12px 13px;border-radius:14px;border:1px solid rgba(var(--fc-accent-rgb),.28);background:rgba(10,12,16,.88);color:rgba(255,255,255,.88);box-shadow:0 20px 54px rgba(0,0,0,.40),inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(24px) saturate(1.2);-webkit-backdrop-filter:blur(24px) saturate(1.2);opacity:0;pointer-events:none;transform:translateY(-8px);transition:opacity .24s,transform .24s}
+#cuefield-feedback.show{opacity:1;pointer-events:auto;transform:translateY(0)}
+.cuefield-feedback-title{font-size:12px;font-weight:800;letter-spacing:.08em;color:#eafffb;text-transform:uppercase}
+.cuefield-feedback-meta{margin-top:5px;font-size:11px;line-height:1.45;color:rgba(255,255,255,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cuefield-feedback-actions{display:flex;gap:7px;margin-top:10px}
+.cuefield-feedback-actions button{flex:1;height:30px;border-radius:9px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.055);color:rgba(255,255,255,.78);font:760 11px/1 var(--font-sans);cursor:pointer}
+.cuefield-feedback-actions button:hover{border-color:rgba(var(--fc-accent-rgb),.36);background:rgba(var(--fc-accent-rgb),.13);color:#fff}
 
 #visual-guide{position:fixed;inset:0;z-index:620;display:none;pointer-events:auto;cursor:pointer}
 #visual-guide.show{display:block}
@@ -2645,6 +2652,15 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 </div>
 
 <div id="toast"></div>
+<div id="cuefield-feedback" aria-live="polite">
+  <div class="cuefield-feedback-title">Cuefield feedback</div>
+  <div id="cuefield-feedback-meta" class="cuefield-feedback-meta">AutoMix transition</div>
+  <div class="cuefield-feedback-actions">
+    <button type="button" onclick="submitCuefieldFeedback(1)">1 合格</button>
+    <button type="button" onclick="submitCuefieldFeedback(2)">2 不合格</button>
+    <button type="button" onclick="submitCuefieldFeedback(3)">3 待定</button>
+  </div>
+</div>
 <div id="source-fallback-notice" aria-live="polite">
   <div class="source-fallback-head">
     <div id="source-fallback-title" class="source-fallback-title">自动换源</div>
@@ -2716,6 +2732,7 @@ var audioFadeTimer = null, audioElementFadeFrame = 0, audioFadeSerial = 0;
 var AUDIO_FADE_IN_MS = 460;
 var AUDIO_FADE_OUT_MS = 420;
 var AUDIO_SILENCE_GAIN = 0.0001;
+var cuefieldFeedbackState = { context: null, timer: null, submitted: false };
 var userPlaylists = [], qqPlaylists = [], myPodcastCollections = [], myPodcastItems = {}, playlistCoverCache = {};
 var CUSTOM_COVER_STORE_KEY = 'mineradio-custom-covers';
 var CUSTOM_LYRIC_STORE_KEY = 'mineradio-custom-lyrics-v1';
@@ -10414,6 +10431,95 @@ function initCuefieldAutoMix() {
   return cuefieldAutoMix;
 }
 
+function cuefieldFeedbackSongMeta(song) {
+  song = song || {};
+  return {
+    key: beatMapSongKey(song),
+    title: song.name || song.title || '',
+    artist: song.artist || (Array.isArray(song.artists) ? song.artists.map(function(a){ return a && a.name; }).filter(Boolean).join(', ') : ''),
+  };
+}
+
+function cuefieldFeedbackContextFromPending(pending) {
+  if (!pending) return null;
+  var fromSong = playQueue[pending.currentIndex] || {};
+  var toSong = playQueue[pending.nextIndex] || {};
+  var fromMeta = cuefieldFeedbackSongMeta(fromSong);
+  var toMeta = cuefieldFeedbackSongMeta(toSong);
+  var chosen = pending.plan && pending.plan.chosen || {};
+  var evaluation = chosen.evaluation || {};
+  return {
+    pair: {
+      fromKey: pending.fromKey || fromMeta.key,
+      toKey: pending.toKey || toMeta.key,
+      fromTitle: fromMeta.title,
+      fromArtist: fromMeta.artist,
+      toTitle: toMeta.title,
+      toArtist: toMeta.artist,
+    },
+    transition: {
+      recipe: chosen.recipe || '',
+      transitionRecipe: chosen.transitionRecipe || pending.executionMode || '',
+      executionMode: pending.executionMode || '',
+      tier: evaluation.tier || '',
+      score: chosen.score,
+      evalScore: evaluation.score,
+      risks: evaluation.risks || [],
+      exitTime: pending.exitTime,
+      entryTime: pending.entryTime,
+    },
+  };
+}
+
+function hideCuefieldFeedbackPrompt() {
+  var el = document.getElementById('cuefield-feedback');
+  if (cuefieldFeedbackState.timer) {
+    clearTimeout(cuefieldFeedbackState.timer);
+    cuefieldFeedbackState.timer = null;
+  }
+  if (el) el.classList.remove('show');
+}
+
+function showCuefieldFeedbackPrompt(context) {
+  if (!context) return;
+  cuefieldFeedbackState.context = context;
+  cuefieldFeedbackState.submitted = false;
+  var el = document.getElementById('cuefield-feedback');
+  var meta = document.getElementById('cuefield-feedback-meta');
+  if (meta) {
+    var pair = context.pair || {};
+    var transition = context.transition || {};
+    meta.textContent = (pair.fromTitle || 'A') + ' -> ' + (pair.toTitle || 'B') + ' · ' + (transition.transitionRecipe || transition.recipe || 'AutoMix');
+  }
+  if (el) el.classList.add('show');
+  if (cuefieldFeedbackState.timer) clearTimeout(cuefieldFeedbackState.timer);
+  cuefieldFeedbackState.timer = setTimeout(hideCuefieldFeedbackPrompt, 30000);
+}
+
+async function submitCuefieldFeedback(rating, note) {
+  rating = Number(rating);
+  if (rating !== 1 && rating !== 2 && rating !== 3) return false;
+  var context = cuefieldFeedbackState.context;
+  if (!context || cuefieldFeedbackState.submitted) return false;
+  cuefieldFeedbackState.submitted = true;
+  try {
+    await apiJson('/api/cuefield/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ rating: rating, note: note || '' }, context)),
+    });
+    showToast('Cuefield 评分已记录: ' + rating);
+    hideCuefieldFeedbackPrompt();
+    return true;
+  } catch (err) {
+    cuefieldFeedbackState.submitted = false;
+    showToast('Cuefield 评分保存失败');
+    return false;
+  }
+}
+
+window.submitCuefieldFeedback = submitCuefieldFeedback;
+
 function toggleCuefieldAutoMix() {
   cuefieldAutoMixEnabled = !cuefieldAutoMixEnabled;
   saveCuefieldAutoMixPreference();
@@ -10869,6 +10975,7 @@ async function executeCuefieldSoftHandoff(pending) {
   cuefieldAutoMixExecuting = true;
   updateCuefieldAutoMixUi('handoff');
   var chosen = pending.plan && pending.plan.chosen || {};
+  var feedbackContext = cuefieldFeedbackContextFromPending(pending);
   showSourceFallbackNotice('Cuefield AutoMix', (pending.executionMode || 'filtered-pickup') + ' · ' + (chosen.recipe || 'section-jump') + ' · ' + cuefieldTierLabel(chosen.evaluation && chosen.evaluation.tier));
   var nextMedia = await startCuefieldPreparedAudio(pending);
   if (pending.token !== trackSwitchToken || pending.currentIndex !== currentIdx) {
@@ -10901,6 +11008,7 @@ async function executeCuefieldSoftHandoff(pending) {
     })).finally(function(){
       cuefieldAutoMixExecuting = false;
       updateCuefieldAutoMixUi('handoff-complete');
+      showCuefieldFeedbackPrompt(feedbackContext);
     });
   }, Math.max(520, handoffDelayMs));
 }
@@ -15624,6 +15732,11 @@ document.addEventListener('keyup', function(e){
 document.addEventListener('keydown', function(e){
   if (isTypingTarget(e.target)) return;
   markRenderInteraction('keyboard', 700);
+  if (cuefieldFeedbackState.context && !cuefieldFeedbackState.submitted && /^[123]$/.test(e.key || '')) {
+    e.preventDefault();
+    submitCuefieldFeedback(Number(e.key));
+    return;
+  }
   if (e.code === 'KeyK') {
     e.preventDefault();
     if (freeCamera && (freeCamera.active || freeCamera.locked)) resetFreeCameraToDefault();

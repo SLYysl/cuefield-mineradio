@@ -53,6 +53,7 @@ const tls = require('tls');
 const { once } = require('events');
 const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
+const { appendCuefieldFeedback } = require('./cuefield/feedback-log');
 const { planTransitionFromPayload } = require('./cuefield/api');
 const { planCuefieldTransitionFromCache } = require('./cuefield/mineradio-bridge');
 
@@ -61,6 +62,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const COOKIE_FILE = process.env.COOKIE_FILE || path.join(__dirname, '.cookie');
 const QQ_COOKIE_FILE = process.env.QQ_COOKIE_FILE || path.join(__dirname, '.qq-cookie');
+const CUEFIELD_FEEDBACK_FILE = process.env.CUEFIELD_FEEDBACK_FILE || path.join(__dirname, 'data', 'cuefield-feedback.jsonl');
 const UPDATE_WORK_DIR = process.env.MINERADIO_UPDATE_DIR || path.join(__dirname, 'updates');
 const UPDATE_DOWNLOAD_DIR = process.env.MINERADIO_UPDATE_DOWNLOAD_DIR || path.join(UPDATE_WORK_DIR, 'downloads');
 const UPDATE_PATCH_BACKUP_DIR = process.env.MINERADIO_PATCH_BACKUP_DIR || path.join(UPDATE_WORK_DIR, 'backups', 'patches');
@@ -3364,6 +3366,22 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       console.error('[CuefieldTransition]', err);
       sendJSON(res, { ok: false, error: err.code || err.message || 'CUEFIELD_TRANSITION_FAILED' }, 400);
+    }
+    return;
+  }
+
+  if (pn === '/api/cuefield/feedback') {
+    if (req.method !== 'POST') {
+      sendJSON(res, { ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
+      return;
+    }
+    try {
+      const body = await readRequestBody(req);
+      const record = appendCuefieldFeedback(CUEFIELD_FEEDBACK_FILE, body);
+      sendJSON(res, { ok: true, record });
+    } catch (err) {
+      console.error('[CuefieldFeedback]', err);
+      sendJSON(res, { ok: false, error: err.code || err.message || 'CUEFIELD_FEEDBACK_FAILED' }, 400);
     }
     return;
   }
