@@ -49,3 +49,6 @@ tmp/
 *.png.tmp
 verification/
 screenshots/
+
+# Agent handoff checkpoints
+CURRENT_STATE.md
