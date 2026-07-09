@@ -38,7 +38,10 @@
 
   function isExecutablePlan(plan, deps) {
     var tier = tierOf(plan);
+    var chosen = plan && plan.chosen || {};
+    var recipe = chosen.transitionRecipe || chosen.recipeCandidate && chosen.recipeCandidate.recipe || '';
     if (EXECUTABLE_TIERS[tier]) return true;
+    if (recipe === 'safety-long-blend') return !!deps.allowSafetyFallback;
     if (tier !== 'weak' || !deps.allowWeak) return false;
     if (hasHardRisk(plan)) return false;
     return scoreOf(plan) >= toNumber(deps.minWeakScore, 0.58);

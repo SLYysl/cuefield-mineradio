@@ -10396,6 +10396,7 @@ function initCuefieldAutoMix() {
   if (cuefieldAutoMix || !window.CuefieldAutoMix || !window.CuefieldAutoMix.createCuefieldAutoMix) return cuefieldAutoMix;
   cuefieldAutoMix = window.CuefieldAutoMix.createCuefieldAutoMix({
     allowWeak: true,
+    allowSafetyFallback: true,
     minWeakScore: 0.55,
     getKey: function(song) { return beatMapSongKey(song); },
     ensureBeatMap: ensureCuefieldAutoMixBeatMap,
@@ -15663,6 +15664,27 @@ window.addEventListener('blur', function(){
 // ============================================================
 //  API 助手
 // ============================================================
+function debugPlaybackLog(event, detail) {
+  var enabled = false;
+  try { enabled = localStorage.getItem('mineradioPlaybackDebug') === '1'; } catch (e) {}
+  if (!enabled) return;
+  detail = detail || {};
+  try {
+    console.log('[PlaybackDebug]', event, Object.assign({
+        currentIdx: currentIdx,
+        token: trackSwitchToken,
+        playing: !!playing,
+        audioPaused: audio ? !!audio.paused : null,
+        audioEnded: audio ? !!audio.ended : null,
+        audioReadyState: audio ? audio.readyState : null,
+        audioNetworkState: audio ? audio.networkState : null,
+        audioTime: audio ? Math.round((Number(audio.currentTime) || 0) * 1000) / 1000 : null,
+        audioDuration: audio && isFinite(audio.duration) ? Math.round(audio.duration * 1000) / 1000 : null,
+        cuefieldEnabled: !!cuefieldAutoMixEnabled,
+        cuefieldExecuting: !!cuefieldAutoMixExecuting
+      }, detail));
+  } catch (e) {}
+}
 async function apiJson(url, opts) {
   opts = opts || {};
   var timeoutMs = Number(opts.timeoutMs) || 0;
@@ -18791,6 +18813,44 @@ function qqPlaybackRetryQualities(requestedQuality, resolvedLevel) {
   }
   return pool.filter(function(q){ return q !== requestedQuality; });
 }
+function playbackRetryQualities(requestedQuality, resolvedLevel) {
+  requestedQuality = normalizePlaybackQuality(requestedQuality || playbackQuality);
+  resolvedLevel = normalizePlaybackQuality(resolvedLevel || requestedQuality);
+  var pool = [];
+  if (requestedQuality === 'jymaster' || requestedQuality === 'hires' || requestedQuality === 'lossless' || resolvedLevel === 'hires' || resolvedLevel === 'lossless') {
+    pool = ['exhigh', 'standard'];
+  } else if (requestedQuality === 'exhigh' || resolvedLevel === 'exhigh') {
+    pool = ['standard'];
+  }
+  return pool.filter(function(q){ return q !== requestedQuality; });
+}
+async function retryPlaybackWithFallbackQuality(song, idx, token, opts, data, requestedQuality, reason) {
+  opts = opts || {};
+  var tried = Array.isArray(opts.playbackQualityTried) ? opts.playbackQualityTried.slice() : [];
+  [requestedQuality, data && data.level].forEach(function(q){
+    q = normalizePlaybackQuality(q || '');
+    if (q && tried.indexOf(q) < 0) tried.push(q);
+  });
+  var candidates = playbackRetryQualities(requestedQuality, data && data.level).filter(function(q){ return tried.indexOf(q) < 0; });
+  if (!candidates.length || token !== trackSwitchToken) return false;
+  var nextQuality = candidates[0];
+  showSourceFallbackNotice('正在重试音频启动', (song && song.name || '当前歌曲') + ' 时间轴未推进，切到 ' + playbackQualityLabel(nextQuality) + ' 重新加载。');
+  debugPlaybackLog('playback-retry-quality', {
+    targetIdx: idx,
+    reason: reason || '',
+    fromQuality: requestedQuality,
+    nextQuality: nextQuality,
+    tried: tried
+  });
+  await playQueueAt(idx, Object.assign({}, opts, {
+    qualityOverride: nextQuality,
+    playbackQualityTried: tried,
+    playbackRetryReason: reason || 'playback-stalled',
+    forceFreshAudio: true,
+    fade: false
+  }));
+  return true;
+}
 async function retryQQPlaybackWithCompatibleQuality(song, idx, token, opts, data, requestedQuality) {
   opts = opts || {};
   var tried = Array.isArray(opts.qqQualityTried) ? opts.qqQualityTried.slice() : [];
@@ -19015,9 +19075,20 @@ function scheduleAudioResumePosition(media, seconds, token) {
 async function playQueueAt(idx, opts) {
   opts = opts || {};
   if (idx < 0 || idx >= playQueue.length) return;
+  debugPlaybackLog('playQueueAt:start', {
+    targetIdx: idx,
+    manual: !!opts.manual,
+    cuefieldAutoMix: !!opts.cuefieldAutoMix,
+    hasPreparedAudio: !!opts.preparedAudio,
+    currentSong: playQueue[currentIdx] && playQueue[currentIdx].name,
+    targetSong: playQueue[idx] && playQueue[idx].name
+  });
   markRenderInteraction('track-switch', 1500);
   var playPhase = 'start';
-  function markPlayPhase(name) { playPhase = name; }
+  function markPlayPhase(name) {
+    playPhase = name;
+    debugPlaybackLog('playQueueAt:phase', { phase: name, targetIdx: idx });
+  }
   try {
   markPlayPhase('session-finalize');
   safePlaybackStep('session-finalize', function(){ finalizeListenSession(false); });
@@ -19026,6 +19097,7 @@ async function playQueueAt(idx, opts) {
   currentIdx = idx;
   trackSwitchToken++;
   markPlayPhase('cancel-previous-track');
+  cancelProgressDragState();
   cancelBeatAnalysisTimer();
   cancelBeatPrefetchTimer();
   resetCuefieldAutoMix('track-switch', { preservePreparedAudio: !!opts.cuefieldAutoMix });
@@ -19045,6 +19117,14 @@ async function playQueueAt(idx, opts) {
   var bmKey = safePlaybackStep('beatmap-key', function(){ return beatMapSongKey(song); }) || '';
   var podcastDjMode = !!safePlaybackStep('podcast-mode', function(){ return isPodcastSong(song); });
   var preparedAudioForSwitch = opts.preparedAudio && opts.preparedAudio.src ? opts.preparedAudio : null;
+  var useFreshAudioForSwitch = (!!forceFreshAudioOnNextSwitch || !!opts.forceFreshAudio) && !preparedAudioForSwitch && !opts.cuefieldAutoMix;
+  forceFreshAudioOnNextSwitch = false;
+  debugPlaybackLog('playQueueAt:switch-mode', {
+    targetIdx: idx,
+    preparedAudio: !!preparedAudioForSwitch,
+    freshAudio: !!useFreshAudioForSwitch,
+    cuefieldAutoMix: !!opts.cuefieldAutoMix
+  });
   safePlaybackStep('dj-mode', function(){ setDjModeActive(podcastDjMode, song); });
   safePlaybackStep('visual-switch', switchPlaybackVisualToEmily);
   currentLocalSong = null;
@@ -19138,6 +19218,24 @@ async function playQueueAt(idx, opts) {
       }
       audio = preparedAudio;
       audio.crossOrigin = 'anonymous';
+    } else if (useFreshAudioForSwitch) {
+      audioFadeSerial++;
+      clearAudioFadeTimers();
+      try { if (source) source.disconnect(); } catch (e) {}
+      try { if (analyser) analyser.disconnect(); } catch (e) {}
+      try { if (beatAnalyser) beatAnalyser.disconnect(); } catch (e) {}
+      try { if (cuefieldFilterNode) cuefieldFilterNode.disconnect(); } catch (e) {}
+      try { if (cuefieldBassNode) cuefieldBassNode.disconnect(); } catch (e) {}
+      try { if (gainNode) gainNode.disconnect(); } catch (e) {}
+      source = null;
+      analyser = null;
+      beatAnalyser = null;
+      gainNode = null;
+      audioGraphElement = null;
+      audioReady = false;
+      audio = new Audio();
+      audio.crossOrigin = 'anonymous';
+      debugPlaybackLog('fresh-audio-element', { reason: opts.forceFreshAudio ? 'retry' : 'manual-seek' });
     } else if (!audio) { audio = new Audio(); audio.crossOrigin = 'anonymous'; }
     else {
       audioFadeSerial++;
@@ -19221,9 +19319,12 @@ async function playQueueAt(idx, opts) {
       safePlaybackStep('visual-prep-hide-chip', hideBeatChip);
     }
     markPlayPhase('audio-start');
-    var playbackStarted = await playAudio({ silent: isQQPlayback, fade: opts.fade });
+    var playbackStarted = await adoptActivePreparedAudioPlayback({ preparedAudio: preparedAudio, fade: opts.fade })
+      || await playAudio({ silent: isQQPlayback, fade: opts.fade, token: token });
+    debugPlaybackLog('playQueueAt:play-result', { phase: playPhase, playbackStarted: !!playbackStarted, targetIdx: idx });
     if (!playbackStarted) {
       if (isQQPlayback && await retryQQPlaybackWithCompatibleQuality(song, idx, token, opts, data, requestedQuality)) return;
+      if (!data.fromPreparedAudio && await retryPlaybackWithFallbackQuality(song, idx, token, opts, data, requestedQuality, opts.playbackRetryReason || 'play-start-failed')) return;
       forcePlaybackControlsInteractive();
       if (opts.manual) {
         showToast('播放启动失败，请重新选择歌曲');
@@ -19250,9 +19351,11 @@ async function playQueueAt(idx, opts) {
     scheduleShelfRebuild('play-queue-at', true);
     safePlaybackStep('shelf-preview-suppress-end', suppressShelfPreviewForPlaybackSwitch);
   } catch (err) {
+    debugPlaybackLog('playQueueAt:error', { phase: playPhase, message: err && (err.message || String(err)) });
     console.error('Play failed:', { phase: playPhase, error: err }, err);
     hideLoading();
     forcePlaybackControlsInteractive();
+    if (!isPlaybackRecursionError(err) && token === trackSwitchToken && data && !data.fromPreparedAudio && await retryPlaybackWithFallbackQuality(song, idx, token, opts, data, requestedQuality, err && (err.message || String(err)))) return;
     if (!isPlaybackRecursionError(err) && token === trackSwitchToken && !opts.manual && playQueue.length > 1) {
       skipFailedQueueItem(idx, token, '当前歌曲加载失败，正在尝试队列里的下一首。');
       return;
@@ -19260,6 +19363,7 @@ async function playQueueAt(idx, opts) {
     showToast(playbackFailureToastText(err));
   }
   } catch (setupErr) {
+    debugPlaybackLog('playQueueAt:setup-error', { phase: playPhase, message: setupErr && (setupErr.message || String(setupErr)) });
     console.error('Play setup failed:', { phase: playPhase, error: setupErr }, setupErr);
     hideLoading();
     forcePlaybackControlsInteractive();
@@ -19274,16 +19378,32 @@ async function attemptAudioPlay(opts) {
   opts = opts || {};
   try {
       if (!audio) return false;
+      var playMedia = audio;
+      var playToken = opts.token == null ? trackSwitchToken : opts.token;
       if (!audioReady || audioGraphElement !== audio) initAudio();
       if (opts.fade !== false) preparePlaybackFadeIn();
+      debugPlaybackLog('attemptAudioPlay:start', {
+        manual: !!opts.manual,
+        silent: !!opts.silent,
+        fade: opts.fade !== false,
+        srcReady: !!(audio && audio.src),
+        playToken: playToken
+      });
+      var startTime = Number(playMedia.currentTime) || 0;
+      var playPromise;
       if (opts.manual) {
-        var manualPlay = audio.play();
+        playPromise = playMedia.play();
         await resumeAudioAnalysis();
-        await manualPlay;
       } else {
         await resumeAudioAnalysis();
-        await audio.play();
+        playPromise = playMedia.play();
       }
+      await waitForAudioPlayPromise(playPromise, 6000, 'attemptAudioPlay');
+      if (playToken !== trackSwitchToken || playMedia !== audio) {
+        debugPlaybackLog('attemptAudioPlay:stale', { playToken: playToken, currentToken: trackSwitchToken });
+        return false;
+      }
+      await waitForAudioTimelineAdvance(playMedia, startTime, 2800, 'attemptAudioPlay', playToken);
       await resumeAudioAnalysis();
       switchPlaybackVisualToEmily();
       playing = true; setPlayIcon(true);
@@ -19291,8 +19411,10 @@ async function attemptAudioPlay(opts) {
     else restorePlaybackGain();
     forcePlaybackControlsInteractive();
     hideLoading();
+    debugPlaybackLog('attemptAudioPlay:success', {});
     return true;
   } catch (err) {
+    debugPlaybackLog('attemptAudioPlay:error', { message: err && (err.message || String(err)) });
     console.warn('Audio play blocked:', err && (err.message || err));
     restorePlaybackGain();
     playing = false; setPlayIcon(false);
@@ -19304,8 +19426,105 @@ async function attemptAudioPlay(opts) {
 }
 async function playAudio(opts) {
   opts = opts || {};
-  return attemptAudioPlay({ manual: false, silent: !!opts.silent, fade: opts.fade });
+  return attemptAudioPlay({ manual: false, silent: !!opts.silent, fade: opts.fade, token: opts.token });
 }
+
+function waitForAudioPlayPromise(playPromise, timeoutMs, label) {
+  if (!playPromise || typeof playPromise.then !== 'function') return Promise.resolve(true);
+  timeoutMs = Math.max(1200, Number(timeoutMs) || 6000);
+  return new Promise(function(resolve, reject) {
+    var settled = false;
+    var timer = setTimeout(function(){
+      if (settled) return;
+      settled = true;
+      reject(new Error((label || 'audio.play') + ' timeout after ' + timeoutMs + 'ms'));
+    }, timeoutMs);
+    playPromise.then(function(value){
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    }, function(err){
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+function waitForAudioTimelineAdvance(media, startTime, timeoutMs, label, token) {
+  if (!media) return Promise.resolve(true);
+  startTime = Number(startTime) || 0;
+  timeoutMs = Math.max(900, Number(timeoutMs) || 2800);
+  return new Promise(function(resolve, reject) {
+    var done = false;
+    var startedAt = performance.now();
+    var timer = 0;
+    function cleanup() {
+      if (timer) clearTimeout(timer);
+      media.removeEventListener('timeupdate', check);
+      media.removeEventListener('playing', check);
+      media.removeEventListener('canplay', check);
+      media.removeEventListener('error', onError);
+    }
+    function finish(ok, err) {
+      if (done) return;
+      done = true;
+      cleanup();
+      if (ok) resolve(true);
+      else reject(err || new Error((label || 'audio') + ' timeline stalled'));
+    }
+    function onError() {
+      finish(false, new Error((label || 'audio') + ' media error'));
+    }
+    function check() {
+      if (token != null && token !== trackSwitchToken) return finish(false, new Error((label || 'audio') + ' stale token'));
+      if (media !== audio) return finish(false, new Error((label || 'audio') + ' stale media'));
+      var nowTime = Number(media.currentTime) || 0;
+      if (media.ended || nowTime > startTime + 0.18) return finish(true);
+      if (performance.now() - startedAt >= timeoutMs) {
+        debugPlaybackLog('timeline-stalled', {
+          label: label || 'audio',
+          startTime: startTime,
+          currentTime: nowTime,
+          readyState: media.readyState,
+          networkState: media.networkState,
+          paused: media.paused,
+          ended: media.ended
+        });
+        return finish(false, new Error((label || 'audio') + ' timeline stalled'));
+      }
+      timer = setTimeout(check, 180);
+    }
+    media.addEventListener('timeupdate', check);
+    media.addEventListener('playing', check);
+    media.addEventListener('canplay', check);
+    media.addEventListener('error', onError);
+    check();
+  });
+}
+
+async function adoptActivePreparedAudioPlayback(opts) {
+  opts = opts || {};
+  if (!opts.preparedAudio || !audio || audio !== opts.preparedAudio || audio.paused || audio.ended) return false;
+  if (!audioReady || audioGraphElement !== audio) initAudio();
+  await resumeAudioAnalysis();
+  switchPlaybackVisualToEmily();
+  playing = true;
+  setPlayIcon(true);
+  if (opts.fade !== false) startPlaybackFadeIn();
+  else restorePlaybackGain();
+  forcePlaybackControlsInteractive();
+  hideLoading();
+  console.log('[CuefieldAutoMix] adopted active prepared audio', {
+    currentTime: audio.currentTime,
+    readyState: audio.readyState,
+    paused: audio.paused,
+  });
+  return true;
+}
+
 async function togglePlay() {
   if (playToggleBusy) return;
   playToggleBusy = true;
@@ -19346,17 +19565,21 @@ function setPlayIcon(p) {
 }
 function nextTrack() {
   if (!playQueue.length) return;
+  var fromIdx = currentIdx;
   playToggleBusy = false;
   forcePlaybackControlsInteractive();
   if (playMode === 'shuffle') currentIdx = Math.floor(Math.random() * playQueue.length);
   else currentIdx = (currentIdx + 1) % playQueue.length;
+  debugPlaybackLog('nextTrack', { fromIdx: fromIdx, toIdx: currentIdx, playMode: playMode });
   Promise.resolve(playQueueAt(currentIdx)).finally(forcePlaybackControlsInteractive);
 }
 function prevTrack() {
   if (!playQueue.length) return;
+  var fromIdx = currentIdx;
   playToggleBusy = false;
   forcePlaybackControlsInteractive();
   currentIdx = (currentIdx - 1 + playQueue.length) % playQueue.length;
+  debugPlaybackLog('prevTrack', { fromIdx: fromIdx, toIdx: currentIdx, playMode: playMode });
   Promise.resolve(playQueueAt(currentIdx)).finally(forcePlaybackControlsInteractive);
 }
 function shuffleQueue() {
@@ -20527,6 +20750,7 @@ async function loadPlaylistIntoQueueById(id, autoplay, title) {
 
 // 进度条
 var progressDragState = { active: false, lastParticleAt: 0 };
+var forceFreshAudioOnNextSwitch = false;
 function normalizePlaybackDurationSeconds(value) {
   var raw = Number(value);
   if (!isFinite(raw) || raw <= 0) return 0;
@@ -20568,6 +20792,17 @@ function bindPlaybackProgressEvents(audioEl) {
   ['play', 'playing', 'pause', 'ended', 'emptied', 'abort', 'error'].forEach(function(name){
     audioEl.addEventListener(name, function(){ syncPlaybackStateFromAudioEvent(name); });
   });
+  ['loadstart', 'loadedmetadata', 'canplay', 'playing', 'waiting', 'stalled', 'suspend', 'error', 'abort', 'emptied'].forEach(function(name){
+    audioEl.addEventListener(name, function(){
+      debugPlaybackLog('media:' + name, {
+        elementMatchesCurrent: audioEl === audio,
+        mediaError: audioEl.error ? {
+          code: audioEl.error.code,
+          message: audioEl.error.message || ''
+        } : null
+      });
+    });
+  });
 }
 function emitProgressDragParticles(x, y) {
   var now = performance.now();
@@ -20597,9 +20832,21 @@ function seekFromProgressPointer(e, emitParticles) {
   syncBeatMapPlaybackCursor(audio.currentTime);
   if (emitParticles) emitProgressDragParticles(e.clientX, rect.top + rect.height / 2);
 }
+function cancelProgressDragState() {
+  progressDragState.active = false;
+  var bar = document.getElementById('progress-bar');
+  if (bar) bar.classList.remove('is-dragging');
+}
+function resetCuefieldAfterManualSeek() {
+  if (!cuefieldAutoMixEnabled) return;
+  resetCuefieldAutoMix('manual-seek');
+  forceFreshAudioOnNextSwitch = true;
+  if (audio && !audio.paused) scheduleCuefieldAutoMixPrepare(trackSwitchToken, currentIdx, 900);
+}
 var progressBar = document.getElementById('progress-bar');
 progressBar.addEventListener('pointerdown', function(e){
   if (!audio || !audio.duration) return;
+  if (cuefieldAutoMixEnabled) resetCuefieldAutoMix('manual-seek-start');
   progressDragState.active = true;
   progressBar.classList.add('is-dragging');
   try { progressBar.setPointerCapture(e.pointerId); } catch (err) {}
@@ -20614,10 +20861,15 @@ function endProgressDrag(e) {
   progressDragState.active = false;
   progressBar.classList.remove('is-dragging');
   try { progressBar.releasePointerCapture(e.pointerId); } catch (err) {}
+  resetCuefieldAfterManualSeek();
 }
 progressBar.addEventListener('pointerup', endProgressDrag);
 progressBar.addEventListener('pointercancel', endProgressDrag);
-progressBar.addEventListener('lostpointercapture', function(){ progressDragState.active = false; progressBar.classList.remove('is-dragging'); });
+progressBar.addEventListener('lostpointercapture', function(){
+  if (!progressDragState.active) return;
+  cancelProgressDragState();
+  resetCuefieldAfterManualSeek();
+});
 setInterval(function(){
   if (!audio) { updatePlaybackProgressUi(); return; }
   updateListenStatsTick(false);

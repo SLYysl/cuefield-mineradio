@@ -63,10 +63,44 @@ test('plans multiple recipe candidates with timelines and chooses the safest hig
 
   assert.equal(Array.isArray(plan.candidates), true);
   assert.equal(recipes.includes('intro-outro-long-blend'), true);
+  assert.equal(recipes.includes('safety-long-blend'), true);
   assert.equal(recipes.includes('filtered-pickup'), true);
   assert.equal(recipes.includes('bass-eq-handoff'), true);
   assert.equal(recipes.includes('quick-safe-fade'), true);
   assert.equal(plan.candidates.every((candidate) => candidate.timeline.length > 0), true);
   assert.equal(plan.chosen.score, Math.max(...plan.candidates.map((candidate) => candidate.score)));
   assert.equal(plan.chosen.risks.includes('hard cut'), false);
+});
+
+test('uses safety long blend for weak or rejected section choices', () => {
+  const fromProfile = buildCueProfile({
+    track: { title: 'A', duration: 128 },
+    map: makeBeatMap(128),
+    candidates: [
+      { type: 'outro', role: 'exit', time: 112, confidence: 0.7 },
+    ],
+  });
+  const toProfile = buildCueProfile({
+    track: { title: 'B', duration: 120 },
+    map: makeBeatMap(120),
+    candidates: [
+      { type: 'intro', role: 'entry', time: 0, confidence: 0.62 },
+      { type: 'hook', role: 'entry', time: 48, confidence: 0.8 },
+    ],
+  });
+
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: {
+      exit: { time: 112 },
+      entry: { time: 48 },
+      evaluation: { tier: 'reject', risks: ['directionality mismatch'] },
+    },
+  });
+
+  assert.equal(plan.chosen.recipe, 'safety-long-blend');
+  assert.equal(plan.chosen.anchors.lead, 12);
+  assert.equal(plan.chosen.timeline[0].op, 'play');
+  assert.equal(plan.chosen.timeline[0].at, 0);
+  assert.equal(plan.chosen.timeline.some((action) => action.deck === 'B' && action.op === 'bass' && action.value < 0.2), true);
+  assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'filter'), true);
 });

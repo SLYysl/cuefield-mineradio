@@ -181,16 +181,66 @@ function makeQuickFade(anchors, scores) {
   );
 }
 
+function makeSafetyLongBlend(anchors, scores, sectionChoice = {}) {
+  const lead = 12;
+  const bStart = round(Math.max(0, anchors.bStart));
+  const score = 0.52 + scores.bpmScore * 0.08 + scores.beatScore * 0.05;
+  const tier = sectionChoice.evaluation && sectionChoice.evaluation.tier || '';
+  const risks = ['safety fallback'];
+  if (tier === 'reject') risks.push('masked rejected pair');
+  if (scores.bassScore < 0.5) risks.push('bass protected');
+  return baseCandidate(
+    'safety-long-blend',
+    score,
+    0.72,
+    [
+      'universal conservative blend for weak or rejected pairs',
+      'B enters from intro or low-density start instead of hook',
+      'low end is delayed to avoid bass collision',
+    ],
+    risks,
+    { ...anchors, bStart, lead, safetyFallback: true },
+    [
+      { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
+      { t: -lead, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
+      { t: -lead, deck: 'B', op: 'filter', type: 'highpass', value: 1200, duration: 0 },
+      { t: -lead, deck: 'B', op: 'volume', value: 0.24, duration: 2600 },
+      { t: -9.2, deck: 'A', op: 'filter', type: 'highpass', value: 420, duration: 3200 },
+      { t: -8.2, deck: 'A', op: 'bass', value: 0.55, duration: 2800 },
+      { t: -6.4, deck: 'B', op: 'volume', value: 0.46, duration: 3600 },
+      { t: -4.2, deck: 'B', op: 'filter', type: 'highpass', value: 520, duration: 2600 },
+      { t: -3.4, deck: 'A', op: 'bass', value: 0.18, duration: 2400 },
+      { t: -2.4, deck: 'B', op: 'volume', value: 0.74, duration: 2200 },
+      { t: -1.1, deck: 'B', op: 'bass', value: 0.72, duration: 1800 },
+      { t: 0, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 1600 },
+      { t: 0.4, deck: 'A', op: 'volume', value: 0.16, duration: 2400 },
+      { t: 2.9, deck: 'A', op: 'volume', value: 0, duration: 900 },
+      { t: 3.8, deck: 'B', op: 'bass', value: 1, duration: 1600 },
+      { t: 4.8, deck: 'B', op: 'handoff' },
+    ],
+  );
+}
+
 function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
   const anchors = pickAnchors(fromProfile || {}, toProfile || {}, opts);
   const scores = commonScores(fromProfile || {}, toProfile || {}, anchors);
+  const sectionTier = opts.sectionChoice && opts.sectionChoice.evaluation && opts.sectionChoice.evaluation.tier || '';
+  const sectionRisks = opts.sectionChoice && opts.sectionChoice.evaluation && opts.sectionChoice.evaluation.risks || [];
+  const needsSafetyFallback = sectionTier === 'weak'
+    || sectionTier === 'reject'
+    || sectionRisks.includes('directionality mismatch')
+    || sectionRisks.includes('style bridge mismatch');
+  const safety = makeSafetyLongBlend(anchors, scores, opts.sectionChoice);
   const candidates = [
+    safety,
     makeLongBlend(anchors, scores),
     makeFilteredPickup(anchors, scores),
     makeBassHandoff(anchors, scores),
     makeQuickFade(anchors, scores),
   ].sort((a, b) => b.score - a.score || b.confidence - a.confidence);
-  const chosen = candidates.find((candidate) => !candidate.risks.includes('hard cut')) || candidates[0];
+  const chosen = needsSafetyFallback
+    ? safety
+    : (candidates.find((candidate) => !candidate.risks.includes('hard cut')) || candidates[0]);
 
   return {
     chosen,

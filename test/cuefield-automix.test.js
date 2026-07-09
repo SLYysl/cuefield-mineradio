@@ -261,6 +261,48 @@ test('does not execute rejected plans even when soft automix mode allows weak pl
   assert.equal(automix.shouldTrigger({ token: 6, currentIndex: 0, currentTime: 29 }), false);
 });
 
+test('executes safety long blend even when the section evaluation is rejected', async () => {
+  const automix = createCuefieldAutoMix({
+    allowWeak: true,
+    allowSafetyFallback: true,
+    minWeakScore: 0.55,
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => ({
+      ok: true,
+      chosen: {
+        recipe: 'section-jump',
+        transitionRecipe: 'safety-long-blend',
+        score: 0.5,
+        exit: { time: 48 },
+        entry: { time: 32 },
+        evaluation: { score: 0.42, tier: 'reject', risks: ['directionality mismatch'] },
+        timeline: [
+          { t: -12, deck: 'B', op: 'play', at: 0, volume: 0 },
+          { t: -12, deck: 'B', op: 'volume', value: 0.24, duration: 2600 },
+          { t: 4.8, deck: 'B', op: 'handoff' },
+        ],
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+
+  automix.setEnabled(true);
+  const result = await automix.prepare({
+    token: 12,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.equal(result.pending.executionMode, 'safety-long-blend');
+  assert.equal(result.pending.entryTime, 0);
+  assert.equal(result.pending.triggerAt, 36);
+  assert.equal(automix.shouldTrigger({ token: 12, currentIndex: 0, currentTime: 36 }), true);
+});
+
 test('does not reuse a prepared transition after queue token or index changes', async () => {
   const automix = createCuefieldAutoMix({
     getKey: (song) => song.key,
