@@ -45,11 +45,13 @@ node scripts/cuefield-feedback-collector.js
 Tester app:
 
 ```bash
-CUEFIELD_FEEDBACK_REMOTE_URL="https://your-collector.example/cuefield-feedback" \
+CUEFIELD_FEEDBACK_REMOTE_URL="https://brahma-technologies.com/api/cuefield" \
 CUEFIELD_FEEDBACK_REMOTE_TOKEN="change-me" \
 CUEFIELD_FEEDBACK_SOURCE="tester-name-or-build-id" \
 npm start
 ```
+
+The recommended public endpoint is `https://brahma-technologies.com/api/cuefield`. It is a token-protected Brahma proxy named for Cuefield; it sanitizes the payload and forwards it to the private collector configured by the maintainer.
 
 The remote payload is intentionally small: rating, note, pair title/key metadata, recipe/tier/score/risk metadata, and transition timing. It does not include cookies, audio URLs, music files, or raw beatmap caches.
 
