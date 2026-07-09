@@ -53,7 +53,7 @@ const tls = require('tls');
 const { once } = require('events');
 const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
-const { appendCuefieldFeedback } = require('./cuefield/feedback-log');
+const { appendCuefieldFeedback, readCuefieldFeedbackStats } = require('./cuefield/feedback-log');
 const { planTransitionFromPayload } = require('./cuefield/api');
 const { planCuefieldTransitionFromCache } = require('./cuefield/mineradio-bridge');
 
@@ -3371,6 +3371,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pn === '/api/cuefield/feedback') {
+    if (req.method === 'GET') {
+      try {
+        sendJSON(res, { ok: true, stats: readCuefieldFeedbackStats(CUEFIELD_FEEDBACK_FILE) });
+      } catch (err) {
+        console.error('[CuefieldFeedbackStats]', err);
+        sendJSON(res, { ok: false, error: err.code || err.message || 'CUEFIELD_FEEDBACK_STATS_FAILED' }, 400);
+      }
+      return;
+    }
     if (req.method !== 'POST') {
       sendJSON(res, { ok: false, error: 'METHOD_NOT_ALLOWED' }, 405);
       return;

@@ -54,6 +54,37 @@ function compactTransition(transition = {}) {
   };
 }
 
+function safeParseJsonLine(line) {
+  try {
+    return JSON.parse(line);
+  } catch (err) {
+    return null;
+  }
+}
+
+function emptyBucket(key) {
+  return { key, total: 0, passed: 0, failed: 0, pending: 0, passRate: 0 };
+}
+
+function addToBucket(map, key, rating) {
+  const bucketKey = compactString(key || 'unknown', 120) || 'unknown';
+  if (!map.has(bucketKey)) map.set(bucketKey, emptyBucket(bucketKey));
+  const bucket = map.get(bucketKey);
+  bucket.total += 1;
+  if (rating === 1) bucket.passed += 1;
+  else if (rating === 2) bucket.failed += 1;
+  else if (rating === 3) bucket.pending += 1;
+}
+
+function finalizeBuckets(map) {
+  return Array.from(map.values())
+    .map((bucket) => ({
+      ...bucket,
+      passRate: roundNumber(bucket.total ? bucket.passed / bucket.total : 0),
+    }))
+    .sort((a, b) => b.total - a.total || b.failed - a.failed || a.key.localeCompare(b.key));
+}
+
 function buildCuefieldFeedbackRecord(input = {}, now = new Date()) {
   return {
     createdAt: now.toISOString(),
@@ -71,7 +102,60 @@ function appendCuefieldFeedback(filePath, input = {}, now = new Date()) {
   return record;
 }
 
+function readCuefieldFeedbackStats(filePath) {
+  const byRecipe = new Map();
+  const byTier = new Map();
+  const byRisk = new Map();
+  const byPair = new Map();
+  const ratingCounts = { 1: 0, 2: 0, 3: 0 };
+  const failedSamples = [];
+  const raw = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
+  const records = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map(safeParseJsonLine).filter(Boolean);
+
+  records.forEach((record) => {
+    const rating = Number(record.rating);
+    if (rating !== 1 && rating !== 2 && rating !== 3) return;
+    const pair = record.pair || {};
+    const transition = record.transition || {};
+    const recipe = transition.transitionRecipe || transition.recipe || transition.executionMode || 'unknown';
+    const tier = transition.tier || 'unknown';
+    const pairKey = [pair.fromTitle || pair.fromKey || 'A', pair.toTitle || pair.toKey || 'B'].join(' -> ');
+
+    ratingCounts[rating] += 1;
+    addToBucket(byRecipe, recipe, rating);
+    addToBucket(byTier, tier, rating);
+    addToBucket(byPair, pairKey, rating);
+    (Array.isArray(transition.risks) && transition.risks.length ? transition.risks : ['none'])
+      .forEach((risk) => addToBucket(byRisk, risk, rating));
+
+    if (rating !== 1) {
+      failedSamples.push({
+        createdAt: compactString(record.createdAt, 40),
+        rating,
+        note: compactString(record.note, 180),
+        pair: compactPair(pair),
+        transition: compactTransition(transition),
+      });
+    }
+  });
+
+  const total = ratingCounts[1] + ratingCounts[2] + ratingCounts[3];
+  return {
+    total,
+    ratingCounts,
+    passRate: roundNumber(total ? ratingCounts[1] / total : 0),
+    byRecipe: finalizeBuckets(byRecipe),
+    byTier: finalizeBuckets(byTier),
+    byRisk: finalizeBuckets(byRisk),
+    byPair: finalizeBuckets(byPair).slice(0, 20),
+    failedSamples: failedSamples
+      .sort((a, b) => a.rating - b.rating || String(b.createdAt).localeCompare(String(a.createdAt)))
+      .slice(0, 20),
+  };
+}
+
 module.exports = {
   appendCuefieldFeedback,
   buildCuefieldFeedbackRecord,
+  readCuefieldFeedbackStats,
 };

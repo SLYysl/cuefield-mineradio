@@ -12,6 +12,33 @@ function densityAt(windows, time) {
   return nearest ? clamp(nearest.value) : 0;
 }
 
+function average(values) {
+  const valid = values.filter((value) => Number.isFinite(value));
+  if (!valid.length) return 0;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+}
+
+function barsInRange(profile, start, end) {
+  const bars = profile && Array.isArray(profile.bars) ? profile.bars : [];
+  return bars.filter((bar) => toNumber(bar.end) > start && toNumber(bar.start) < end);
+}
+
+function textureAt(profile, start, end) {
+  const bars = barsInRange(profile, start, end);
+  return {
+    energy: clamp(average(bars.map((bar) => toNumber(bar.energy, NaN)))),
+    low: clamp(average(bars.map((bar) => toNumber(bar.lowDensity, NaN)))),
+    body: clamp(average(bars.map((bar) => toNumber(bar.bodyDensity, NaN)))),
+    snap: clamp(average(bars.map((bar) => toNumber(bar.snapDensity, NaN)))),
+  };
+}
+
+function nearestCandidate(profile, role, time) {
+  return (profile.candidates || [])
+    .filter((candidate) => candidate && candidate.role === role && Number.isFinite(toNumber(candidate.time, NaN)))
+    .sort((a, b) => Math.abs(toNumber(a.time) - time) - Math.abs(toNumber(b.time) - time))[0] || null;
+}
+
 function firstCandidate(profile, predicate) {
   return (profile.candidates || [])
     .filter((candidate) => candidate && Number.isFinite(toNumber(candidate.time, NaN)) && predicate(candidate))
@@ -61,6 +88,19 @@ function commonScores(fromProfile, toProfile, anchors) {
   const energyScore = 1 - Math.min(1, Math.abs(aEnergy - bEnergy) / 0.65);
   const bassScore = 1 - Math.min(1, Math.max(0, aBass + bBass - 0.88) / 0.7);
   const bpmScore = 1 - Math.min(1, bpmDiff / 18);
+  const outroTexture = textureAt(fromProfile, anchors.aExit, toNumber(fromProfile.duration, anchors.aExit) + 0.001);
+  const introTexture = textureAt(toProfile, anchors.bStart, anchors.bStart + 12);
+  const exitCandidate = nearestCandidate(fromProfile, 'exit', anchors.aExit);
+  const outroLengthScore = clamp((toNumber(fromProfile.duration) - anchors.aExit) / 16);
+  const outroConfidence = clamp(exitCandidate && exitCandidate.confidence, 0, 1);
+  const outroCompleteness = clamp(outroLengthScore * 0.45 + outroConfidence * 0.35 + (1 - outroTexture.energy) * 0.2);
+  const bIntroAggression = clamp(introTexture.energy * 0.55 + introTexture.low * 0.25 + introTexture.snap * 0.2);
+  const styleTextureDistance = clamp(average([
+    Math.abs(outroTexture.energy - introTexture.energy),
+    Math.abs(outroTexture.low - introTexture.low),
+    Math.abs(outroTexture.body - introTexture.body),
+    Math.abs(outroTexture.snap - introTexture.snap),
+  ]) / 0.7);
 
   return {
     aEnergy,
@@ -71,6 +111,9 @@ function commonScores(fromProfile, toProfile, anchors) {
     energyScore,
     bassScore,
     bpmScore,
+    outroCompleteness,
+    bIntroAggression,
+    styleTextureDistance,
   };
 }
 
@@ -184,11 +227,18 @@ function makeQuickFade(anchors, scores) {
 function makeSafetyLongBlend(anchors, scores, sectionChoice = {}) {
   const lead = 12;
   const bStart = round(Math.max(0, anchors.bStart));
-  const score = 0.52 + scores.bpmScore * 0.08 + scores.beatScore * 0.05;
+  const score = 0.48
+    + scores.bpmScore * 0.08
+    + scores.beatScore * 0.05
+    + scores.outroCompleteness * 0.08
+    - scores.bIntroAggression * 0.04
+    - scores.styleTextureDistance * 0.03;
   const tier = sectionChoice.evaluation && sectionChoice.evaluation.tier || '';
   const risks = ['safety fallback'];
   if (tier === 'reject') risks.push('masked rejected pair');
   if (scores.bassScore < 0.5) risks.push('bass protected');
+  if (scores.bIntroAggression > 0.68) risks.push('intro aggression masked');
+  if (scores.styleTextureDistance > 0.45) risks.push('texture distance masked');
   return baseCandidate(
     'safety-long-blend',
     score,
@@ -254,6 +304,9 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
       energyScore: round(scores.energyScore),
       bassScore: round(scores.bassScore),
       bpmScore: round(scores.bpmScore),
+      outroCompleteness: round(scores.outroCompleteness),
+      bIntroAggression: round(scores.bIntroAggression),
+      styleTextureDistance: round(scores.styleTextureDistance),
     },
   };
 }

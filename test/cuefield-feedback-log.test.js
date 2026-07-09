@@ -7,6 +7,7 @@ const test = require('node:test');
 const {
   appendCuefieldFeedback,
   buildCuefieldFeedbackRecord,
+  readCuefieldFeedbackStats,
 } = require('../cuefield/feedback-log');
 
 test('builds a compact Cuefield feedback record without audio urls', () => {
@@ -65,4 +66,47 @@ test('appends one feedback record per JSONL line', () => {
   assert.equal(lines.length, 1);
   assert.deepEqual(JSON.parse(lines[0]), record);
   assert.equal(record.rating, 3);
+});
+
+test('summarizes Cuefield feedback by recipe, tier, risk, and failed samples', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuefield-feedback-'));
+  const file = path.join(dir, 'feedback.jsonl');
+  const rows = [
+    {
+      rating: 1,
+      pair: { fromKey: 'a', toKey: 'b', fromTitle: 'A', toTitle: 'B' },
+      transition: { transitionRecipe: 'safety-long-blend', tier: 'reject', risks: ['directionality mismatch'] },
+    },
+    {
+      rating: 2,
+      note: 'B too loud',
+      pair: { fromKey: 'c', toKey: 'd', fromTitle: 'C', toTitle: 'D' },
+      transition: { transitionRecipe: 'safety-long-blend', tier: 'reject', risks: ['style bridge mismatch'] },
+    },
+    {
+      rating: 3,
+      pair: { fromKey: 'e', toKey: 'f', fromTitle: 'E', toTitle: 'F' },
+      transition: { transitionRecipe: 'filtered-pickup', tier: 'weak', risks: ['noticeable energy change'] },
+    },
+  ];
+  rows.forEach((row, index) => appendCuefieldFeedback(file, row, new Date(Date.UTC(2026, 6, 9, 3, index))));
+
+  const stats = readCuefieldFeedbackStats(file);
+
+  assert.equal(stats.total, 3);
+  assert.deepEqual(stats.ratingCounts, { 1: 1, 2: 1, 3: 1 });
+  assert.equal(stats.passRate, 0.333);
+  assert.deepEqual(stats.byRecipe[0], {
+    key: 'safety-long-blend',
+    total: 2,
+    passed: 1,
+    failed: 1,
+    pending: 0,
+    passRate: 0.5,
+  });
+  assert.equal(stats.byTier.find((item) => item.key === 'reject').passRate, 0.5);
+  assert.equal(stats.byRisk.find((item) => item.key === 'style bridge mismatch').failed, 1);
+  assert.equal(stats.failedSamples.length, 2);
+  assert.equal(stats.failedSamples[0].rating, 2);
+  assert.equal(stats.failedSamples[0].transition.transitionRecipe, 'safety-long-blend');
 });

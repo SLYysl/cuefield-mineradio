@@ -996,6 +996,27 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 .cuefield-feedback-actions{display:flex;gap:7px;margin-top:10px}
 .cuefield-feedback-actions button{flex:1;height:30px;border-radius:9px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.055);color:rgba(255,255,255,.78);font:760 11px/1 var(--font-sans);cursor:pointer}
 .cuefield-feedback-actions button:hover{border-color:rgba(var(--fc-accent-rgb),.36);background:rgba(var(--fc-accent-rgb),.13);color:#fff}
+#cuefield-feedback-stats{position:fixed;z-index:203;top:178px;left:24px;width:min(430px,calc(100vw - 48px));max-height:min(560px,calc(100vh - 210px));overflow:auto;padding:13px 14px 14px;border-radius:14px;border:1px solid rgba(var(--fc-accent-rgb),.24);background:rgba(9,11,15,.90);color:rgba(255,255,255,.88);box-shadow:0 22px 58px rgba(0,0,0,.42),inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(26px) saturate(1.18);-webkit-backdrop-filter:blur(26px) saturate(1.18);opacity:0;pointer-events:none;transform:translateY(-8px);transition:opacity .24s,transform .24s}
+#cuefield-feedback-stats.show{opacity:1;pointer-events:auto;transform:translateY(0)}
+.cuefield-feedback-stats-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.cuefield-feedback-stats-title{font-size:12px;font-weight:850;letter-spacing:.08em;color:#eafffb;text-transform:uppercase}
+.cuefield-feedback-stats-sub{margin-top:4px;font-size:11px;line-height:1.35;color:rgba(255,255,255,.54)}
+.cuefield-feedback-stats-close{width:25px;height:25px;flex:0 0 25px;border-radius:50%;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.045);color:rgba(255,255,255,.62);cursor:pointer}
+.cuefield-feedback-stats-close:hover{background:rgba(255,255,255,.10);color:#fff}
+.cuefield-feedback-stat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px}
+.cuefield-feedback-stat{min-width:0;padding:9px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.045)}
+.cuefield-feedback-stat b{display:block;font-size:17px;line-height:1;color:#fff}
+.cuefield-feedback-stat span{display:block;margin-top:5px;font-size:10.5px;color:rgba(255,255,255,.48)}
+.cuefield-feedback-stat-section{margin-top:12px}
+.cuefield-feedback-stat-label{font-size:10px;font-weight:820;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.46)}
+.cuefield-feedback-stat-row{display:grid;grid-template-columns:minmax(0,1fr) 46px 58px;gap:8px;align-items:center;margin-top:7px;font-size:11px;color:rgba(255,255,255,.72)}
+.cuefield-feedback-stat-row .key{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cuefield-feedback-stat-row .rate{text-align:right;color:#eafffb}
+.cuefield-feedback-stat-bar{height:5px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+.cuefield-feedback-stat-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#00f5d4,#f4d28a)}
+.cuefield-feedback-stat-failures{margin-top:8px;display:grid;gap:7px}
+.cuefield-feedback-stat-failure{padding:8px 9px;border-radius:10px;background:rgba(255,83,103,.075);border:1px solid rgba(255,83,103,.16);font-size:11px;line-height:1.42;color:rgba(255,255,255,.70)}
+.cuefield-feedback-stat-failure b{color:#fff;font-size:11.5px}
 
 #visual-guide{position:fixed;inset:0;z-index:620;display:none;pointer-events:auto;cursor:pointer}
 #visual-guide.show{display:block}
@@ -2442,6 +2463,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
     <div class="control-cluster transport">
     <button id="play-mode-btn" class="ctrl-btn" onclick="cyclePlayMode()" title="播放顺序"><svg id="play-mode-icon" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></button>
     <button id="cuefield-automix-btn" class="ctrl-btn" onclick="toggleCuefieldAutoMix()" title="Cuefield AutoMix"><svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7c3.2 0 3.2 10 6.4 10S13.6 7 16.8 7 20 17 22 17"/><path d="M2 12h20"/></svg></button>
+    <button id="cuefield-feedback-stats-btn" class="ctrl-btn" onclick="toggleCuefieldFeedbackStats()" title="Cuefield feedback stats"><svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg></button>
     <button id="prev-btn" class="ctrl-btn" onclick="prevTrack()" title="上一首"><svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg></button>
     <button id="play-btn" class="ctrl-btn" onclick="togglePlay()" title="播放/暂停"><svg id="play-icon" width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
     <button id="next-btn" class="ctrl-btn" onclick="nextTrack()" title="下一首"><svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
@@ -2661,6 +2683,32 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
     <button type="button" onclick="submitCuefieldFeedback(3)">3 待定</button>
   </div>
 </div>
+<div id="cuefield-feedback-stats" aria-live="polite">
+  <div class="cuefield-feedback-stats-head">
+    <div>
+      <div class="cuefield-feedback-stats-title">Cuefield stats</div>
+      <div id="cuefield-feedback-stats-summary" class="cuefield-feedback-stats-sub">等待反馈数据</div>
+    </div>
+    <button class="cuefield-feedback-stats-close" type="button" onclick="toggleCuefieldFeedbackStats(false)">×</button>
+  </div>
+  <div class="cuefield-feedback-stat-grid">
+    <div class="cuefield-feedback-stat"><b id="cuefield-feedback-stat-total">0</b><span>样本</span></div>
+    <div class="cuefield-feedback-stat"><b id="cuefield-feedback-stat-passrate">0%</b><span>合格率</span></div>
+    <div class="cuefield-feedback-stat"><b id="cuefield-feedback-stat-failures">0</b><span>复听</span></div>
+  </div>
+  <div class="cuefield-feedback-stat-section">
+    <div class="cuefield-feedback-stat-label">recipe / tier</div>
+    <div id="cuefield-feedback-stat-recipes"></div>
+  </div>
+  <div class="cuefield-feedback-stat-section">
+    <div class="cuefield-feedback-stat-label">risk</div>
+    <div id="cuefield-feedback-stat-risks"></div>
+  </div>
+  <div class="cuefield-feedback-stat-section">
+    <div class="cuefield-feedback-stat-label">samples to replay</div>
+    <div id="cuefield-feedback-stat-failure-list" class="cuefield-feedback-stat-failures"></div>
+  </div>
+</div>
 <div id="source-fallback-notice" aria-live="polite">
   <div class="source-fallback-head">
     <div id="source-fallback-title" class="source-fallback-title">自动换源</div>
@@ -2733,6 +2781,7 @@ var AUDIO_FADE_IN_MS = 460;
 var AUDIO_FADE_OUT_MS = 420;
 var AUDIO_SILENCE_GAIN = 0.0001;
 var cuefieldFeedbackState = { context: null, timer: null, submitted: false };
+var cuefieldFeedbackStatsState = { visible: false, loading: false, loadedAt: 0 };
 var userPlaylists = [], qqPlaylists = [], myPodcastCollections = [], myPodcastItems = {}, playlistCoverCache = {};
 var CUSTOM_COVER_STORE_KEY = 'mineradio-custom-covers';
 var CUSTOM_LYRIC_STORE_KEY = 'mineradio-custom-lyrics-v1';
@@ -10510,6 +10559,7 @@ async function submitCuefieldFeedback(rating, note) {
     });
     showToast('Cuefield 评分已记录: ' + rating);
     hideCuefieldFeedbackPrompt();
+    if (cuefieldFeedbackStatsState.visible) loadCuefieldFeedbackStats(true);
     return true;
   } catch (err) {
     cuefieldFeedbackState.submitted = false;
@@ -10519,6 +10569,96 @@ async function submitCuefieldFeedback(rating, note) {
 }
 
 window.submitCuefieldFeedback = submitCuefieldFeedback;
+
+function cuefieldEscapeText(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function(ch) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+  });
+}
+
+function cuefieldFeedbackPercent(value) {
+  var n = Number(value);
+  if (!isFinite(n)) n = 0;
+  return (Math.round(n * 1000) / 10).toFixed(n > 0 && n < 1 ? 1 : 0).replace(/\.0$/, '') + '%';
+}
+
+function cuefieldFeedbackStatRows(items, limit) {
+  items = Array.isArray(items) ? items.slice(0, limit || 5) : [];
+  if (!items.length) return '<div class="cuefield-feedback-stats-sub">暂无数据</div>';
+  return items.map(function(item) {
+    var rate = Number(item.passRate) || 0;
+    return '<div class="cuefield-feedback-stat-row">'
+      + '<div class="key" title="' + cuefieldEscapeText(item.key) + '">' + cuefieldEscapeText(item.key) + '</div>'
+      + '<div class="cuefield-feedback-stat-bar"><i style="width:' + Math.max(0, Math.min(100, Math.round(rate * 100))) + '%"></i></div>'
+      + '<div class="rate">' + cuefieldFeedbackPercent(rate) + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function renderCuefieldFeedbackStats(stats) {
+  stats = stats || {};
+  var total = Number(stats.total) || 0;
+  var failedSamples = Array.isArray(stats.failedSamples) ? stats.failedSamples : [];
+  var recipes = Array.isArray(stats.byRecipe) ? stats.byRecipe : [];
+  var tiers = Array.isArray(stats.byTier) ? stats.byTier.map(function(item) {
+    return Object.assign({}, item, { key: 'tier: ' + item.key });
+  }) : [];
+  var risks = Array.isArray(stats.byRisk) ? stats.byRisk : [];
+  var totalEl = document.getElementById('cuefield-feedback-stat-total');
+  var passEl = document.getElementById('cuefield-feedback-stat-passrate');
+  var failureEl = document.getElementById('cuefield-feedback-stat-failures');
+  var summaryEl = document.getElementById('cuefield-feedback-stats-summary');
+  var recipesEl = document.getElementById('cuefield-feedback-stat-recipes');
+  var risksEl = document.getElementById('cuefield-feedback-stat-risks');
+  var failureListEl = document.getElementById('cuefield-feedback-stat-failure-list');
+  if (totalEl) totalEl.textContent = String(total);
+  if (passEl) passEl.textContent = cuefieldFeedbackPercent(stats.passRate);
+  if (failureEl) failureEl.textContent = String(failedSamples.length);
+  if (summaryEl) {
+    var counts = stats.ratingCounts || {};
+    summaryEl.textContent = '1=' + (counts[1] || 0) + ' / 2=' + (counts[2] || 0) + ' / 3=' + (counts[3] || 0);
+  }
+  if (recipesEl) recipesEl.innerHTML = cuefieldFeedbackStatRows(recipes.concat(tiers), 6);
+  if (risksEl) risksEl.innerHTML = cuefieldFeedbackStatRows(risks, 5);
+  if (failureListEl) {
+    failureListEl.innerHTML = failedSamples.slice(0, 4).map(function(sample) {
+      var pair = sample.pair || {};
+      var transition = sample.transition || {};
+      var title = (pair.fromTitle || pair.fromKey || 'A') + ' -> ' + (pair.toTitle || pair.toKey || 'B');
+      var recipe = transition.transitionRecipe || transition.recipe || transition.executionMode || 'AutoMix';
+      return '<div class="cuefield-feedback-stat-failure"><b>' + cuefieldEscapeText(title) + '</b><br>'
+        + cuefieldEscapeText(recipe + ' · rating ' + sample.rating + (sample.note ? ' · ' + sample.note : ''))
+        + '</div>';
+    }).join('') || '<div class="cuefield-feedback-stats-sub">暂无复听样本</div>';
+  }
+}
+
+async function loadCuefieldFeedbackStats(force) {
+  if (cuefieldFeedbackStatsState.loading) return;
+  if (!force && Date.now() - cuefieldFeedbackStatsState.loadedAt < 10000) return;
+  cuefieldFeedbackStatsState.loading = true;
+  var summaryEl = document.getElementById('cuefield-feedback-stats-summary');
+  if (summaryEl) summaryEl.textContent = '正在读取反馈数据...';
+  try {
+    var result = await apiJson('/api/cuefield/feedback', { method: 'GET', timeoutMs: 5000 });
+    renderCuefieldFeedbackStats(result && result.stats || {});
+    cuefieldFeedbackStatsState.loadedAt = Date.now();
+  } catch (err) {
+    if (summaryEl) summaryEl.textContent = '反馈统计读取失败';
+  } finally {
+    cuefieldFeedbackStatsState.loading = false;
+  }
+}
+
+function toggleCuefieldFeedbackStats(force) {
+  cuefieldFeedbackStatsState.visible = typeof force === 'boolean' ? force : !cuefieldFeedbackStatsState.visible;
+  var panel = document.getElementById('cuefield-feedback-stats');
+  if (panel) panel.classList.toggle('show', cuefieldFeedbackStatsState.visible);
+  if (cuefieldFeedbackStatsState.visible) loadCuefieldFeedbackStats(true);
+}
+
+window.toggleCuefieldFeedbackStats = toggleCuefieldFeedbackStats;
+window.loadCuefieldFeedbackStats = loadCuefieldFeedbackStats;
 
 function toggleCuefieldAutoMix() {
   cuefieldAutoMixEnabled = !cuefieldAutoMixEnabled;
