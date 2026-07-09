@@ -31,18 +31,9 @@ Cuefield AutoMix is an experimental transition layer built on top of Mineradio. 
 
 ## Multi-Tester Feedback
 
-By default, feedback stays on each tester's machine. To collect feedback centrally, run a collector and configure testers to mirror feedback to it.
+By default, feedback stays on each tester's machine. Test builds can also mirror feedback to a token-protected Cuefield endpoint operated by the maintainer.
 
-Collector:
-
-```bash
-CUEFIELD_FEEDBACK_COLLECTOR_TOKEN="change-me" \
-CUEFIELD_FEEDBACK_COLLECTOR_HOST=127.0.0.1 \
-CUEFIELD_FEEDBACK_COLLECTOR_PORT=3787 \
-node scripts/cuefield-feedback-collector.js
-```
-
-Tester app:
+Recommended tester app config:
 
 ```bash
 CUEFIELD_FEEDBACK_REMOTE_URL="https://brahma-technologies.com/api/cuefield" \
@@ -51,11 +42,13 @@ CUEFIELD_FEEDBACK_SOURCE="tester-name-or-build-id" \
 npm start
 ```
 
-The recommended public endpoint is `https://brahma-technologies.com/api/cuefield`. It is a token-protected Brahma proxy named for Cuefield; it sanitizes the payload and forwards it to the private collector configured by the maintainer.
+The recommended public endpoint is `https://brahma-technologies.com/api/cuefield`. It is a token-protected Brahma proxy named for Cuefield; it sanitizes the payload and writes the small feedback record to the maintainer's Supabase feedback store.
 
 The remote payload is intentionally small: rating, note, pair title/key metadata, recipe/tier/score/risk metadata, and transition timing. It does not include cookies, audio URLs, music files, or raw beatmap caches.
 
 If the remote endpoint is not configured, unavailable, or times out, local feedback still succeeds.
+
+`scripts/cuefield-feedback-collector.js` remains available for local-only experiments, but public test builds should use the Brahma endpoint above.
 
 ## Local Verification
 
