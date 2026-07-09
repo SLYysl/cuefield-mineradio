@@ -19363,6 +19363,10 @@ async function playQueueAt(idx, opts) {
     audio.onended = function(){
       if (token !== trackSwitchToken) return;
       finalizeListenSession(true);
+      if (cuefieldAutoMixExecuting) {
+        debugPlaybackLog('cuefield-ended-suppressed', { targetIdx: idx, currentIdx: currentIdx });
+        return;
+      }
       if (playMode === 'single') setTimeout(function(){ playQueueAt(currentIdx, { autoRepeat: true }); }, 0);
       else setTimeout(nextTrack, 0);
     };
