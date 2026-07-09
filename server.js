@@ -3349,6 +3349,17 @@ const server = http.createServer(async (req, res) => {
         exitBias: body.exitBias || 'late',
         readBeatMapCache,
       });
+      const chosen = result && result.chosen || {};
+      const evaluation = chosen.evaluation || {};
+      console.log('[CuefieldTransition]', {
+        fromKey: body.fromKey || body.fromCacheKey || body.from,
+        toKey: body.toKey || body.toCacheKey || body.to,
+        recipe: chosen.recipe,
+        score: chosen.score,
+        tier: evaluation.tier,
+        evalScore: evaluation.score,
+        risks: evaluation.risks || [],
+      });
       sendJSON(res, result);
     } catch (err) {
       console.error('[CuefieldTransition]', err);

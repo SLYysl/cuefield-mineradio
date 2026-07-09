@@ -67,4 +67,9 @@ test('plans a Cuefield transition directly from Mineradio beatmap cache keys', (
   assert.equal(result.chosen.entry.role, 'entry');
   assert.equal(typeof result.chosen.recipe, 'string');
   assert.equal(typeof result.chosen.evaluation.tier, 'string');
+  assert.equal(Array.isArray(result.candidates), true);
+  assert.equal(result.candidates.length >= 4, true);
+  assert.equal(Array.isArray(result.chosen.timeline), true);
+  assert.equal(result.chosen.timeline.length > 0, true);
+  assert.equal(typeof result.chosen.transitionRecipe, 'string');
 });

@@ -5,6 +5,10 @@
   'use strict';
 
   var EXECUTABLE_TIERS = { magic: true, usable: true, usable_but_not_magic: true };
+  var HARD_RISKS = {
+    'closed outgoing phrase': true,
+    'near closed outgoing phrase': true,
+  };
 
   function toNumber(value, fallback) {
     var n = Number(value);
@@ -13,6 +17,62 @@
 
   function tierOf(plan) {
     return plan && plan.chosen && plan.chosen.evaluation && plan.chosen.evaluation.tier || '';
+  }
+
+  function scoreOf(plan) {
+    var chosen = plan && plan.chosen || {};
+    var evaluation = chosen.evaluation || {};
+    var score = Number(evaluation.score);
+    if (isFinite(score)) return score;
+    score = Number(chosen.score);
+    return isFinite(score) ? score : 0;
+  }
+
+  function hasHardRisk(plan) {
+    var risks = plan && plan.chosen && plan.chosen.evaluation && plan.chosen.evaluation.risks || [];
+    for (var i = 0; i < risks.length; i++) {
+      if (HARD_RISKS[risks[i]]) return true;
+    }
+    return false;
+  }
+
+  function isExecutablePlan(plan, deps) {
+    var tier = tierOf(plan);
+    if (EXECUTABLE_TIERS[tier]) return true;
+    if (tier !== 'weak' || !deps.allowWeak) return false;
+    if (hasHardRisk(plan)) return false;
+    return scoreOf(plan) >= toNumber(deps.minWeakScore, 0.58);
+  }
+
+  function executionModeFor(plan) {
+    var chosen = plan && plan.chosen || {};
+    var recipe = chosen.transitionRecipe || chosen.recipeCandidate && chosen.recipeCandidate.recipe || '';
+    if (recipe) return recipe;
+    return tierOf(plan) === 'weak' ? 'intro-bed' : 'filtered-pickup';
+  }
+
+  function timelineOf(plan) {
+    var chosen = plan && plan.chosen || {};
+    return Array.isArray(chosen.timeline) ? chosen.timeline : [];
+  }
+
+  function timelineLeadSec(timeline, fallback) {
+    var lead = 0;
+    for (var i = 0; i < timeline.length; i++) {
+      var t = toNumber(timeline[i] && timeline[i].t, 0);
+      if (t < 0) lead = Math.max(lead, Math.abs(t));
+    }
+    return lead > 0 ? lead : fallback;
+  }
+
+  function timelineBStart(timeline, fallback) {
+    for (var i = 0; i < timeline.length; i++) {
+      var action = timeline[i] || {};
+      if (action.deck === 'B' && action.op === 'play') {
+        return Math.max(0, toNumber(action.at, fallback));
+      }
+    }
+    return fallback;
   }
 
   function createCuefieldAutoMix(deps) {
@@ -75,7 +135,7 @@
         if (serial !== state.serial) return { status: 'stale' };
         var chosen = plan && plan.chosen;
         var tier = tierOf(plan);
-        if (!plan || !plan.ok || !chosen || !EXECUTABLE_TIERS[tier]) {
+        if (!plan || !plan.ok || !chosen || !isExecutablePlan(plan, deps)) {
           reset('fallback');
           return { status: 'fallback', plan: plan || null };
         }
@@ -87,8 +147,14 @@
         }
 
         var exitTime = toNumber(chosen.exit && chosen.exit.time, NaN);
-        var triggerAt = isFinite(exitTime) ? Math.max(0, exitTime - toNumber(ctx.leadSec, 1)) : 0;
-        var entryTime = Math.max(0, toNumber(chosen.entry && chosen.entry.time, 0));
+        var executionMode = executionModeFor(plan);
+        var timeline = timelineOf(plan);
+        var fallbackLeadSec = executionMode === 'intro-bed'
+          ? toNumber(ctx.introBedLeadSec, toNumber(ctx.leadSec, 1))
+          : toNumber(ctx.leadSec, 1);
+        var leadSec = timelineLeadSec(timeline, fallbackLeadSec);
+        var triggerAt = isFinite(exitTime) ? Math.max(0, exitTime - leadSec) : 0;
+        var entryTime = timelineBStart(timeline, Math.max(0, toNumber(chosen.entry && chosen.entry.time, 0)));
         state.pending = {
           token: ctx.token,
           currentIndex: ctx.currentIndex,
@@ -96,7 +162,9 @@
           fromKey: fromKey,
           toKey: toKey,
           plan: plan,
+          timeline: timeline,
           audioUrl: audioUrl,
+          executionMode: executionMode,
           entryTime: entryTime,
           exitTime: exitTime,
           triggerAt: triggerAt,

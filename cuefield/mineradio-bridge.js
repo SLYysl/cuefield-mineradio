@@ -1,6 +1,8 @@
 const { analyzeSectionCandidates, chooseTransitionCandidates } = require('./section-candidates');
 const { normalizeMineradioBeatMap } = require('./adapter-mineradio');
+const { buildCueProfile } = require('./cue-profile');
 const { parseLrc } = require('./lrc-anchors');
+const { planRecipeCandidates } = require('./recipe-planner');
 
 function toTrack(entry, fallbackKey) {
   const meta = entry && entry.meta || {};
@@ -59,11 +61,20 @@ function addFallbackEntry(analysis) {
 }
 
 function analyzeCacheEntry(entry, key, lrcText) {
+  const fixture = normalizedFixture(entry, key);
   const analysis = analyzeSectionCandidates({
-    fixture: normalizedFixture(entry, key),
+    fixture,
     lrcLines: parseMaybeLrc(lrcText),
   });
-  return addFallbackEntry(analysis);
+  const withFallback = addFallbackEntry(analysis);
+  return {
+    ...withFallback,
+    cueProfile: buildCueProfile({
+      track: withFallback.track,
+      map: fixture.map,
+      candidates: withFallback.candidates,
+    }),
+  };
 }
 
 function planCuefieldTransitionFromCache(opts = {}) {
@@ -77,13 +88,24 @@ function planCuefieldTransitionFromCache(opts = {}) {
   const toEntry = entryFromCache(readBeatMapCache, toKey);
   const from = analyzeCacheEntry(fromEntry, fromKey, opts.fromLrc);
   const to = analyzeCacheEntry(toEntry, toKey, opts.toLrc);
-  const chosen = chooseTransitionCandidates(from, to, { exitBias: opts.exitBias || 'late' });
+  const sectionChoice = chooseTransitionCandidates(from, to, { exitBias: opts.exitBias || 'late' });
+  const recipePlan = planRecipeCandidates(from.cueProfile, to.cueProfile, {
+    sectionChoice,
+  });
+  const chosen = {
+    ...sectionChoice,
+    transitionRecipe: recipePlan.chosen.recipe,
+    timeline: recipePlan.chosen.timeline,
+    recipeCandidate: recipePlan.chosen,
+  };
 
   return {
     ok: true,
     from,
     to,
     chosen,
+    candidates: recipePlan.candidates,
+    diagnostics: recipePlan.diagnostics,
   };
 }
 
