@@ -1,3 +1,33 @@
+# Cuefield AutoMix for Mineradio
+
+Cuefield is an experimental AutoMix layer for Mineradio. It listens to Mineradio's local beatmap cache, plans a DJ-style transition recipe, prepares the next deck, and executes a conservative handoff before the current track ends.
+
+This repository is a public MVP fork for discussion with the Mineradio author. The goal is to prove the transition layer first, not to replace Mineradio or redistribute a separate music player.
+
+## Cuefield MVP
+
+- Planner output: explainable transition recipes, not just a crossfade duration.
+- Current safe recipe: `safety-long-blend`, a conservative long blend for weak/reject pairs.
+- Current listening checkpoint: 57 real playlist tests, `1=54 / 2=2 / 3=1`.
+- Current `safety-long-blend` pass rate: 94.7%.
+- Feedback loop: in-app 1/2/3 rating, local stats panel, and optional multi-tester remote feedback mirroring.
+- Data boundary: no music files, cookies, playback URLs, raw beatmap cache, or private feedback logs are committed.
+
+Read the MVP handoff: [docs/CUEFIELD_MVP.md](./docs/CUEFIELD_MVP.md)
+
+## Relationship To Mineradio
+
+Cuefield currently ships as a fork because the MVP needs Mineradio's real player, queue, beat analysis, and UI runtime to prove whether the transition layer feels usable. The intended long-term shape is cleaner:
+
+- `adapter`: read host beatmaps, queue state, and audio URLs
+- `planner`: choose transition anchors and recipe timelines
+- `runtime`: prepare the next deck and execute the handoff
+- `feedback`: collect ratings for recipe tuning
+
+Mineradio remains the host application in this MVP. Cuefield is the transition brain being tested inside it.
+
+---
+
 # Mineradio
 
 ![Mineradio 暗场启动页](./docs/assets/readme/cinema-beat-smoke.png)
