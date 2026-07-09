@@ -10675,7 +10675,8 @@ async function ensureCuefieldAutoMixBeatMap(song, key, ctx) {
   if (beatMapCache[key]) return true;
   if (ctx && ctx.currentIndex === currentIdx && key === beatMapSongKey(playQueue[currentIdx]) && currentBeatMap) {
     beatMapCache[key] = currentBeatMap;
-    return await writeBeatDiskCache(key, currentBeatMap, song, 'mr');
+    writeBeatDiskCache(key, currentBeatMap, song, 'mr').catch(function(){});
+    return true;
   }
   var diskMap = await readBeatDiskCache(key);
   if (diskMap) return true;

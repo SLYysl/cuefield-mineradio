@@ -56,6 +56,7 @@ const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer
 const { appendCuefieldFeedback, readCuefieldFeedbackStats } = require('./cuefield/feedback-log');
 const { planTransitionFromPayload } = require('./cuefield/api');
 const { planCuefieldTransitionFromCache } = require('./cuefield/mineradio-bridge');
+const { defaultBeatMapCacheDir } = require('./cuefield/beatmap-cache-path');
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -66,7 +67,7 @@ const CUEFIELD_FEEDBACK_FILE = process.env.CUEFIELD_FEEDBACK_FILE || path.join(_
 const UPDATE_WORK_DIR = process.env.MINERADIO_UPDATE_DIR || path.join(__dirname, 'updates');
 const UPDATE_DOWNLOAD_DIR = process.env.MINERADIO_UPDATE_DOWNLOAD_DIR || path.join(UPDATE_WORK_DIR, 'downloads');
 const UPDATE_PATCH_BACKUP_DIR = process.env.MINERADIO_PATCH_BACKUP_DIR || path.join(UPDATE_WORK_DIR, 'backups', 'patches');
-const BEATMAP_CACHE_DIR = process.env.MINERADIO_BEAT_CACHE_DIR || 'D:\\MineradioCache\\beatmaps';
+const BEATMAP_CACHE_DIR = defaultBeatMapCacheDir({ projectDir: __dirname });
 const APP_PACKAGE = readPackageInfo();
 const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '0.9.11';
 const UPDATE_CONFIG = readUpdateConfig(APP_PACKAGE);

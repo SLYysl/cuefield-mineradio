@@ -17,3 +17,10 @@ test('Cuefield feedback stats panel can fetch and render feedback stats', () => 
   assert.match(html, /cuefield-feedback-stat-passrate/);
   assert.match(html, /cuefield-feedback-stat-failures/);
 });
+
+test('Cuefield AutoMix treats the active in-memory beatmap as ready before disk persistence', () => {
+  const html = readIndexHtml();
+
+  assert.match(html, /beatMapCache\[key\] = currentBeatMap;\s*writeBeatDiskCache\(key, currentBeatMap, song, 'mr'\)\.catch/);
+  assert.match(html, /return true;\s*\}\s*var diskMap = await readBeatDiskCache\(key\);/);
+});
