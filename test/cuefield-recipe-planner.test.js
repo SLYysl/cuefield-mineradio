@@ -375,6 +375,31 @@ test('uses long overlap only for a trusted entry with compatible tempo', () => {
   assert.equal(plan.chosen.timeline.filter((action) => action.deck === 'B' && action.op === 'volume' && !action.curve).every((action) => action.value === 0), true);
 });
 
+test('structure route leaves direct planner long-overlap selection available', () => {
+  const fromProfile = buildCueProfile({
+    track: { title: 'A', duration: 128 },
+    map: makeBeatMap(128, 0.5),
+    candidates: [{ type: 'outro', role: 'exit', time: 112, confidence: 0.82 }],
+  });
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 0, confidence: 0.8, resolvesTo: { time: 12 } };
+  const toProfile = buildCueProfile({
+    track: { title: 'B', duration: 120 },
+    map: makeBeatMap(120, 0.5),
+    candidates: [entry],
+  });
+  const usable = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { time: 112 }, entry, evaluation: { tier: 'usable', risks: [] } },
+    routePolicy: { route: 'structure-mix', overlapClass: 'adaptive' },
+  });
+  const weak = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { time: 112 }, entry, evaluation: { tier: 'weak', risks: [] } },
+    routePolicy: { route: 'structure-mix', overlapClass: 'adaptive' },
+  });
+
+  assert.notEqual(usable.chosen.recipe, 'safety-long-blend');
+  assert.equal(weak.diagnostics.overlapClass, 'long');
+});
+
 test('reports overlap diagnostics from the chosen recipe timeline', () => {
   const fromProfile = buildCueProfile({
     track: { title: 'A', duration: 128 },

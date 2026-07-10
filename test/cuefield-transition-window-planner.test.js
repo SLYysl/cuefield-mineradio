@@ -140,6 +140,53 @@ test('late contrast rise constrains exits to its late range and uses a short ove
   assert.notEqual(result.chosen.entry.type, 'hook');
 });
 
+test('late contrast rise with only an early exit escalates to terminal rescue', () => {
+  const from = setBarMetrics(profile({
+    duration: 200,
+    exits: [exit(92, 0.99, { exitRatio: 0.46 })],
+  }), 92, { energy: 0.36, snapDensity: 0.16 });
+  const to = setBarMetrics(profile({
+    entries: [entry('intro', 12, { playFrom: 0, landingAt: 12, landingType: 'intro' })],
+  }), 12, { energy: 0.82, snapDensity: 0.58 });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.policy.route, 'terminal-rescue');
+  assert.equal(result.chosen.recipeCandidate.recipe, 'terminal-rescue');
+  assert.equal(result.diagnostics.consideredExitCount, 0);
+  assert.equal(result.chosen.exitRatio >= 0.88 && result.chosen.exitRatio <= 0.96, true);
+});
+
+test('late contrast release filters a high-scoring long recipe from window ranking', () => {
+  const from = setBarMetrics(profile({
+    duration: 200,
+    exits: [exit(160, 0.84, { exitRatio: 0.8 })],
+  }), 160, { energy: 0.86, snapDensity: 0.64 });
+  const intro = entry('intro', 1.4, {
+    source: 'energy',
+    confidence: 0.55,
+    playFrom: 0,
+    landingAt: 1.4,
+    landingType: 'intro',
+  });
+  const to = setBarMetrics(profile({
+    entries: [entry('drop', 12, {
+      source: 'energy',
+      confidence: 0.95,
+      playFrom: 0,
+      landingAt: 12,
+      landingType: 'drop',
+    })],
+    candidates: [intro],
+  }), 12, { energy: 0.34, snapDensity: 0.16 });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.policy.route, 'late-contrast-release');
+  assert.notEqual(result.chosen.recipeCandidate.recipe, 'intro-outro-long-blend');
+  assert.equal(result.chosen.audibleOverlap <= 6, true);
+});
+
 test('structure mix retains an early usable post-hook exit', () => {
   const from = profile({
     duration: 200,
@@ -227,18 +274,34 @@ test('terminal rescue returns an executable late timeline when structural window
   assert.equal(result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
 });
 
+test('terminal rescue caps a valid late exit to a short executable overlap', () => {
+  const from = profile({ duration: 200, exits: [exit(180, 0.82, { exitRatio: 0.9 })] });
+  const to = profile({ duration: 120 });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.policy.route, 'terminal-rescue');
+  assert.equal(result.chosen.mixStart, 180);
+  assert.equal(result.chosen.mixStart >= from.structureMap.protectedUntil, true);
+  assert.equal(result.chosen.audibleOverlap <= 3.4, true);
+  assert.equal(result.chosen.audibleOverlap >= 2.2, true);
+  assert.equal(result.chosen.handoffAt <= from.duration, true);
+  assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= result.chosen.audibleOverlap), true);
+});
+
 test('terminal rescue respects a very late protected section without negative timing or ending after A', () => {
-  const from = profile({ duration: 12, protectedUntil: 10.5 });
+  const from = profile({ duration: 12, protectedUntil: 11.9 });
   const to = profile({ duration: 24 });
 
   const result = chooseTransitionWindow(from, to);
   const timeline = result.chosen.timeline;
 
   assert.equal(result.chosen.policy.route, 'terminal-rescue');
-  assert.equal(result.chosen.mixStart >= 10.5, true);
+  assert.equal(result.chosen.mixStart >= 11.9, true);
   assert.equal(result.chosen.handoffAt <= 12, true);
   assert.equal(result.chosen.mixStart < result.chosen.handoffAt, true);
   assert.equal(timeline.every((action) => action.t >= 0), true);
+  assert.equal(timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= result.chosen.audibleOverlap), true);
   assert.equal(timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
 });
 

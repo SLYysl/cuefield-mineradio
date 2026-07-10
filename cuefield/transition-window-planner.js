@@ -152,7 +152,8 @@ function exitsForPolicy(exits, duration, policy) {
     const ratio = toNumber(candidate.time) / Math.max(1, toNumber(duration));
     return ratio >= minRatio && ratio <= maxRatio;
   });
-  return inRange.length ? inRange : exits;
+  if (inRange.length || !policy || policy.route === 'structure-mix') return inRange.length ? inRange : exits;
+  return [];
 }
 
 function exitOptions(analysis, protectedUntil, policy) {
@@ -237,6 +238,16 @@ function entryPolicyPenalty(entry, policy) {
   return landingKind(entry) === 'hook' && type !== 'pre-hook' ? 0.18 : 0;
 }
 
+function recipeCandidateAllowedByRoute(candidate, policy) {
+  const route = policy && policy.route;
+  const overlap = toNumber(candidate && candidate.window && candidate.window.audibleOverlap);
+  if (route === 'late-contrast-rise') {
+    return candidate.recipe === 'safety-long-blend' && overlap <= 3.5;
+  }
+  if (route === 'late-contrast-release') return overlap <= 6;
+  return true;
+}
+
 function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, fromProfile, toProfile, policy }) {
   const energyContinuity = clamp(diagnostics.energyScore);
   const tempoCompatibility = clamp(diagnostics.bpmScore);
@@ -319,15 +330,18 @@ function terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, rejec
       return ratio >= minRatio && ratio <= maxRatio && toNumber(candidate.time) < duration;
     })
     .sort((a, b) => toNumber(b.time) - toNumber(a.time));
-  const minimumDuration = Math.min(3.4, Math.max(0.2, duration * 0.03));
   const preferredStart = rangeExits[0]
     ? toNumber(rangeExits[0].time)
     : Math.max(toNumber(protectedUntil), Math.min(duration - 3.6, duration * 0.92));
-  const latestStart = Math.max(0, duration - minimumDuration);
-  const mixStart = round(Math.max(0, Math.min(preferredStart, latestStart)));
-  const overlapDuration = round(Math.max(0.01, duration - mixStart));
+  const mixStart = round(Math.max(toNumber(protectedUntil), Math.min(duration, preferredStart)));
+  const overlapDuration = round(Math.max(0, Math.min(3.4, duration - mixStart)));
   const fadeDuration = Math.max(1, Math.round(overlapDuration * 1000));
-  const bassRestoreAt = round(Math.max(0, overlapDuration - Math.min(1, overlapDuration * 0.3)));
+  const bassRestoreDuration = Math.min(800, fadeDuration);
+  const bassRestoreAt = round(Math.max(0, overlapDuration - bassRestoreDuration / 1000 - 0.001));
+  const boundedBassRestoreDuration = Math.max(0, Math.min(
+    bassRestoreDuration,
+    Math.round((overlapDuration - bassRestoreAt) * 1000),
+  ));
   const entry = {
     type: 'start',
     role: 'entry',
@@ -343,7 +357,7 @@ function terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, rejec
     { t: 0, deck: 'B', op: 'bass', value: 0.2, duration: 0 },
     { t: 0, deck: 'B', op: 'volume', value: 1, duration: fadeDuration, curve: 'equal-power-in' },
     { t: 0, deck: 'A', op: 'volume', value: 0, duration: fadeDuration, curve: 'equal-power-out' },
-    { t: bassRestoreAt, deck: 'B', op: 'bass', value: 1, duration: Math.min(800, fadeDuration) },
+    { t: bassRestoreAt, deck: 'B', op: 'bass', value: 1, duration: boundedBassRestoreDuration },
     { t: overlapDuration, deck: 'B', op: 'handoff' },
   ];
   const exit = rangeExits[0] || {
@@ -407,7 +421,7 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
         sectionChoice: { ...sectionChoice, entry: recipeSectionEntry(entry) },
         routePolicy: policy,
       });
-      (recipePlan.candidates || []).forEach((candidate) => {
+      (recipePlan.candidates || []).filter((candidate) => recipeCandidateAllowedByRoute(candidate, policy)).forEach((candidate) => {
         const recipeCandidate = { ...candidate, score: clamp(candidate.score) };
         diagnostics.recipeCandidatesConsidered += 1;
         const reasons = rejectionReasons({ protectedUntil, exit, entry, recipeCandidate, diagnostics: recipePlan.diagnostics || {} });

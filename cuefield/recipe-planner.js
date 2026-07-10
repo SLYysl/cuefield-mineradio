@@ -543,7 +543,8 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
     makeQuickFade(anchors, scores),
   ].sort((a, b) => b.score - a.score || b.confidence - a.confidence);
   const validCandidates = candidates.filter((candidate) => candidate.window.runwayAvailable);
-  const requiresAdaptiveSafety = needsSafetyFallback || safety.anchors.overlapClass !== 'long' || route !== '';
+  const requiresAdaptiveSafety = needsSafetyFallback || safety.anchors.overlapClass !== 'long'
+    || (route !== '' && route !== 'structure-mix');
   const preferred = candidates.find((candidate) => !candidate.risks.includes('hard cut')) || candidates[0];
   const chosen = requiresAdaptiveSafety
     ? (safety.window.runwayAvailable ? safety : (validCandidates[0] || safety))
