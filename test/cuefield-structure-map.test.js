@@ -81,6 +81,39 @@ test('skips an early low-energy repeated block for a later valid hook', () => {
   assert.equal(map.protectedUntil, 96);
 });
 
+test('does not treat consecutive identical lyric lines as a repeated block', () => {
+  const map = buildStructureMap({
+    profile: makeProfile([0.32, 0.78, 0.74, 0.44, 0.72, 0.7]),
+    lrcLines: [
+      { time: 18, normalized: 'same line' },
+      { time: 34, normalized: 'same line' },
+      { time: 50, normalized: 'same line' },
+      { time: 66, normalized: 'same line' },
+    ],
+  });
+
+  assert.equal(map.sections.some((section) => section.type === 'hook'), false);
+});
+
+test('deduplicates unordered lyric records before finding the real repeated block', () => {
+  const map = buildStructureMap({
+    profile: makeProfile([0.32, 0.78, 0.74, 0.44, 0.72, 0.7]),
+    lrcLines: [
+      { time: 82, normalized: 'nothing feels the same' },
+      { time: 18, normalized: 'we own the night' },
+      { time: 82, normalized: 'nothing feels the same' },
+      { time: 66, normalized: 'we own the night' },
+      { time: 34, normalized: 'nothing feels the same' },
+      { time: 18, normalized: 'we own the night' },
+    ],
+  });
+
+  const hook = map.sections.find((section) => section.type === 'hook');
+  assert.equal(hook.start, 16);
+  assert.equal(hook.end, 48);
+  assert.equal(map.protectedUntil, 48);
+});
+
 test('does not end protection on a transient early peak', () => {
   const map = buildStructureMap({ profile: makeProfile([0.9, 0.35, 0.72, 0.69, 0.4]), lrcLines: [] });
 

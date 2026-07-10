@@ -20,12 +20,20 @@ function repeatedLyricTimes(lines) {
 }
 
 function repeatedLyricBlocks(lines) {
-  const sorted = (lines || []).slice().sort((a, b) => toNumber(a.time) - toNumber(b.time));
+  const unique = new Map();
+  for (const line of lines || []) {
+    const normalized = String(line && line.normalized || '').trim();
+    const time = toNumber(line && line.time, NaN);
+    if (normalized.length < 4 || !Number.isFinite(time)) continue;
+    const key = `${normalized}\u0000${time}`;
+    if (!unique.has(key)) unique.set(key, { ...line, normalized, time });
+  }
+  const sorted = Array.from(unique.values()).sort((a, b) => a.time - b.time);
   const pairs = new Map();
   for (let index = 0; index < sorted.length - 1; index += 1) {
     const first = String(sorted[index] && sorted[index].normalized || '').trim();
     const second = String(sorted[index + 1] && sorted[index + 1].normalized || '').trim();
-    if (first.length < 4 || second.length < 4) continue;
+    if (first.length < 4 || second.length < 4 || first === second) continue;
     const key = `${first}\u0000${second}`;
     if (!pairs.has(key)) pairs.set(key, []);
     pairs.get(key).push(index);
