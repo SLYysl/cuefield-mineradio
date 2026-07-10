@@ -110,11 +110,81 @@ test('uses safety long blend for weak or rejected section choices', () => {
   });
 
   assert.equal(plan.chosen.recipe, 'safety-long-blend');
-  assert.equal(plan.chosen.anchors.lead, 12);
+  assert.equal(plan.chosen.anchors.overlapClass, 'short');
+  assert.equal(plan.chosen.anchors.overlapDuration <= 3.2, true);
   assert.equal(plan.chosen.timeline[0].op, 'play');
-  assert.equal(plan.chosen.timeline[0].at, 0);
+  assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'filter' && action.t < -2), false);
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'B' && action.op === 'bass' && action.value < 0.2), true);
-  assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'filter'), true);
+});
+
+test('keeps fallback entries on a short aligned overlap even with a high pair score', () => {
+  const fromProfile = buildCueProfile({
+    track: { title: 'A', duration: 128 },
+    map: makeBeatMap(128, 0.5),
+    candidates: [{ type: 'outro', role: 'exit', time: 112, confidence: 0.82 }],
+  });
+  const toProfile = buildCueProfile({
+    track: { title: 'B', duration: 120 },
+    map: makeBeatMap(120, 0.75),
+    candidates: [{ type: 'intro', role: 'entry', source: 'fallback', time: 16, confidence: 0.52 }],
+  });
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: {
+      exit: { time: 112 },
+      entry: { type: 'intro', role: 'entry', source: 'fallback', time: 16, confidence: 0.52 },
+      score: 0.99,
+      evaluation: { tier: 'reject', score: 0.99, risks: ['directionality mismatch'] },
+    },
+  });
+  const play = plan.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play');
+
+  assert.equal(plan.chosen.anchors.overlapClass, 'short');
+  assert.equal(plan.chosen.anchors.overlapDuration <= 3.2, true);
+  assert.equal(plan.chosen.anchors.entrySource, 'fallback');
+  assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'filter' && action.t < -2), false);
+  assert.equal(Math.abs((play.at + plan.chosen.anchors.lead) - plan.chosen.anchors.bAnchor) <= 0.05, true);
+});
+
+test('uses medium overlap for a trusted entry with moderate tempo difference', () => {
+  const fromProfile = buildCueProfile({
+    track: { title: 'A', duration: 128 },
+    map: makeBeatMap(128, 0.5),
+    candidates: [{ type: 'outro', role: 'exit', time: 112, confidence: 0.82 }],
+  });
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 0, confidence: 0.74, resolvesTo: { time: 8 } };
+  const toProfile = buildCueProfile({
+    track: { title: 'B', duration: 120 },
+    map: makeBeatMap(120, 0.56),
+    candidates: [entry],
+  });
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { time: 112 }, entry, evaluation: { tier: 'weak', risks: [] } },
+  });
+
+  assert.equal(plan.chosen.anchors.overlapClass, 'medium');
+  assert.equal(plan.chosen.anchors.overlapDuration >= 4, true);
+  assert.equal(plan.chosen.anchors.overlapDuration <= 6, true);
+});
+
+test('uses long overlap only for a trusted entry with compatible tempo', () => {
+  const fromProfile = buildCueProfile({
+    track: { title: 'A', duration: 128 },
+    map: makeBeatMap(128, 0.5),
+    candidates: [{ type: 'outro', role: 'exit', time: 112, confidence: 0.82 }],
+  });
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 0, confidence: 0.8, resolvesTo: { time: 12 } };
+  const toProfile = buildCueProfile({
+    track: { title: 'B', duration: 120 },
+    map: makeBeatMap(120, 0.52),
+    candidates: [entry],
+  });
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { time: 112 }, entry, evaluation: { tier: 'weak', risks: [] } },
+  });
+
+  assert.equal(plan.chosen.anchors.overlapClass, 'long');
+  assert.equal(plan.chosen.anchors.overlapDuration >= 8, true);
+  assert.equal(plan.chosen.anchors.overlapDuration <= 12, true);
 });
 
 test('reports planner features for outro completeness, intro aggression, and texture distance', () => {

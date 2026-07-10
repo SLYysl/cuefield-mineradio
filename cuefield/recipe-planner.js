@@ -65,7 +65,8 @@ function pickAnchors(fromProfile, toProfile, opts = {}) {
   const intro = firstCandidate(toProfile, (candidate) => candidate.role === 'entry' && candidate.type === 'intro');
   const aExit = round(toNumber(sectionChoice.exit && sectionChoice.exit.time, toNumber(fromCue.outroStart, Math.max(0, fromProfile.duration - 16))));
   const bIntro = round(toNumber(intro && intro.time, toNumber(toCue.introStart, 0)));
-  const bAnchor = round(toNumber(sectionChoice.entry && sectionChoice.entry.time, toNumber(hook && hook.time, toNumber(toCue.firstStrongDownbeat, bIntro))));
+  const sectionEntry = sectionChoice.entry || {};
+  const bAnchor = round(toNumber(sectionEntry.resolvesTo && sectionEntry.resolvesTo.time, toNumber(sectionEntry.time, toNumber(hook && hook.time, toNumber(toCue.firstStrongDownbeat, bIntro)))));
   const bStart = Math.max(0, Math.min(bIntro, bAnchor));
   const bar = barLength(fromProfile);
 
@@ -74,7 +75,7 @@ function pickAnchors(fromProfile, toProfile, opts = {}) {
     bStart: round(bStart),
     bAnchor,
     barLength: bar,
-    downbeatOffset: downbeatOffset(aExit, bAnchor, bar),
+    downbeatOffset: 0,
   };
 }
 
@@ -224,9 +225,102 @@ function makeQuickFade(anchors, scores) {
   );
 }
 
-function makeSafetyLongBlend(anchors, scores, sectionChoice = {}) {
-  const lead = 12;
-  const bStart = round(Math.max(0, anchors.bStart));
+function safetyAssessment(fromProfile, toProfile, sectionChoice = {}) {
+  const entry = sectionChoice.entry || {};
+  const entrySource = String(entry.source || 'fallback');
+  const entryConfidence = clamp(entry.confidence);
+  const entryTrusted = entrySource !== 'fallback' && entryConfidence >= 0.6;
+  const bpmA = Math.max(0, toNumber(fromProfile && fromProfile.bpm));
+  const bpmB = Math.max(0, toNumber(toProfile && toProfile.bpm));
+  const relativeTempoDelta = bpmA > 0 && bpmB > 0 ? Math.abs(bpmA - bpmB) / Math.max(bpmA, bpmB) : 1;
+  const beatGridTrusted = !!(
+    fromProfile && toProfile
+    && toNumber(fromProfile.gridStep) > 0
+    && toNumber(toProfile.gridStep) > 0
+    && (fromProfile.downbeats || []).length >= 4
+    && (toProfile.downbeats || []).length >= 4
+  );
+  let overlapClass = 'short';
+  if (entryTrusted && beatGridTrusted && relativeTempoDelta <= 0.08) overlapClass = 'long';
+  else if (entryTrusted && relativeTempoDelta <= 0.15) overlapClass = 'medium';
+  const overlapDuration = overlapClass === 'long' ? 10.5 : (overlapClass === 'medium' ? 5.6 : 3.1);
+  return {
+    entrySource,
+    entryConfidence: round(entryConfidence),
+    entryTrusted,
+    bpmA: round(bpmA),
+    bpmB: round(bpmB),
+    relativeTempoDelta: round(relativeTempoDelta),
+    beatGridTrusted,
+    overlapClass,
+    overlapDuration,
+  };
+}
+
+function safetyTimeline(anchors, assessment) {
+  const overlapClass = assessment.overlapClass;
+  const lead = overlapClass === 'long' ? 9.5 : (overlapClass === 'medium' ? 5 : 2.8);
+  const handoffAt = round(assessment.overlapDuration - lead);
+  const bStart = round(Math.max(0, anchors.bAnchor - lead));
+  if (overlapClass === 'short') {
+    return {
+      lead,
+      bStart,
+      timeline: [
+        { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
+        { t: -lead, deck: 'B', op: 'bass', value: 0.15, duration: 0 },
+        { t: -lead, deck: 'B', op: 'volume', value: 1, duration: 2800 },
+        { t: -1.6, deck: 'A', op: 'bass', value: 0.5, duration: 700 },
+        { t: -1.4, deck: 'A', op: 'volume', value: 0, duration: 1400 },
+        { t: -0.8, deck: 'B', op: 'bass', value: 0.85, duration: 700 },
+        { t: 0, deck: 'B', op: 'bass', value: 1, duration: 300 },
+        { t: handoffAt, deck: 'B', op: 'handoff' },
+      ],
+    };
+  }
+  if (overlapClass === 'medium') {
+    return {
+      lead,
+      bStart,
+      timeline: [
+        { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
+        { t: -lead, deck: 'B', op: 'bass', value: 0.12, duration: 0 },
+        { t: -lead, deck: 'B', op: 'filter', type: 'highpass', value: 850, duration: 0 },
+        { t: -lead, deck: 'B', op: 'volume', value: 0.55, duration: 2800 },
+        { t: -2.2, deck: 'B', op: 'volume', value: 1, duration: 2200 },
+        { t: -1.8, deck: 'A', op: 'bass', value: 0.3, duration: 1000 },
+        { t: -1.2, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 1000 },
+        { t: -1.1, deck: 'A', op: 'volume', value: 0, duration: 1100 },
+        { t: -0.8, deck: 'B', op: 'bass', value: 1, duration: 900 },
+        { t: handoffAt, deck: 'B', op: 'handoff' },
+      ],
+    };
+  }
+  return {
+    lead,
+    bStart,
+    timeline: [
+      { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
+      { t: -lead, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
+      { t: -lead, deck: 'B', op: 'filter', type: 'highpass', value: 1100, duration: 0 },
+      { t: -lead, deck: 'B', op: 'volume', value: 0.35, duration: 3600 },
+      { t: -5.4, deck: 'B', op: 'volume', value: 0.62, duration: 3000 },
+      { t: -2, deck: 'A', op: 'filter', type: 'highpass', value: 160, duration: 1600 },
+      { t: -1.8, deck: 'A', op: 'bass', value: 0.24, duration: 1200 },
+      { t: -1.6, deck: 'B', op: 'volume', value: 1, duration: 1600 },
+      { t: -1.2, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 1100 },
+      { t: -1, deck: 'A', op: 'volume', value: 0, duration: 1000 },
+      { t: -0.8, deck: 'B', op: 'bass', value: 1, duration: 900 },
+      { t: handoffAt, deck: 'B', op: 'handoff' },
+    ],
+  };
+}
+
+function makeSafetyLongBlend(anchors, scores, sectionChoice = {}, fromProfile = {}, toProfile = {}) {
+  const assessment = safetyAssessment(fromProfile, toProfile, sectionChoice);
+  const execution = safetyTimeline(anchors, assessment);
+  const lead = execution.lead;
+  const bStart = execution.bStart;
   const score = 0.48
     + scores.bpmScore * 0.08
     + scores.beatScore * 0.05
@@ -249,25 +343,8 @@ function makeSafetyLongBlend(anchors, scores, sectionChoice = {}) {
       'low end is delayed to avoid bass collision',
     ],
     risks,
-    { ...anchors, bStart, lead, safetyFallback: true },
-    [
-      { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
-      { t: -lead, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
-      { t: -lead, deck: 'B', op: 'filter', type: 'highpass', value: 1200, duration: 0 },
-      { t: -lead, deck: 'B', op: 'volume', value: 0.24, duration: 2600 },
-      { t: -9.2, deck: 'A', op: 'filter', type: 'highpass', value: 420, duration: 3200 },
-      { t: -8.2, deck: 'A', op: 'bass', value: 0.55, duration: 2800 },
-      { t: -6.4, deck: 'B', op: 'volume', value: 0.46, duration: 3600 },
-      { t: -4.2, deck: 'B', op: 'filter', type: 'highpass', value: 520, duration: 2600 },
-      { t: -3.4, deck: 'A', op: 'bass', value: 0.18, duration: 2400 },
-      { t: -2.4, deck: 'B', op: 'volume', value: 0.74, duration: 2200 },
-      { t: -1.1, deck: 'B', op: 'bass', value: 0.72, duration: 1800 },
-      { t: 0, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 1600 },
-      { t: 0.4, deck: 'A', op: 'volume', value: 0.16, duration: 2400 },
-      { t: 2.9, deck: 'A', op: 'volume', value: 0, duration: 900 },
-      { t: 3.8, deck: 'B', op: 'bass', value: 1, duration: 1600 },
-      { t: 4.8, deck: 'B', op: 'handoff' },
-    ],
+    { ...anchors, ...assessment, bStart, lead, safetyFallback: true },
+    execution.timeline,
   );
 }
 
@@ -280,7 +357,7 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
     || sectionTier === 'reject'
     || sectionRisks.includes('directionality mismatch')
     || sectionRisks.includes('style bridge mismatch');
-  const safety = makeSafetyLongBlend(anchors, scores, opts.sectionChoice);
+  const safety = makeSafetyLongBlend(anchors, scores, opts.sectionChoice, fromProfile, toProfile);
   const candidates = [
     safety,
     makeLongBlend(anchors, scores),
@@ -307,6 +384,15 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
       outroCompleteness: round(scores.outroCompleteness),
       bIntroAggression: round(scores.bIntroAggression),
       styleTextureDistance: round(scores.styleTextureDistance),
+      entrySource: safety.anchors.entrySource,
+      entryConfidence: safety.anchors.entryConfidence,
+      entryTrusted: safety.anchors.entryTrusted,
+      bpmA: safety.anchors.bpmA,
+      bpmB: safety.anchors.bpmB,
+      relativeTempoDelta: safety.anchors.relativeTempoDelta,
+      beatGridTrusted: safety.anchors.beatGridTrusted,
+      overlapClass: safety.anchors.overlapClass,
+      overlapDuration: safety.anchors.overlapDuration,
     },
   };
 }
