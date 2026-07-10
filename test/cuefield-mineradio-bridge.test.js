@@ -106,6 +106,59 @@ test('plans only after the protected first hook when paired lyrics are available
   assert.equal(result.diagnostics.exitCandidateCount > 0, true);
 });
 
+test('exposes the validated transition window and sanitized diagnostics', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
+    'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(96) },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    fromLrc: '[00:18.00]we own the night\n[00:34.00]nothing feels the same\n[01:06.00]we own the night\n[01:22.00]nothing feels the same',
+    toLrc: '[00:18.00]take me higher\n[00:34.00]feel it rising\n[01:06.00]take me higher\n[01:22.00]feel it rising',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+
+  const { chosen, diagnostics } = result;
+  assert.equal(chosen.mixStart >= chosen.protectedUntil, true);
+  assert.equal(chosen.audibleOverlap >= 3, true);
+  assert.equal(chosen.exitRatio < 0.78, true);
+  assert.equal(chosen.transitionRecipe, chosen.recipeCandidate.recipe);
+  assert.equal(diagnostics.protectedUntil, chosen.protectedUntil);
+  assert.equal(diagnostics.mixStart, chosen.mixStart);
+  assert.equal(diagnostics.handoffAt, chosen.handoffAt);
+  assert.equal(diagnostics.audibleOverlap, chosen.audibleOverlap);
+  assert.equal(diagnostics.preRollDuration, chosen.preRollDuration);
+  assert.equal(diagnostics.exitRatio, chosen.exitRatio);
+  assert.equal(Number.isFinite(chosen.energyContinuity), true);
+  assert.equal(Number.isFinite(chosen.grooveContinuity), true);
+  assert.equal(Number.isFinite(chosen.tempoCompatibility), true);
+  assert.equal(diagnostics.firstHookStart, 16);
+  assert.equal(diagnostics.firstHookEnd, 40);
+  assert.equal(diagnostics.hookConfidence, 0.88);
+  assert.deepEqual(diagnostics.hookEvidence, result.from.structureMap.sections.find((section) => section.type === 'hook').evidence);
+  assert.equal(JSON.stringify({ diagnostics, candidates: result.candidates, rejected: result.rejected }).includes('we own the night'), false);
+});
+
+test('runtime wrapper uses cueProfile BPM and beat-only fallback never claims hook entry', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
+    'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(96) },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+
+  assert.equal(result.from.cueProfile.bpm, 120);
+  assert.equal(result.to.cueProfile.bpm, 120);
+  assert.equal(['start', 'intro', 'drop'].includes(result.diagnostics.entryType), true);
+  assert.equal(Number.isFinite(result.chosen.energyContinuity), true);
+  assert.equal(Number.isFinite(result.chosen.grooveContinuity), true);
+  assert.equal(Number.isFinite(result.chosen.tempoCompatibility), true);
+});
+
 test('uses a real zero-second fallback when paired lyrics are unavailable', () => {
   const cache = {
     'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },

@@ -197,6 +197,76 @@ test('uses recipe planner timeline for execution mode, trigger lead, and B start
   assert.equal(result.pending.timeline.length, 2);
 });
 
+test('uses explicit mixStart and copies transition window diagnostics into pending state', async () => {
+  const automix = createCuefieldAutoMix({
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => ({
+      ok: true,
+      chosen: {
+        transitionRecipe: 'intro-outro-long-blend',
+        exit: { time: 53 },
+        entry: { time: 12 },
+        protectedUntil: 40,
+        mixStart: 48.25,
+        handoffAt: 51.25,
+        audibleOverlap: 3,
+        preRollDuration: 2,
+        exitRatio: 0.7,
+        evaluation: { tier: 'usable', risks: [] },
+        timeline: [{ t: 0, deck: 'B', op: 'play', at: 0 }],
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+
+  automix.setEnabled(true);
+  const result = await automix.prepare({
+    token: 13,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+    leadSec: 5,
+  });
+
+  assert.equal(result.pending.triggerAt, 48.25);
+  assert.equal(result.pending.handoffAt, 51.25);
+  assert.equal(result.pending.audibleOverlap, 3);
+  assert.equal(result.pending.preRollDuration, 2);
+  assert.equal(result.pending.exitRatio, 0.7);
+});
+
+test('keeps legacy exit minus lead trigger when mixStart is absent', async () => {
+  const automix = createCuefieldAutoMix({
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => ({
+      ok: true,
+      chosen: {
+        transitionRecipe: 'intro-outro-long-blend',
+        exit: { time: 53 },
+        entry: { time: 12 },
+        evaluation: { tier: 'usable', risks: [] },
+        timeline: [],
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+
+  automix.setEnabled(true);
+  const result = await automix.prepare({
+    token: 14,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+    leadSec: 5,
+  });
+
+  assert.equal(result.pending.triggerAt, 48);
+});
+
 test('never starts transition actions before the protected signature section ends', async () => {
   const automix = createCuefieldAutoMix({
     getKey: (song) => song.key,

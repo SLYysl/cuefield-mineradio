@@ -157,7 +157,10 @@
           : toNumber(ctx.leadSec, 1);
         var leadSec = timelineLeadSec(timeline, fallbackLeadSec);
         var protectedUntil = Math.max(0, toNumber(chosen.protectedUntil, 0));
-        var triggerAt = isFinite(exitTime) ? Math.max(protectedUntil, exitTime - leadSec) : protectedUntil;
+        var explicitMixStart = toNumber(chosen.mixStart, NaN);
+        var triggerAt = isFinite(explicitMixStart)
+          ? Math.max(protectedUntil, explicitMixStart)
+          : (isFinite(exitTime) ? Math.max(protectedUntil, exitTime - leadSec) : protectedUntil);
         var entryTime = timelineBStart(timeline, Math.max(0, toNumber(chosen.entry && chosen.entry.time, 0)));
         state.pending = {
           token: ctx.token,
@@ -172,6 +175,10 @@
           entryTime: entryTime,
           exitTime: exitTime,
           protectedUntil: protectedUntil,
+          handoffAt: chosen.handoffAt,
+          audibleOverlap: chosen.audibleOverlap,
+          preRollDuration: chosen.preRollDuration,
+          exitRatio: chosen.exitRatio,
           triggerAt: triggerAt,
           createdAt: Date.now(),
         };

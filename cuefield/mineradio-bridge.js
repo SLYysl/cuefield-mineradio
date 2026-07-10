@@ -1,9 +1,9 @@
-const { analyzeSectionCandidates, chooseTransitionCandidates } = require('./section-candidates');
+const { analyzeSectionCandidates } = require('./section-candidates');
 const { normalizeMineradioBeatMap } = require('./adapter-mineradio');
 const { buildCueProfile } = require('./cue-profile');
 const { parseLrc } = require('./lrc-anchors');
-const { planRecipeCandidates } = require('./recipe-planner');
 const { buildStructureMap } = require('./structure-map');
+const { chooseTransitionWindow } = require('./transition-window-planner');
 
 function toTrack(entry, fallbackKey) {
   const meta = entry && entry.meta || {};
@@ -73,6 +73,57 @@ function analyzeCacheEntry(entry, key, lrcText) {
   };
 }
 
+function credibleFirstHook(structureMap) {
+  return (structureMap && structureMap.sections || []).find((section) => (
+    section
+    && structureMap.structureSource === 'lyric+beat'
+    && String(section.type || '').toLowerCase() === 'hook'
+    && Number(section.confidence) >= 0.6
+  )) || null;
+}
+
+function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
+  const fromStructure = from.structureMap || {};
+  const toStructure = to.structureMap || {};
+  const fromHook = credibleFirstHook(fromStructure);
+  const recipeDiagnostics = windowPlan.diagnostics || {};
+  const entry = chosen.entry || {};
+  const rawLandingType = String(entry.landingType || entry.type || 'start').toLowerCase();
+  const landingType = structureSource === 'beat-only' && rawLandingType === 'hook'
+    ? (entry.source === 'fallback' ? 'start' : 'drop')
+    : rawLandingType;
+  return {
+    ...recipeDiagnostics,
+    structureSource,
+    structureConfidence: Math.min(fromStructure.structureConfidence, toStructure.structureConfidence),
+    protectedUntil: chosen.protectedUntil,
+    ...(fromHook ? {
+      firstHookStart: fromHook.start,
+      firstHookEnd: fromHook.end,
+      hookConfidence: fromHook.confidence,
+      ...(fromHook.evidence ? { hookEvidence: fromHook.evidence } : {}),
+    } : {}),
+    exitType: chosen.exit && chosen.exit.type || '',
+    exitConfidence: chosen.exit && chosen.exit.confidence,
+    exitRatio: chosen.exitRatio,
+    entryType: landingType,
+    entrySource: entry.source || '',
+    entryConfidence: entry.confidence,
+    landingAt: entry.landingAt,
+    mixStart: chosen.mixStart,
+    handoffAt: chosen.handoffAt,
+    audibleOverlap: chosen.audibleOverlap,
+    preRollDuration: chosen.preRollDuration,
+    windowRejectionReasons: Array.isArray(chosen.rejectionReasons) ? chosen.rejectionReasons.slice() : [],
+    sourceExitCount: recipeDiagnostics.sourceExitCount,
+    sourceLandingCount: recipeDiagnostics.sourceLandingCount,
+    consideredExitCount: recipeDiagnostics.consideredExitCount,
+    consideredLandingCount: recipeDiagnostics.consideredLandingCount,
+    exitCandidateCount: fromStructure.exitCandidates.length,
+    entryCandidateCount: toStructure.entryCandidates.length,
+  };
+}
+
 function planCuefieldTransitionFromCache(opts = {}) {
   const readBeatMapCache = opts.readBeatMapCache;
   if (typeof readBeatMapCache !== 'function') throw new Error('READ_BEATMAP_CACHE_REQUIRED');
@@ -84,15 +135,35 @@ function planCuefieldTransitionFromCache(opts = {}) {
   const toEntry = entryFromCache(readBeatMapCache, toKey);
   const from = analyzeCacheEntry(fromEntry, fromKey, opts.fromLrc);
   const to = analyzeCacheEntry(toEntry, toKey, opts.toLrc);
-  const sectionChoice = chooseTransitionCandidates(from, to, { exitBias: opts.exitBias || 'late' });
-  const recipePlan = planRecipeCandidates(from.cueProfile, to.cueProfile, {
-    sectionChoice,
-  });
+  const windowPlan = chooseTransitionWindow(from, to);
+  const selected = windowPlan.chosen || {};
+  const sectionChoice = selected.sectionChoice || {};
+  const recipeCandidate = selected.recipeCandidate || {};
+  const chosenScore = sectionChoice.score ?? selected.score ?? recipeCandidate.score ?? 0;
   const chosen = {
     ...sectionChoice,
-    transitionRecipe: recipePlan.chosen.recipe,
-    timeline: recipePlan.chosen.timeline,
-    recipeCandidate: recipePlan.chosen,
+    recipe: sectionChoice.recipe || recipeCandidate.recipe || 'honest-start-fallback',
+    score: chosenScore,
+    evaluation: sectionChoice.evaluation || {
+      score: chosenScore,
+      tier: 'weak',
+      risks: selected.rejectionReasons || [],
+    },
+    exit: selected.exit,
+    entry: selected.entry,
+    protectedUntil: from.structureMap.protectedUntil,
+    transitionRecipe: recipeCandidate.recipe,
+    timeline: selected.timeline,
+    recipeCandidate,
+    mixStart: selected.mixStart,
+    handoffAt: selected.handoffAt,
+    audibleOverlap: selected.audibleOverlap,
+    preRollDuration: selected.preRollDuration,
+    exitRatio: selected.exitRatio,
+    energyContinuity: selected.energyContinuity,
+    grooveContinuity: selected.grooveContinuity,
+    tempoCompatibility: selected.tempoCompatibility,
+    rejectionReasons: selected.rejectionReasons || [],
   };
   const structureSource = from.structureMap.structureSource === 'lyric+beat'
     && to.structureMap.structureSource === 'lyric+beat'
@@ -104,18 +175,13 @@ function planCuefieldTransitionFromCache(opts = {}) {
     from,
     to,
     chosen,
-    candidates: recipePlan.candidates,
-    diagnostics: {
-      ...recipePlan.diagnostics,
-      structureSource,
-      structureConfidence: Math.min(from.structureMap.structureConfidence, to.structureMap.structureConfidence),
-      protectedUntil: from.structureMap.protectedUntil,
-      exitType: chosen.exit && chosen.exit.type || '',
-      exitConfidence: chosen.exit && chosen.exit.confidence,
-      entryType: chosen.entry && chosen.entry.type || '',
-      exitCandidateCount: from.structureMap.exitCandidates.length,
-      entryCandidateCount: to.structureMap.entryCandidates.length,
+    candidates: windowPlan.candidates,
+    rejected: windowPlan.rejected,
+    windowPlan: {
+      candidates: windowPlan.candidates,
+      rejected: windowPlan.rejected,
     },
+    diagnostics: transitionDiagnostics(from, to, windowPlan, chosen, structureSource),
   };
 }
 
