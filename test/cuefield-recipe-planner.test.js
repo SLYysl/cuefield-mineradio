@@ -195,6 +195,19 @@ test('plans multiple recipe candidates with timelines and chooses the safest hig
   assert.equal(recipes.includes('quick-safe-fade'), true);
   assert.equal(plan.candidates.every((candidate) => candidate.timeline.length > 0), true);
   assert.equal(plan.candidates.every((candidate) => Number.isFinite(candidate.window.audibleOverlap)), true);
+  assert.equal(plan.candidates.every((candidate) => typeof candidate.window.runwayAvailable === 'boolean'), true);
+  assert.equal(plan.candidates.every((candidate) => Number.isFinite(candidate.window.landingError)), true);
+  assert.equal(plan.candidates.every((candidate) => {
+    const play = candidate.timeline.find((action) => action.deck === 'B' && action.op === 'play');
+    const handoffs = candidate.timeline.filter((action) => action.op === 'handoff');
+    const handoff = handoffs[handoffs.length - 1];
+    const expected = play && handoff
+      ? play.at + (handoff.t - play.t) - candidate.anchors.bAnchor
+      : Number.MAX_SAFE_INTEGER;
+    return Math.abs(candidate.window.landingError - expected) <= 0.001;
+  }), true);
+  assert.equal(plan.candidates.some((candidate) => candidate.window.runwayAvailable), true);
+  assert.equal(plan.chosen.window.runwayAvailable, true);
   assert.equal(plan.chosen.recipe, 'safety-long-blend');
   assert.equal(plan.chosen.anchors.overlapClass, 'short');
   assert.equal(plan.chosen.risks.includes('hard cut'), false);
@@ -235,6 +248,32 @@ test('uses safety long blend for weak or rejected section choices', () => {
   assert.equal(plan.chosen.timeline[0].op, 'play');
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'filter' && action.t < -2), false);
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'B' && action.op === 'bass' && action.value < 0.2), true);
+});
+
+test('keeps invalid safety runway as explicit degraded output when every candidate is invalid', () => {
+  const fromProfile = buildCueProfile({
+    track: { title: 'A', duration: 128 },
+    map: makeBeatMap(128),
+    candidates: [{ type: 'outro', role: 'exit', time: 112, confidence: 0.7 }],
+  });
+  const toProfile = buildCueProfile({
+    track: { title: 'B', duration: 120 },
+    map: makeBeatMap(120),
+    candidates: [{ type: 'intro', role: 'entry', source: 'fallback', time: 0, confidence: 0.52 }],
+  });
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: {
+      exit: { time: 112 },
+      entry: { source: 'fallback', time: 2, confidence: 0.52 },
+      evaluation: { tier: 'reject', risks: ['directionality mismatch'] },
+    },
+  });
+
+  assert.equal(plan.candidates.every((candidate) => candidate.window.runwayAvailable === false), true);
+  assert.equal(plan.chosen.recipe, 'safety-long-blend');
+  assert.equal(plan.chosen.risks.includes('insufficient B runway'), true);
+  assert.equal(plan.chosen.anchors.runwayAvailable, false);
+  assert.equal(Number.isFinite(plan.chosen.anchors.landingError), true);
 });
 
 test('keeps fallback entries on a short aligned overlap even with a high pair score', () => {

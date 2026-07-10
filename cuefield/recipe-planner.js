@@ -1,5 +1,8 @@
 const { round, toNumber } = require('./cue-profile');
 
+// Finite sentinel for invalid timelines with no computable landing equation.
+const INVALID_LANDING_ERROR = Number.MAX_SAFE_INTEGER;
+
 function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, toNumber(value)));
 }
@@ -12,7 +15,13 @@ function curveGain(progress, curve) {
 }
 
 function gainAtEnvelope(envelope, time) {
-  const segment = envelope.slice().reverse().find((item) => item.start <= time);
+  let segment;
+  for (let index = envelope.length - 1; index >= 0; index -= 1) {
+    if (envelope[index].start <= time) {
+      segment = envelope[index];
+      break;
+    }
+  }
   if (!segment) return 0;
   if (!(segment.end > segment.start) || time >= segment.end) return clamp(segment.gainEnd);
   const progress = (time - segment.start) / (segment.end - segment.start);
@@ -101,6 +110,25 @@ function measureTimelineWindow(timeline, threshold = 0.08) {
     audibleStart: round(start),
     audibleEnd: round(end),
     handoffOffset: handoff ? handoff.t : 0,
+  };
+}
+
+function landingDiagnostics(timeline, anchors) {
+  const actions = Array.isArray(timeline) ? timeline : [];
+  const play = actions.find((action) => action && action.deck === 'B' && action.op === 'play');
+  const handoffs = actions.filter((action) => action && action.op === 'handoff');
+  const handoff = handoffs[handoffs.length - 1];
+  const requestedLanding = toNumber(anchors && anchors.bAnchor, NaN);
+  const actualLanding = play && handoff
+    ? toNumber(play.at, NaN) + (toNumber(handoff.t, NaN) - toNumber(play.t, NaN))
+    : NaN;
+  if (!Number.isFinite(requestedLanding) || !Number.isFinite(actualLanding)) {
+    return { runwayAvailable: false, landingError: INVALID_LANDING_ERROR };
+  }
+  const landingError = round(actualLanding - requestedLanding);
+  return {
+    runwayAvailable: toNumber(play.at, NaN) >= 0 && Math.abs(landingError) <= 0.01,
+    landingError,
   };
 }
 
@@ -219,6 +247,7 @@ function commonScores(fromProfile, toProfile, anchors) {
 }
 
 function baseCandidate(recipe, score, confidence, reason, risks, anchors, timeline, windowMetadata = {}) {
+  const landing = landingDiagnostics(timeline, anchors);
   return {
     recipe,
     score: round(score),
@@ -227,7 +256,7 @@ function baseCandidate(recipe, score, confidence, reason, risks, anchors, timeli
     risks,
     anchors,
     timeline,
-    window: { ...measureTimelineWindow(timeline), ...windowMetadata },
+    window: { ...measureTimelineWindow(timeline), ...windowMetadata, ...landing },
   };
 }
 
@@ -453,6 +482,7 @@ function makeSafetyLongBlend(anchors, scores, sectionChoice = {}, fromProfile = 
   if (scores.bassScore < 0.5) risks.push('bass protected');
   if (scores.bIntroAggression > 0.68) risks.push('intro aggression masked');
   if (scores.styleTextureDistance > 0.45) risks.push('texture distance masked');
+  if (!execution.runwayAvailable) risks.push('insufficient B runway');
   return baseCandidate(
     'safety-long-blend',
     score,
@@ -507,10 +537,12 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
     makeBassHandoff(anchors, scores),
     makeQuickFade(anchors, scores),
   ].sort((a, b) => b.score - a.score || b.confidence - a.confidence);
+  const validCandidates = candidates.filter((candidate) => candidate.window.runwayAvailable);
   const requiresAdaptiveSafety = needsSafetyFallback || safety.anchors.overlapClass !== 'long';
+  const preferred = candidates.find((candidate) => !candidate.risks.includes('hard cut')) || candidates[0];
   const chosen = requiresAdaptiveSafety
-    ? safety
-    : (candidates.find((candidate) => !candidate.risks.includes('hard cut')) || candidates[0]);
+    ? (safety.window.runwayAvailable ? safety : (validCandidates[0] || safety))
+    : (preferred === safety && !safety.window.runwayAvailable ? (validCandidates[0] || safety) : preferred);
   const chosenOverlap = chosenOverlapDiagnostics(chosen, {
     overlapClass: safety.anchors.overlapClass,
     overlapDuration: safety.anchors.overlapDuration,
