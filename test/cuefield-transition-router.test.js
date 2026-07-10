@@ -211,6 +211,43 @@ test('does not lower a structure mix range below a late protected boundary', () 
   assert.deepEqual(policy.preferredExitRange, [0.9, 0.9]);
 });
 
+test('does not let high-confidence fallback sources beat credible exit and entry candidates', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 100, [
+      { start: 70, snapDensity: 0.3, energy: 0.5 },
+      { start: 150, snapDensity: 0.27, energy: 0.5 },
+    ]),
+    toProfile: profile(220, 88, [
+      { start: 10, snapDensity: 0.3, energy: 0.5 },
+      { start: 106, snapDensity: 0.53, energy: 0.5 },
+    ]),
+    exits: [
+      { time: 70, source: 'fallback', type: 'release', confidence: 0.99 },
+      { time: 150, source: 'analysis', type: 'release', confidence: 0.7 },
+    ],
+    entries: [
+      { landingAt: 10, source: 'fallback', landingType: 'hook', confidence: 0.99 },
+      { landingAt: 106, source: 'analysis', landingType: 'intro', confidence: 0.7 },
+    ],
+    risks: [],
+  });
+
+  assert.equal(policy.route, 'late-contrast-rise');
+});
+
+test('does not terminal-rescue a style bridge mismatch at moderate tempo contrast', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 100, [{ start: 70, snapDensity: 0.3, energy: 0.5 }]),
+    toProfile: profile(220, 111, [{ start: 106, snapDensity: 0.3, energy: 0.5 }]),
+    exits: [{ time: 70, source: 'analysis', type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 106, source: 'analysis', landingType: 'intro', confidence: 0.7 }],
+    risks: ['style bridge mismatch'],
+  });
+
+  assert.equal(policy.route, 'structure-mix');
+  assert.ok(policy.metrics.tempoDelta < 0.18);
+});
+
 test('returns a compact policy with finite metrics', () => {
   const policy = classifyTransitionRoute({
     fromProfile: profile(200, 100, [{ start: 70, snapDensity: 0.27, energy: 0.72 }]),

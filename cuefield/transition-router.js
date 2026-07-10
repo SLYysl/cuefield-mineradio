@@ -42,7 +42,8 @@ function chooseExit(exits) {
     const type = String(exit.type || '').toLowerCase();
     const confidence = firstFinite(exit.confidence) ?? 0;
     const latePenalty = firstFinite(exit.latePenalty) ?? 0;
-    const score = (type === 'release' ? 100 : 0) + confidence * 10 - latePenalty;
+    const sourceScore = exit.source === 'fallback' ? 0 : 100;
+    const score = sourceScore + (type === 'release' ? 10 : 0) + confidence - latePenalty;
     if (!best || score > best.score) return { value: exit, time, score };
     return best;
   }, null);
@@ -52,9 +53,9 @@ function chooseEntry(entries) {
   return entries.reduce((best, entry) => {
     const time = firstFinite(entry && entry.landingAt, entry && entry.time);
     if (time === null) return best;
-    const type = String(entry.landingType || entry.type || '').toLowerCase();
     const confidence = firstFinite(entry.confidence) ?? 0;
-    const score = (type.includes('fallback') ? 0 : 100) + confidence * 10;
+    const sourceScore = entry.source === 'fallback' ? 0 : 100;
+    const score = sourceScore + confidence;
     if (!best || score > best.score) return { value: entry, time, score };
     return best;
   }, null);
@@ -143,7 +144,7 @@ function classifyTransitionRoute(opts = {}) {
     directionalityMismatch,
   };
   const reasons = directionalityMismatch ? ['directionality-mismatch'] : [];
-  if (styleBridgeMismatch && tempoDelta >= 0.08) {
+  if (styleBridgeMismatch && tempoDelta >= 0.18) {
     return terminalPolicy(protectedRatio, reasons.concat('style-bridge-mismatch'), metrics);
   }
 
