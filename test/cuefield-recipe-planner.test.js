@@ -397,7 +397,8 @@ test('structure route leaves direct planner long-overlap selection available', (
   });
 
   assert.notEqual(usable.chosen.recipe, 'safety-long-blend');
-  assert.equal(weak.diagnostics.overlapClass, 'long');
+  assert.equal(weak.diagnostics.eligibleRecipes.includes('intro-outro-long-blend'), true);
+  assert.equal(weak.chosen.anchors.overlapClass, 'long');
 });
 
 test('reports overlap diagnostics from the chosen recipe timeline', () => {
@@ -505,4 +506,96 @@ test('reports planner features for outro completeness, intro aggression, and tex
   assert.equal(plan.diagnostics.styleTextureDistance > 0.45, true);
   assert.equal(plan.chosen.risks.includes('intro aggression masked'), true);
   assert.equal(plan.chosen.risks.includes('texture distance masked'), true);
+});
+
+test('selects filtered pickup for a controlled late energy rise', () => {
+  const fromProfile = makeProfile('A', 128, [
+    { type: 'outro', role: 'exit', time: 112, confidence: 0.84 },
+  ]);
+  const entry = {
+    type: 'intro',
+    role: 'entry',
+    source: 'energy',
+    time: 8,
+    confidence: 0.82,
+    resolvesTo: { time: 16 },
+  };
+  const toProfile = makeProfile('B', 120, [entry]);
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: {
+      exit: { time: 112 },
+      entry,
+      evaluation: { tier: 'usable', risks: [] },
+    },
+    routePolicy: {
+      route: 'late-contrast-rise',
+      compatibilityClass: 'contrast',
+      contrastDirection: 'rising',
+    },
+  });
+
+  assert.equal(plan.chosen.recipe, 'filtered-pickup');
+  assert.equal(plan.diagnostics.eligibleRecipes.includes('filtered-pickup'), true);
+  assert.equal(plan.chosen.window.runwayAvailable, true);
+});
+
+test('selects echo out when a late contrast has unsafe sustained overlap', () => {
+  const fromProfile = makeProfile('A', 128, [
+    { type: 'outro', role: 'exit', time: 112, confidence: 0.84 },
+  ]);
+  const entry = {
+    type: 'intro',
+    role: 'entry',
+    source: 'energy',
+    time: 8,
+    confidence: 0.82,
+    resolvesTo: { time: 16 },
+  };
+  const toProfile = makeProfile('B', 120, [entry]);
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: {
+      exit: { time: 112 },
+      entry,
+      evaluation: { tier: 'reject', risks: ['style bridge mismatch'] },
+    },
+    routePolicy: {
+      route: 'late-contrast-rise',
+      compatibilityClass: 'contrast',
+      contrastDirection: 'rising',
+    },
+  });
+
+  assert.equal(plan.chosen.recipe, 'echo-out');
+  assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'echo'), true);
+  assert.equal(Array.isArray(plan.chosen.fallbackTimeline), true);
+  assert.equal(plan.chosen.fallbackTimeline.some((action) => action.op === 'echo'), false);
+  assert.equal(plan.diagnostics.eligibleRecipes.includes('echo-out'), true);
+});
+
+test('reports why unsafe long recipes were rejected', () => {
+  const fromProfile = makeProfile('A', 128, [
+    { type: 'outro', role: 'exit', time: 112, confidence: 0.84 },
+  ]);
+  const entry = {
+    type: 'intro',
+    role: 'entry',
+    source: 'fallback',
+    time: 3,
+    confidence: 0.35,
+  };
+  const toProfile = makeProfile('B', 120, [entry]);
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: {
+      exit: { time: 112 },
+      entry,
+      evaluation: { tier: 'weak', risks: [] },
+    },
+    routePolicy: { route: 'terminal-rescue', compatibilityClass: 'uncertain' },
+  });
+
+  assert.equal(Array.isArray(plan.diagnostics.rejectedRecipes), true);
+  assert.equal(plan.diagnostics.rejectedRecipes.some((item) => (
+    item.recipe === 'intro-outro-long-blend' && typeof item.reason === 'string'
+  )), true);
+  assert.equal(plan.chosen.recipe === 'quick-safe-fade' || plan.chosen.recipe === 'safety-long-blend', true);
 });

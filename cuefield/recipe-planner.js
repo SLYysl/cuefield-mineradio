@@ -260,8 +260,14 @@ function baseCandidate(recipe, score, confidence, reason, risks, anchors, timeli
   };
 }
 
+function alignedBStart(anchors, playAt, handoffAt) {
+  return Math.max(0, round(toNumber(anchors && anchors.bAnchor) - (toNumber(handoffAt) - toNumber(playAt))));
+}
+
 function makeLongBlend(anchors, scores) {
   const lead = 8;
+  const handoffAt = 2.6;
+  const bStart = alignedBStart(anchors, -lead, handoffAt);
   const score = 0.28 + scores.beatScore * 0.28 + scores.energyScore * 0.18 + scores.bassScore * 0.18 + scores.bpmScore * 0.08;
   const risks = [];
   if (scores.bassScore < 0.45) risks.push('bass overlap needs eq');
@@ -271,23 +277,25 @@ function makeLongBlend(anchors, scores) {
     Math.min(0.9, score + 0.04),
     ['A outro supports longer bed', 'B intro can enter before anchor'],
     risks,
-    { ...anchors, lead },
+    { ...anchors, bStart, lead },
     [
-      { t: -lead, deck: 'B', op: 'play', at: anchors.bStart, volume: 0 },
+      { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
       { t: -lead, deck: 'B', op: 'volume', value: 0.58, duration: 5200 },
       { t: -4.5, deck: 'B', op: 'filter', type: 'highpass', value: 650, duration: 2600 },
       { t: -3.2, deck: 'A', op: 'bass', value: 0.38, duration: 2200 },
       { t: -1.2, deck: 'B', op: 'bass', value: 0.82, duration: 1400 },
       { t: 0, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 900 },
       { t: 0.8, deck: 'A', op: 'volume', value: 0, duration: 1600 },
-      { t: 2.6, deck: 'B', op: 'handoff' },
+      { t: handoffAt, deck: 'B', op: 'handoff' },
     ],
   );
 }
 
-function makeFilteredPickup(anchors, scores) {
-  const lead = 4;
-  const bStart = Math.max(0, anchors.bAnchor - lead);
+function makeFilteredPickup(anchors, scores, route) {
+  const shortRoute = route === 'late-contrast-rise';
+  const lead = shortRoute ? 2.8 : 4;
+  const handoffAt = shortRoute ? 0.6 : 2.2;
+  const bStart = alignedBStart(anchors, -lead, handoffAt);
   const score = 0.34 + scores.beatScore * 0.3 + scores.energyScore * 0.18 + scores.bassScore * 0.12 + scores.bpmScore * 0.06;
   const risks = [];
   if (scores.energyScore < 0.35) risks.push('noticeable energy change');
@@ -298,7 +306,16 @@ function makeFilteredPickup(anchors, scores) {
     ['B pickup is filtered before downbeat', 'A low end clears before handoff'],
     risks,
     { ...anchors, bStart: round(bStart), lead },
-    [
+    shortRoute ? [
+      { t: -lead, deck: 'B', op: 'play', at: round(bStart), volume: 0 },
+      { t: -lead, deck: 'B', op: 'filter', type: 'highpass', value: 900, duration: 1300 },
+      { t: -2.6, deck: 'B', op: 'volume', value: 1, duration: 2500, curve: 'equal-power-in' },
+      { t: -1.7, deck: 'A', op: 'bass', value: 0.35, duration: 900 },
+      { t: -0.7, deck: 'A', op: 'volume', value: 0, duration: 1000, curve: 'equal-power-out' },
+      { t: -0.6, deck: 'B', op: 'bass', value: 0.8, duration: 700 },
+      { t: -0.5, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 800 },
+      { t: handoffAt, deck: 'B', op: 'handoff' },
+    ] : [
       { t: -lead, deck: 'B', op: 'play', at: round(bStart), volume: 0 },
       { t: -lead, deck: 'B', op: 'filter', type: 'highpass', value: 900, duration: 1800 },
       { t: -3.6, deck: 'B', op: 'volume', value: 0.72, duration: 2600 },
@@ -306,13 +323,15 @@ function makeFilteredPickup(anchors, scores) {
       { t: -0.4, deck: 'B', op: 'bass', value: 0.8, duration: 900 },
       { t: 0, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 900 },
       { t: 1.1, deck: 'A', op: 'volume', value: 0, duration: 1000 },
-      { t: 2.2, deck: 'B', op: 'handoff' },
+      { t: handoffAt, deck: 'B', op: 'handoff' },
     ],
   );
 }
 
 function makeBassHandoff(anchors, scores) {
   const lead = 5.2;
+  const handoffAt = 1.8;
+  const bStart = alignedBStart(anchors, -lead, handoffAt);
   const score = 0.3 + scores.beatScore * 0.28 + scores.bassScore * 0.24 + scores.energyScore * 0.12 + scores.bpmScore * 0.06;
   const risks = [];
   if (scores.aBass > 0.65 && scores.bBass > 0.55) risks.push('requires bass swap');
@@ -322,21 +341,23 @@ function makeBassHandoff(anchors, scores) {
     Math.min(0.88, score + 0.03),
     ['bass is exchanged instead of stacked', 'handoff lands near downbeat'],
     risks,
-    { ...anchors, lead },
+    { ...anchors, bStart, lead },
     [
-      { t: -lead, deck: 'B', op: 'play', at: anchors.bStart, volume: 0 },
+      { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
       { t: -lead, deck: 'B', op: 'bass', value: 0.15, duration: 0 },
       { t: -4.8, deck: 'B', op: 'volume', value: 0.68, duration: 2600 },
       { t: -2.6, deck: 'A', op: 'bass', value: 0.18, duration: 1800 },
       { t: -1, deck: 'B', op: 'bass', value: 0.92, duration: 1100 },
       { t: 0.3, deck: 'A', op: 'volume', value: 0, duration: 1200 },
-      { t: 1.8, deck: 'B', op: 'handoff' },
+      { t: handoffAt, deck: 'B', op: 'handoff' },
     ],
   );
 }
 
 function makeQuickFade(anchors, scores) {
   const lead = 2.6;
+  const handoffAt = 1;
+  const bStart = alignedBStart(anchors, -lead, handoffAt);
   const score = 0.24 + scores.beatScore * 0.32 + scores.energyScore * 0.16 + scores.bpmScore * 0.1;
   return baseCandidate(
     'quick-safe-fade',
@@ -344,15 +365,52 @@ function makeQuickFade(anchors, scores) {
     Math.min(0.78, score),
     ['fallback when longer overlap is risky'],
     ['short transition'],
-    { ...anchors, lead },
+    { ...anchors, bStart, lead },
     [
-      { t: -lead, deck: 'B', op: 'play', at: anchors.bAnchor, volume: 0 },
+      { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
       { t: -lead, deck: 'B', op: 'volume', value: 0.76, duration: 1800 },
       { t: -0.6, deck: 'A', op: 'volume', value: 0.2, duration: 800 },
       { t: 0.3, deck: 'A', op: 'volume', value: 0, duration: 600 },
-      { t: 1, deck: 'B', op: 'handoff' },
+      { t: handoffAt, deck: 'B', op: 'handoff' },
     ],
   );
+}
+
+function makeEchoOut(anchors, scores, assessment) {
+  const playAt = -2.8;
+  const handoffAt = 0.6;
+  const bStart = alignedBStart(anchors, playAt, handoffAt);
+  const fallback = buildSafetyTimelineForAnchors({
+    bLandingAt: anchors.bAnchor,
+    overlapClass: 'short',
+    overlapDuration: 3.4,
+  });
+  const score = 0.4
+    + scores.beatScore * 0.16
+    + scores.energyScore * 0.08
+    + scores.outroCompleteness * 0.12
+    + (1 - scores.styleTextureDistance) * 0.04;
+  const candidate = baseCandidate(
+    'echo-out',
+    score,
+    Math.min(0.9, score + 0.08),
+    ['A echo tail masks the dry cut', 'B enters on a protected short runway'],
+    [],
+    { ...anchors, ...assessment, bStart, lead: 2.8 },
+    [
+      { t: playAt, deck: 'B', op: 'play', at: bStart, volume: 0 },
+      { t: playAt, deck: 'B', op: 'bass', value: 0.15, duration: 0 },
+      { t: playAt, deck: 'B', op: 'volume', value: 1, duration: 3000, curve: 'equal-power-in' },
+      { t: -2, deck: 'A', op: 'echo', enabled: true, bpm: assessment.bpmA, delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 180 },
+      { t: -1.4, deck: 'A', op: 'bass', value: 0.45, duration: 600 },
+      { t: -1.2, deck: 'A', op: 'volume', value: 0, duration: 1400, curve: 'equal-power-out' },
+      { t: -0.4, deck: 'B', op: 'bass', value: 1, duration: 800 },
+      { t: 0.2, deck: 'A', op: 'echo', enabled: false, bpm: assessment.bpmA, delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 160 },
+      { t: handoffAt, deck: 'B', op: 'handoff' },
+    ],
+  );
+  candidate.fallbackTimeline = fallback.timeline;
+  return candidate;
 }
 
 function safetyAssessment(fromProfile, toProfile, sectionChoice = {}, routePolicy = {}) {
@@ -523,6 +581,46 @@ function chosenOverlapDiagnostics(candidate, fallback) {
   };
 }
 
+function recipeEligibility(candidate, context) {
+  const { assessment, route, scores, severeOverlapRisk } = context;
+  if (!candidate.window.runwayAvailable) return { eligible: false, reason: 'insufficient B runway', preference: 0 };
+  if (candidate.recipe === 'safety-long-blend') return { eligible: false, reason: 'fallback only', preference: 0 };
+  if (candidate.recipe === 'intro-outro-long-blend') {
+    if (route && route !== 'structure-mix') return { eligible: false, reason: 'route requires shorter overlap', preference: 0 };
+    if (!assessment.entryTrusted) return { eligible: false, reason: 'entry evidence is not trusted', preference: 0 };
+    if (!assessment.beatGridTrusted) return { eligible: false, reason: 'beat grid is not trusted', preference: 0 };
+    if (assessment.relativeTempoDelta > 0.08) return { eligible: false, reason: 'tempo delta exceeds long blend limit', preference: 0 };
+    if (assessment.overlapClass !== 'long') return { eligible: false, reason: 'long overlap is not available', preference: 0 };
+    return { eligible: true, reason: '', preference: 0.12 };
+  }
+  if (candidate.recipe === 'bass-eq-handoff') {
+    if (route === 'late-contrast-rise' || route === 'terminal-rescue') return { eligible: false, reason: 'route requires a short protected handoff', preference: 0 };
+    if (!assessment.entryTrusted) return { eligible: false, reason: 'entry evidence is not trusted', preference: 0 };
+    if (!assessment.beatGridTrusted) return { eligible: false, reason: 'beat grid is not trusted', preference: 0 };
+    if (assessment.relativeTempoDelta > 0.12) return { eligible: false, reason: 'tempo delta exceeds bass handoff limit', preference: 0 };
+    if (assessment.overlapClass === 'short') return { eligible: false, reason: 'bass handoff needs medium runway', preference: 0 };
+    return { eligible: true, reason: '', preference: route === 'late-contrast-release' ? 0.28 : 0.18 };
+  }
+  if (candidate.recipe === 'filtered-pickup') {
+    if (!assessment.entryTrusted) return { eligible: false, reason: 'entry evidence is not trusted', preference: 0 };
+    if (route === 'terminal-rescue' || route === 'late-contrast-release') return { eligible: false, reason: 'route does not support an energy pickup', preference: 0 };
+    const rising = route === 'late-contrast-rise' || scores.bEnergy > scores.aEnergy + 0.08 || scores.bIntroAggression >= 0.58;
+    if (!rising) return { eligible: false, reason: 'no controlled energy rise', preference: 0 };
+    return { eligible: true, reason: '', preference: route === 'late-contrast-rise' ? 0.35 : 0.08 };
+  }
+  if (candidate.recipe === 'echo-out') {
+    const lateRoute = route === 'late-contrast-rise' || route === 'late-contrast-release' || route === 'terminal-rescue';
+    if (!lateRoute && !severeOverlapRisk) return { eligible: false, reason: 'echo is reserved for difficult transitions', preference: 0 };
+    return {
+      eligible: true,
+      reason: '',
+      preference: severeOverlapRisk ? 0.7 : (route === 'late-contrast-release' ? 0.22 : 0.08),
+    };
+  }
+  if (candidate.recipe === 'quick-safe-fade') return { eligible: true, reason: '', preference: 0.04 };
+  return { eligible: false, reason: 'unsupported recipe', preference: 0 };
+}
+
 function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
   const anchors = pickAnchors(fromProfile || {}, toProfile || {}, opts);
   const scores = commonScores(fromProfile || {}, toProfile || {}, anchors);
@@ -535,20 +633,37 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
   const routePolicy = opts.routePolicy || {};
   const route = String(routePolicy.route || '');
   const safety = makeSafetyLongBlend(anchors, scores, opts.sectionChoice, fromProfile, toProfile, routePolicy);
+  const assessment = safetyAssessment(fromProfile, toProfile, opts.sectionChoice, routePolicy);
+  const severeOverlapRisk = sectionRisks.some((risk) => (
+    risk === 'style bridge mismatch'
+    || risk === 'vocal collision'
+    || risk === 'vocal overlap'
+  ));
   const candidates = [
     safety,
     makeLongBlend(anchors, scores),
-    makeFilteredPickup(anchors, scores),
+    makeFilteredPickup(anchors, scores, route),
     makeBassHandoff(anchors, scores),
     makeQuickFade(anchors, scores),
-  ].sort((a, b) => b.score - a.score || b.confidence - a.confidence);
-  const validCandidates = candidates.filter((candidate) => candidate.window.runwayAvailable);
-  const requiresAdaptiveSafety = needsSafetyFallback || safety.anchors.overlapClass !== 'long'
-    || (route !== '' && route !== 'structure-mix');
-  const preferred = candidates.find((candidate) => !candidate.risks.includes('hard cut')) || candidates[0];
-  const chosen = requiresAdaptiveSafety
-    ? (safety.window.runwayAvailable ? safety : (validCandidates[0] || safety))
-    : (preferred === safety && !safety.window.runwayAvailable ? (validCandidates[0] || safety) : preferred);
+    makeEchoOut(anchors, scores, assessment),
+  ].map((candidate) => ({
+    ...candidate,
+    anchors: { ...candidate.anchors, ...assessment },
+  })).sort((a, b) => b.score - a.score || b.confidence - a.confidence);
+  const evaluated = candidates.map((candidate) => ({
+    candidate,
+    eligibility: recipeEligibility(candidate, { assessment, route, scores, severeOverlapRisk }),
+  }));
+  const eligible = evaluated
+    .filter((item) => item.eligibility.eligible)
+    .sort((a, b) => (
+      (b.candidate.score + b.eligibility.preference) - (a.candidate.score + a.eligibility.preference)
+      || b.candidate.confidence - a.candidate.confidence
+    ));
+  const preserveUnroutedSafety = route === '' && (needsSafetyFallback || !assessment.entryTrusted);
+  const chosen = preserveUnroutedSafety
+    ? safety
+    : (eligible[0] && eligible[0].candidate || safety);
   const chosenOverlap = chosenOverlapDiagnostics(chosen, {
     overlapClass: safety.anchors.overlapClass,
     overlapDuration: safety.anchors.overlapDuration,
@@ -580,6 +695,10 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
       overlapDuration: chosenOverlap.overlapDuration,
       runwayAvailable: chosen.window.runwayAvailable,
       landingError: chosen.window.landingError,
+      eligibleRecipes: eligible.map((item) => item.candidate.recipe),
+      rejectedRecipes: evaluated
+        .filter((item) => !item.eligibility.eligible)
+        .map((item) => ({ recipe: item.candidate.recipe, reason: item.eligibility.reason })),
     },
   };
 }
