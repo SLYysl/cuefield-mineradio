@@ -81,6 +81,12 @@
     return fallback;
   }
 
+  function timelineHasHandoff(timeline) {
+    return timeline.some(function(action) {
+      return action && action.op === 'handoff' && Number.isFinite(Number(action.t));
+    });
+  }
+
   function createCuefieldAutoMix(deps) {
     deps = deps || {};
     var state = {
@@ -160,9 +166,13 @@
           : toNumber(ctx.leadSec, 1);
         var leadSec = timelineLeadSec(timeline, fallbackLeadSec);
         var protectedUntil = Math.max(0, toNumber(chosen.protectedUntil, 0));
-        var hasExplicitMixStart = chosen.mixStart != null && Number.isFinite(Number(chosen.mixStart));
-        var explicitMixStart = hasExplicitMixStart ? Number(chosen.mixStart) : NaN;
-        var triggerAt = hasExplicitMixStart
+        var explicitMixStart = chosen.mixStart != null ? Number(chosen.mixStart) : NaN;
+        var explicitHandoffAt = chosen.handoffAt != null ? Number(chosen.handoffAt) : NaN;
+        var hasExplicitWindow = Number.isFinite(explicitMixStart)
+          && Number.isFinite(explicitHandoffAt)
+          && explicitHandoffAt > explicitMixStart
+          && timelineHasHandoff(timeline);
+        var triggerAt = hasExplicitWindow
           ? Math.max(protectedUntil, explicitMixStart)
           : (isFinite(exitTime) ? Math.max(protectedUntil, exitTime - leadSec) : protectedUntil);
         var entryTime = timelineBStart(timeline, Math.max(0, toNumber(chosen.entry && chosen.entry.time, 0)));
@@ -179,14 +189,16 @@
           entryTime: entryTime,
           exitTime: exitTime,
           protectedUntil: protectedUntil,
-          handoffAt: chosen.handoffAt,
           audibleOverlap: chosen.audibleOverlap,
           preRollDuration: chosen.preRollDuration,
           exitRatio: chosen.exitRatio,
           triggerAt: triggerAt,
           createdAt: Date.now(),
         };
-        if (hasExplicitMixStart) state.pending.mixStart = chosen.mixStart;
+        if (hasExplicitWindow) {
+          state.pending.mixStart = explicitMixStart;
+          state.pending.handoffAt = explicitHandoffAt;
+        }
         state.lastStatus = 'ready';
         return { status: 'ready', pending: state.pending };
       } catch (err) {

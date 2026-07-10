@@ -214,7 +214,10 @@ test('uses explicit mixStart and copies transition window diagnostics into pendi
         preRollDuration: 2,
         exitRatio: 0.7,
         evaluation: { tier: 'usable', risks: [] },
-        timeline: [{ t: 0, deck: 'B', op: 'play', at: 0 }],
+        timeline: [
+          { t: 0, deck: 'B', op: 'play', at: 0 },
+          { t: 3, deck: 'B', op: 'handoff' },
+        ],
       },
     }),
     prepareAudioUrl: async () => '/api/audio?url=b',
@@ -300,6 +303,42 @@ test('treats null mixStart as legacy timing instead of a zero fallback', async (
   assert.equal(Object.prototype.hasOwnProperty.call(result.pending, 'mixStart'), false);
 });
 
+test('uses legacy timing when an explicit window has no positive handoff span', async () => {
+  const automix = createCuefieldAutoMix({
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => ({
+      ok: true,
+      chosen: {
+        transitionRecipe: 'intro-outro-long-blend',
+        exit: { time: 100 },
+        entry: { time: 12 },
+        mixStart: 50,
+        handoffAt: 50,
+        evaluation: { tier: 'usable', risks: [] },
+        timeline: [
+          { t: -8, deck: 'B', op: 'play', at: 4, volume: 0 },
+          { t: 2.6, deck: 'B', op: 'handoff' },
+        ],
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+
+  automix.setEnabled(true);
+  const result = await automix.prepare({
+    token: 20,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+  });
+
+  assert.equal(result.pending.triggerAt, 92);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.pending, 'mixStart'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.pending, 'handoffAt'), false);
+});
+
 test('clamps an explicit mixStart below protectedUntil', async () => {
   const automix = createCuefieldAutoMix({
     getKey: (song) => song.key,
@@ -312,7 +351,9 @@ test('clamps an explicit mixStart below protectedUntil', async () => {
         entry: { time: 12 },
         protectedUntil: 40,
         mixStart: 35,
+        handoffAt: 45,
         evaluation: { tier: 'usable', risks: [] },
+        timeline: [{ t: 0, deck: 'B', op: 'handoff' }],
       },
     }),
     prepareAudioUrl: async () => '/api/audio?url=b',
