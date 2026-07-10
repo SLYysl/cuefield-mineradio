@@ -6,6 +6,13 @@ function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, toNumber(value)));
 }
 
+// Neutral policy: absent, NaN, null, and negative infinity mean no penalty.
+function normalizePenalty(value) {
+  if (value === Infinity) return 1;
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.min(1, value);
+}
+
 function profileOf(analysis) {
   return analysis && analysis.cueProfile || analysis || {};
 }
@@ -68,7 +75,7 @@ function scoreWindowExit(candidate) {
   let score = clamp(candidate && candidate.confidence);
   if (candidate && candidate.type === 'release') score += 0.18;
   if (toNumber(candidate && candidate.energyAfter) < toNumber(candidate && candidate.energyBefore)) score += 0.08;
-  return clamp(score - clamp(candidate && candidate.latePenalty));
+  return clamp(score - normalizePenalty(candidate && candidate.latePenalty));
 }
 
 function exitOptions(analysis, protectedUntil) {
@@ -145,7 +152,7 @@ function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, 
   const continuity = clamp((energyContinuity + groove + tempoCompatibility + clamp(diagnostics.bassScore)) / 4);
   const suppliedExitRatio = clamp(exit.exitRatio);
   const exitRatio = suppliedExitRatio || clamp(toNumber(exit.time) / Math.max(1, toNumber(fromProfile.duration)));
-  const latePenalty = clamp(Math.max(clamp(exit.latePenalty), exitRatio > 0.78 ? 0.45 : 0));
+  const latePenalty = Math.max(normalizePenalty(exit.latePenalty), exitRatio > 0.78 ? 0.45 : 0);
   const score = clamp(clamp(sectionChoice.score) * 0.34
     + clamp(recipeCandidate.score) * 0.2
     + ((clamp(exit.confidence) + clamp(entry.confidence)) / 2) * 0.16

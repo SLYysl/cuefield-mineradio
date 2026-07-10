@@ -263,6 +263,23 @@ test('sanitizes malformed scores and penalties to finite ranking values', () => 
   assert.equal(ranked.every((candidate) => Number.isFinite(candidate.score) && candidate.score >= 0 && candidate.score <= 1), true);
 });
 
+test('treats an infinite late penalty as maximum in cap selection and ranking', () => {
+  const from = profile({
+    duration: 150,
+    exits: [
+      exit(80, 0.8, { exitRatio: 0.53, latePenalty: 0 }),
+      exit(104, 0.99, { exitRatio: 0.69, latePenalty: Infinity }),
+    ],
+  });
+  const to = profile({ entries: [entry('intro', 16)] });
+
+  const result = chooseTransitionWindow(from, to);
+  const ranked = [result.chosen, ...result.candidates, ...result.rejected];
+
+  assert.equal(result.chosen.exit.time, 80);
+  assert.equal(ranked.every((candidate) => Number.isFinite(candidate.score) && candidate.score >= 0 && candidate.score <= 1), true);
+});
+
 test('rejects anchored windows without a finite landing diagnostic', () => {
   const { isAnchoredLandingDiagnosticValid } = require('../cuefield/transition-window-planner');
 
