@@ -297,9 +297,18 @@ function chooseTransitionCandidates(fromAnalysis, toAnalysis, opts = {}) {
   const exitScore = opts.exitBias === 'late'
     ? (candidate) => scoreLateExit(candidate, toNumber(fromAnalysis && fromAnalysis.duration))
     : scoreExit;
-  const exits = (fromAnalysis.candidates || []).filter((candidate) => candidate.role === 'exit')
+  const fromStructure = fromAnalysis.structureMap || {};
+  const toStructure = toAnalysis.structureMap || {};
+  const protectedUntil = toNumber(fromStructure.protectedUntil, 0);
+  const sourceExits = fromStructure.exitCandidates && fromStructure.exitCandidates.length
+    ? fromStructure.exitCandidates
+    : (fromAnalysis.candidates || []).filter((candidate) => candidate.role === 'exit');
+  const sourceEntries = toStructure.entryCandidates && toStructure.entryCandidates.length
+    ? toStructure.entryCandidates
+    : (toAnalysis.candidates || []).filter((candidate) => candidate.role === 'entry');
+  const exits = sourceExits.filter((candidate) => candidate.role === 'exit' && toNumber(candidate.time) >= protectedUntil)
     .sort((a, b) => exitScore(b) - exitScore(a) || (opts.exitBias === 'late' ? b.time - a.time : a.time - b.time));
-  const entries = (toAnalysis.candidates || []).filter((candidate) => candidate.role === 'entry')
+  const entries = sourceEntries.filter((candidate) => candidate.role === 'entry')
     .sort((a, b) => scoreEntry(b) - scoreEntry(a) || a.time - b.time);
   const pairs = [];
   const consideredExits = exits.slice(0, 6);
@@ -322,6 +331,9 @@ function chooseTransitionCandidates(fromAnalysis, toAnalysis, opts = {}) {
     entry: chosen.entry,
     score: chosen.score,
     evaluation: chosen.evaluation,
+    protectedUntil,
+    exitCandidateCount: exits.length,
+    entryCandidateCount: entries.length,
   };
 }
 

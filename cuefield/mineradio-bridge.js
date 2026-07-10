@@ -3,6 +3,7 @@ const { normalizeMineradioBeatMap } = require('./adapter-mineradio');
 const { buildCueProfile } = require('./cue-profile');
 const { parseLrc } = require('./lrc-anchors');
 const { planRecipeCandidates } = require('./recipe-planner');
+const { buildStructureMap } = require('./structure-map');
 
 function toTrack(entry, fallbackKey) {
   const meta = entry && entry.meta || {};
@@ -42,38 +43,32 @@ function normalizedFixture(entry, key) {
   };
 }
 
-function addFallbackEntry(analysis) {
-  if ((analysis.candidates || []).some((candidate) => candidate.role === 'entry')) return analysis;
-  const time = Math.max(0, Math.min(16, (analysis.duration || 0) * 0.12));
-  analysis.candidates.push({
-    type: 'intro',
-    role: 'entry',
-    source: 'fallback',
-    time,
-    confidence: 0.52,
-    text: '',
-    energyBefore: 0,
-    energyAfter: 0.42,
-    lowDensity: 0.36,
-    vocalDensity: 0,
-    beatStability: 0.72,
-  });
-  return analysis;
-}
-
 function analyzeCacheEntry(entry, key, lrcText) {
   const fixture = normalizedFixture(entry, key);
+  const lrcLines = parseMaybeLrc(lrcText);
   const analysis = analyzeSectionCandidates({
     fixture,
-    lrcLines: parseMaybeLrc(lrcText),
+    lrcLines,
   });
-  const withFallback = addFallbackEntry(analysis);
+  const baseProfile = buildCueProfile({
+    track: analysis.track,
+    map: fixture.map,
+    candidates: analysis.candidates,
+  });
+  const structureMap = buildStructureMap({ profile: baseProfile, lrcLines });
+  const candidates = [
+    ...analysis.candidates,
+    ...structureMap.exitCandidates,
+    ...structureMap.entryCandidates,
+  ];
   return {
-    ...withFallback,
+    ...analysis,
+    candidates,
+    structureMap,
     cueProfile: buildCueProfile({
-      track: withFallback.track,
+      track: analysis.track,
       map: fixture.map,
-      candidates: withFallback.candidates,
+      candidates,
     }),
   };
 }
@@ -99,6 +94,10 @@ function planCuefieldTransitionFromCache(opts = {}) {
     timeline: recipePlan.chosen.timeline,
     recipeCandidate: recipePlan.chosen,
   };
+  const structureSource = from.structureMap.structureSource === 'lyric+beat'
+    && to.structureMap.structureSource === 'lyric+beat'
+    ? 'lyric+beat'
+    : 'beat-only';
 
   return {
     ok: true,
@@ -106,7 +105,17 @@ function planCuefieldTransitionFromCache(opts = {}) {
     to,
     chosen,
     candidates: recipePlan.candidates,
-    diagnostics: recipePlan.diagnostics,
+    diagnostics: {
+      ...recipePlan.diagnostics,
+      structureSource,
+      structureConfidence: Math.min(from.structureMap.structureConfidence, to.structureMap.structureConfidence),
+      protectedUntil: from.structureMap.protectedUntil,
+      exitType: chosen.exit && chosen.exit.type || '',
+      exitConfidence: chosen.exit && chosen.exit.confidence,
+      entryType: chosen.entry && chosen.entry.type || '',
+      exitCandidateCount: from.structureMap.exitCandidates.length,
+      entryCandidateCount: to.structureMap.entryCandidates.length,
+    },
   };
 }
 

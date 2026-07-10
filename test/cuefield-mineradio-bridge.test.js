@@ -65,8 +65,8 @@ test('plans a Cuefield transition directly from Mineradio beatmap cache keys', (
   assert.equal(result.to.track.title, 'TAKE ME');
   assert.equal(result.chosen.exit.role, 'exit');
   assert.equal(result.chosen.entry.role, 'entry');
-  assert.equal(result.to.candidates.find((candidate) => candidate.role === 'entry').source, 'fallback');
-  assert.equal(result.chosen.entry.source, 'fallback');
+  assert.equal(result.to.structureMap.entryCandidates.some((candidate) => candidate.source === 'fallback' && candidate.time === 0), true);
+  assert.equal(result.chosen.entry.source, 'beat-only');
   assert.equal(typeof result.chosen.recipe, 'string');
   assert.equal(typeof result.chosen.evaluation.tier, 'string');
   assert.equal(Array.isArray(result.candidates), true);
@@ -74,4 +74,50 @@ test('plans a Cuefield transition directly from Mineradio beatmap cache keys', (
   assert.equal(Array.isArray(result.chosen.timeline), true);
   assert.equal(result.chosen.timeline.length > 0, true);
   assert.equal(typeof result.chosen.transitionRecipe, 'string');
+});
+
+test('plans only after the protected first hook when paired lyrics are available', () => {
+  const cache = {
+    'song:a': {
+      key: 'song:a',
+      meta: { provider: 'netease', title: 'A', artist: 'Artist A' },
+      map: makeCompressedMap(128),
+    },
+    'song:b': {
+      key: 'song:b',
+      meta: { provider: 'netease', title: 'B', artist: 'Artist B' },
+      map: makeCompressedMap(96),
+    },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    fromLrc: '[00:18.00]we own the night\n[00:50.00]we own the night',
+    toLrc: '[00:18.00]take me higher\n[00:50.00]take me higher',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+
+  assert.equal(result.from.structureMap.structureSource, 'lyric+beat');
+  assert.equal(result.to.structureMap.structureSource, 'lyric+beat');
+  assert.equal(result.chosen.exit.time >= result.from.structureMap.protectedUntil, true);
+  assert.equal(result.chosen.entry.time === 0 || result.chosen.entry.source !== 'fallback', true);
+  assert.equal(result.diagnostics.structureSource, 'lyric+beat');
+  assert.equal(result.diagnostics.exitCandidateCount > 0, true);
+});
+
+test('uses a real zero-second fallback when paired lyrics are unavailable', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
+    'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(96) },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+  const fallback = result.to.structureMap.entryCandidates.find((item) => item.source === 'fallback');
+
+  assert.equal(result.diagnostics.structureSource, 'beat-only');
+  assert.equal(fallback.time, 0);
+  assert.equal(result.to.structureMap.entryCandidates.some((item) => item.source === 'fallback' && item.time >= 12 && item.time <= 16), false);
 });
