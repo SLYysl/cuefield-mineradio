@@ -93,8 +93,8 @@ test('plans only after the protected first hook when paired lyrics are available
   const result = planCuefieldTransitionFromCache({
     fromKey: 'song:a',
     toKey: 'song:b',
-    fromLrc: '[00:18.00]we own the night\n[00:50.00]we own the night',
-    toLrc: '[00:18.00]take me higher\n[00:50.00]take me higher',
+    fromLrc: '[00:18.00]we own the night\n[00:34.00]nothing feels the same\n[01:06.00]we own the night\n[01:22.00]nothing feels the same',
+    toLrc: '[00:18.00]take me higher\n[00:34.00]feel it rising\n[01:06.00]take me higher\n[01:22.00]feel it rising',
     readBeatMapCache: (key) => cache[key] || null,
   });
 
