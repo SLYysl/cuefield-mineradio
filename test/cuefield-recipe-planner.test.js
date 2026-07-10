@@ -72,7 +72,7 @@ test('measures silent B pre-roll separately from an audible dual-deck overlap', 
   assert.equal(window.handoffOffset, 0.6);
 });
 
-test('measures linear and equal-power threshold crossings within 0.02 seconds', () => {
+test('measures linear and equal-power threshold crossings within 0.01 seconds', () => {
   const linear = measureTimelineWindow([
     { t: -2, deck: 'B', op: 'play', at: 0, volume: 0 },
     { t: -2, deck: 'B', op: 'volume', value: 1, duration: 4000 },
@@ -86,12 +86,25 @@ test('measures linear and equal-power threshold crossings within 0.02 seconds', 
     { t: 2, deck: 'B', op: 'handoff' },
   ]);
 
-  assert.equal(Math.abs(linear.audibleStart - -1) <= 0.02, true);
-  assert.equal(Math.abs(linear.audibleEnd - 1) <= 0.02, true);
-  assert.equal(Math.abs(linear.audibleOverlap - 2) <= 0.02, true);
-  assert.equal(Math.abs(equalPower.audibleStart - -1.796) <= 0.02, true);
-  assert.equal(Math.abs(equalPower.audibleEnd - 1.796) <= 0.02, true);
-  assert.equal(Math.abs(equalPower.audibleOverlap - 3.592) <= 0.02, true);
+  assert.equal(Math.abs(linear.audibleStart - -1) <= 0.01, true);
+  assert.equal(Math.abs(linear.audibleEnd - 1) <= 0.01, true);
+  assert.equal(Math.abs(linear.audibleOverlap - 2) <= 0.01, true);
+  assert.equal(Math.abs(equalPower.audibleStart - -1.796) <= 0.01, true);
+  assert.equal(Math.abs(equalPower.audibleEnd - 1.796) <= 0.01, true);
+  assert.equal(Math.abs(equalPower.audibleOverlap - 3.592) <= 0.01, true);
+});
+
+test('captures an overlapping A ramp start gain before the later ramp overrides it', () => {
+  const window = measureTimelineWindow([
+    { t: -1, deck: 'B', op: 'play', at: 0, volume: 1 },
+    { t: 0, deck: 'A', op: 'volume', value: 0, duration: 10000 },
+    { t: 5, deck: 'A', op: 'volume', value: 1, duration: 5000 },
+    { t: 10, deck: 'B', op: 'handoff' },
+  ], 0.7);
+
+  assert.equal(Math.abs(window.audibleStart - 7) <= 0.01, true);
+  assert.equal(Math.abs(window.audibleEnd - 10) <= 0.01, true);
+  assert.equal(Math.abs(window.audibleOverlap - 3) <= 0.01, true);
 });
 
 test('reports the longest separated dual-audible interval without merging gaps', () => {

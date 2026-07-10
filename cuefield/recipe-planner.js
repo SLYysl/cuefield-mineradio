@@ -11,27 +11,43 @@ function curveGain(progress, curve) {
   return p;
 }
 
-function volumeAt(timeline, deck, time) {
-  let gain = deck === 'A' ? 1 : 0;
+function gainAtEnvelope(envelope, time) {
+  const segment = envelope.slice().reverse().find((item) => item.start <= time);
+  if (!segment) return 0;
+  if (!(segment.end > segment.start) || time >= segment.end) return clamp(segment.gainEnd);
+  const progress = (time - segment.start) / (segment.end - segment.start);
+  return clamp(segment.gainStart + (segment.gainEnd - segment.gainStart) * curveGain(progress, segment.curve));
+}
+
+function buildGainEnvelope(timeline, deck) {
+  const baseGain = deck === 'A' ? 1 : 0;
+  let envelope = [{ start: -Infinity, end: Infinity, gainStart: baseGain, gainEnd: baseGain }];
   const actions = (Array.isArray(timeline) ? timeline : [])
     .filter((action) => action && action.deck === deck && (action.op === 'play' || action.op === 'volume'))
-    .sort((a, b) => toNumber(a.t) - toNumber(b.t));
+    .map((action, index) => ({ action, index }))
+    .sort((a, b) => toNumber(a.action.t) - toNumber(b.action.t) || a.index - b.index)
+    .map(({ action }) => action);
   actions.forEach((action) => {
     const start = toNumber(action.t, NaN);
-    if (!Number.isFinite(start) || start > time) return;
+    if (!Number.isFinite(start)) return;
+    const startGain = gainAtEnvelope(envelope, start);
+    envelope = envelope
+      .filter((segment) => segment.start < start)
+      .map((segment) => segment.end > start ? { ...segment, end: start } : segment);
     if (action.op === 'play') {
-      gain = clamp(action.volume);
+      const gain = clamp(action.volume);
+      envelope.push({ start, end: Infinity, gainStart: gain, gainEnd: gain });
       return;
     }
     const duration = Math.max(0, toNumber(action.duration) / 1000);
     const target = clamp(action.value);
-    if (duration > 0 && time < start + duration) {
-      gain = gain + (target - gain) * curveGain((time - start) / duration, action.curve);
-    } else {
-      gain = target;
-    }
+    if (duration > 0) {
+      const end = start + duration;
+      envelope.push({ start, end, gainStart: startGain, gainEnd: target, curve: action.curve });
+      envelope.push({ start: end, end: Infinity, gainStart: target, gainEnd: target });
+    } else envelope.push({ start, end: Infinity, gainStart: target, gainEnd: target });
   });
-  return clamp(gain);
+  return envelope.sort((a, b) => a.start - b.start);
 }
 
 function measureTimelineWindow(timeline, threshold = 0.08) {
@@ -53,14 +69,18 @@ function measureTimelineWindow(timeline, threshold = 0.08) {
   const startTime = Math.min(...starts.filter(Number.isFinite));
   const endTime = Math.max(...ends.filter(Number.isFinite));
   const sampleStep = 0.005;
+  const envelopes = {
+    A: buildGainEnvelope(actions, 'A'),
+    B: buildGainEnvelope(actions, 'B'),
+  };
   const intervals = [];
   let activeStart = null;
   for (let time = startTime; time < endTime; time += sampleStep) {
     const start = round(time, 3);
     const end = Math.min(endTime, start + sampleStep);
     const midpoint = start + (end - start) / 2;
-    const audible = volumeAt(actions, 'A', midpoint) >= threshold
-      && volumeAt(actions, 'B', midpoint) >= threshold;
+    const audible = gainAtEnvelope(envelopes.A, midpoint) >= threshold
+      && gainAtEnvelope(envelopes.B, midpoint) >= threshold;
     if (audible && activeStart === null) activeStart = start;
     if (!audible && activeStart !== null) {
       intervals.push({ start: activeStart, end: start });
