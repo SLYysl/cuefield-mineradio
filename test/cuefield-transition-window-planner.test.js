@@ -18,6 +18,7 @@ function bars(duration, energy = 0.5, beatStability = 0.9) {
 function profile({
   duration = 128,
   bpm = 120,
+  track = {},
   protectedUntil = 0,
   exits = [],
   entries = [],
@@ -59,6 +60,7 @@ function profile({
       evidence: candidate.evidence,
     }));
   return {
+    track,
     duration,
     bpm,
     gridStep: beatGridTrusted ? 0.5 : 0,
@@ -187,6 +189,41 @@ test('late contrast release filters a high-scoring long recipe from window ranki
   assert.equal(result.chosen.audibleOverlap <= 6, true);
 });
 
+test('relationship style risk routes directly to terminal rescue without structural recipes', () => {
+  const from = profile({
+    duration: 200,
+    bpm: 100,
+    track: { artist: 'Avicii', title: 'Wake Me Up' },
+    exits: [exit(160, 0.84, { exitRatio: 0.8 })],
+  });
+  const to = profile({
+    duration: 120,
+    bpm: 140,
+    track: { artist: 'ACDC', title: 'Highway to Hell' },
+    entries: [entry('intro', 16, { playFrom: 0, landingAt: 16, landingType: 'intro' })],
+  });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.policy.route, 'terminal-rescue');
+  assert.equal(result.chosen.recipeCandidate.recipe, 'terminal-rescue');
+  assert.equal(result.diagnostics.recipeCandidatesConsidered, 0);
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.rejected, []);
+});
+
+test('relationship directionality risk alone keeps the structure route available', () => {
+  const from = profile({ exits: [exit(80, 0.84, { energyAfter: 0.35 })] });
+  const to = profile({
+    entries: [entry('intro', 16, { playFrom: 0, landingAt: 16, landingType: 'intro', energyAfter: 0.8 })],
+  });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.policy.route, 'structure-mix');
+  assert.notEqual(result.chosen.recipeCandidate.recipe, 'terminal-rescue');
+});
+
 test('structure mix retains an early usable post-hook exit', () => {
   const from = profile({
     duration: 200,
@@ -282,6 +319,7 @@ test('terminal rescue caps a valid late exit to a short executable overlap', () 
 
   assert.equal(result.policy.route, 'terminal-rescue');
   assert.equal(result.chosen.mixStart, 180);
+  assert.equal(result.chosen.exit.time, result.chosen.mixStart);
   assert.equal(result.chosen.mixStart >= from.structureMap.protectedUntil, true);
   assert.equal(result.chosen.audibleOverlap <= 3.4, true);
   assert.equal(result.chosen.audibleOverlap >= 2.2, true);
@@ -289,24 +327,37 @@ test('terminal rescue caps a valid late exit to a short executable overlap', () 
   assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= result.chosen.audibleOverlap), true);
 });
 
-test('rejects terminal rescue when protection leaves less than 2.2 seconds', () => {
+test('returns a non-executable technical result when protection leaves less than 2.2 seconds', () => {
   const from = profile({ duration: 12, protectedUntil: 11.9 });
   const to = profile({ duration: 24 });
 
-  assert.throws(
-    () => chooseTransitionWindow(from, to),
-    (error) => error && error.code === 'TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY',
-  );
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.chosen.technicalFailure, true);
+  assert.equal(result.chosen.errorCode, 'TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY');
+  assert.deepEqual(result.chosen.timeline, []);
+  assert.equal(result.chosen.recipeCandidate.recipe, 'technical-failure');
 });
 
-test('rejects terminal rescue when protection leaves no post-protection runway', () => {
+test('returns a non-executable technical result when protection leaves no post-protection runway', () => {
   const from = profile({ duration: 12, protectedUntil: 12 });
   const to = profile({ duration: 24 });
 
-  assert.throws(
-    () => chooseTransitionWindow(from, to),
-    (error) => error && error.code === 'TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY',
-  );
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.chosen.technicalFailure, true);
+  assert.equal(result.chosen.errorCode, 'TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY');
+  assert.deepEqual(result.chosen.timeline, []);
+});
+
+test('returns a non-executable technical result for an invalid source duration', () => {
+  const result = chooseTransitionWindow(profile({ duration: 0 }), profile({ duration: 24 }));
+
+  assert.equal(result.policy.route, 'terminal-rescue');
+  assert.equal(result.chosen.technicalFailure, true);
+  assert.equal(result.chosen.errorCode, 'TERMINAL_RESCUE_INVALID_DURATION');
+  assert.deepEqual(result.chosen.timeline, []);
+  assert.equal(result.chosen.handoffAt, null);
 });
 
 test('terminal rescue executes an exact 2.2-second post-protection runway', () => {
@@ -321,6 +372,18 @@ test('terminal rescue executes an exact 2.2-second post-protection runway', () =
   assert.equal(result.chosen.audibleOverlap >= 2.2, true);
   assert.equal(result.chosen.audibleOverlap <= 3.4, true);
   assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= result.chosen.audibleOverlap), true);
+});
+
+test('rejects every structural candidate whose handoff would exceed A duration before rescuing', () => {
+  const from = profile({ duration: 128, exits: [exit(127.5)] });
+  const to = profile({ entries: [entry('intro', 16, { playFrom: 0, landingAt: 16, landingType: 'intro' })] });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.policy.route, 'terminal-rescue');
+  assert.equal(result.chosen.recipeCandidate.recipe, 'terminal-rescue');
+  assert.equal(result.rejected.length > 0, true);
+  assert.equal(result.rejected.every((candidate) => candidate.rejectionReasons.includes('handoff exceeds source duration')), true);
 });
 
 test('uses .35 conservative groove continuity without a trusted beat grid', () => {

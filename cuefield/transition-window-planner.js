@@ -209,7 +209,7 @@ function isAnchoredLandingDiagnosticValid(entry, window) {
   return Number.isFinite(landingError) && Math.abs(landingError) <= 0.08;
 }
 
-function rejectionReasons({ protectedUntil, exit, entry, recipeCandidate, diagnostics }) {
+function rejectionReasons({ protectedUntil, sourceDuration, exit, entry, recipeCandidate, diagnostics }) {
   const reasons = [];
   const window = recipeCandidate.window || {};
   const mixStart = toNumber(exit.time) + toNumber(window.audibleStart);
@@ -220,6 +220,9 @@ function rejectionReasons({ protectedUntil, exit, entry, recipeCandidate, diagno
   else if (anchored && !isAnchoredLandingDiagnosticValid(entry, window)) reasons.push('landing error exceeds .08');
   if (landingKind(entry) === 'hook' && entry.playFrom === entry.landingAt && toNumber(diagnostics.relativeTempoDelta) > 0.15) {
     reasons.push('direct hook has no compatible runway');
+  }
+  if (toNumber(exit.time) + toNumber(window.handoffOffset) > toNumber(sourceDuration) + 0.000001) {
+    reasons.push('handoff exceeds source duration');
   }
   if (!Array.isArray(recipeCandidate.timeline) || !recipeCandidate.timeline.length) reasons.push('missing executable timeline');
   return reasons;
@@ -323,28 +326,80 @@ function terminalRescuePolicy(policy, fromProfile, protectedUntil) {
   };
 }
 
+function technicalFailure(errorCode, rejected = []) {
+  const entry = {
+    type: 'start',
+    role: 'entry',
+    source: 'fallback',
+    time: 0,
+    playFrom: 0,
+    landingAt: 0,
+    landingType: 'start',
+    confidence: 0.35,
+  };
+  return {
+    exit: null,
+    entry,
+    sectionChoice: null,
+    recipeCandidate: {
+      recipe: 'technical-failure',
+      score: 0,
+      timeline: [],
+      window: {
+        audibleStart: null,
+        audibleEnd: null,
+        audibleOverlap: null,
+        preRollDuration: null,
+        handoffOffset: null,
+        runwayAvailable: false,
+        landingError: null,
+      },
+    },
+    timeline: [],
+    mixStart: null,
+    handoffAt: null,
+    audibleOverlap: null,
+    preRollDuration: null,
+    exitRatio: null,
+    energyContinuity: null,
+    grooveContinuity: null,
+    tempoCompatibility: null,
+    score: 0,
+    rejectionReasons: ['no valid complete transition window', ...(rejected.length ? ['structural windows rejected'] : [])],
+    errorCode,
+    technicalFailure: true,
+    routeFallbackUsed: false,
+  };
+}
+
 function terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, rejected) {
   const duration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
   const protectedBoundary = toNumber(protectedUntil);
+  if (!(duration > 0)) return technicalFailure('TERMINAL_RESCUE_INVALID_DURATION', rejected);
   if (duration - protectedBoundary < MINIMUM_TERMINAL_OVERLAP - 0.000001) {
-    const error = new Error('TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY');
-    error.code = 'TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY';
-    throw error;
+    return technicalFailure('TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY', rejected);
   }
-  const [minRatio, maxRatio] = policy.preferredExitRange;
+  const [minRatio, maxRatio] = policy.preferredExitRange || [];
   const rangeExits = sourceExits(fromAnalysis, protectedUntil)
     .filter((candidate) => {
-      const ratio = toNumber(candidate.time) / Math.max(1, duration);
-      return ratio >= minRatio && ratio <= maxRatio && toNumber(candidate.time) < duration;
+      const time = toNumber(candidate.time, NaN);
+      const ratio = time / Math.max(1, duration);
+      return Number.isFinite(time)
+        && ratio >= minRatio
+        && ratio <= maxRatio
+        && duration - time >= MINIMUM_TERMINAL_OVERLAP - 0.000001;
     })
     .sort((a, b) => toNumber(b.time) - toNumber(a.time));
-  const preferredStart = rangeExits[0]
-    ? toNumber(rangeExits[0].time)
+  const selectedExit = rangeExits[0] || null;
+  const preferredStart = selectedExit
+    ? toNumber(selectedExit.time)
     : Math.max(toNumber(protectedUntil), Math.min(duration - 3.6, duration * 0.92));
-  const mixStart = round(Math.max(
-    protectedBoundary,
-    Math.min(duration - MINIMUM_TERMINAL_OVERLAP, preferredStart),
-  ));
+  const mixStart = selectedExit
+    ? round(toNumber(selectedExit.time))
+    : round(Math.max(
+      protectedBoundary,
+      Math.min(duration - MINIMUM_TERMINAL_OVERLAP, preferredStart),
+    ));
   const overlapDuration = round(Math.max(0, Math.min(3.4, duration - mixStart)));
   const fadeDuration = Math.max(1, Math.round(overlapDuration * 1000));
   const bassRestoreDuration = Math.min(800, fadeDuration);
@@ -371,7 +426,7 @@ function terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, rejec
     { t: bassRestoreAt, deck: 'B', op: 'bass', value: 1, duration: boundedBassRestoreDuration },
     { t: overlapDuration, deck: 'B', op: 'handoff' },
   ];
-  const exit = rangeExits[0] || {
+  const exit = selectedExit ? { ...selectedExit, time: mixStart } : {
     type: 'terminal-boundary',
     role: 'exit',
     source: 'fallback',
@@ -397,22 +452,32 @@ function terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, rejec
   };
 }
 
+function representativeRelationshipRisks(fromAnalysis, toAnalysis, exits, entries) {
+  const exit = exits.slice()
+    .sort((a, b) => scoreWindowExit(b) - scoreWindowExit(a) || toNumber(a.time) - toNumber(b.time))[0];
+  const entry = entries[0];
+  if (!exit || !entry) return [];
+  const scored = scoreCandidatePair(exit, entry, fromAnalysis, toAnalysis, scoreWindowExit, exits);
+  return Array.from(new Set((scored.evaluation && scored.evaluation.risks || [])
+    .filter((risk) => typeof risk === 'string' && risk))).slice(0, 4);
+}
+
 function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
   const fromProfile = profileOf(fromAnalysis);
   const toProfile = profileOf(toAnalysis);
   const protectedUntil = toNumber(fromAnalysis.structureMap && fromAnalysis.structureMap.protectedUntil);
   const sourceExitOptions = sourceExits(fromAnalysis, protectedUntil);
   const entries = landingOptions(toAnalysis);
+  const risks = representativeRelationshipRisks(fromAnalysis, toAnalysis, sourceExitOptions, entries);
   const policy = classifyTransitionRoute({
     fromProfile,
     toProfile,
     protectedUntil,
     exits: sourceExitOptions,
     entries,
+    risks,
   });
   const exits = exitOptions(fromAnalysis, protectedUntil, policy);
-  const candidateWindows = [];
-  const rejected = [];
   const diagnostics = {
     protectedUntil,
     sourceExitCount: exitSourceCandidates(fromAnalysis).length,
@@ -423,6 +488,21 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
     landingCount: entries.length,
     recipeCandidatesConsidered: 0,
   };
+
+  if (policy.route === 'terminal-rescue') {
+    const chosen = terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, []);
+    chosen.policy = policy;
+    return {
+      chosen,
+      candidates: [],
+      rejected: [],
+      diagnostics,
+      policy,
+    };
+  }
+
+  const candidateWindows = [];
+  const rejected = [];
 
   exits.forEach((exit) => {
     entries.forEach((entry) => {
@@ -435,7 +515,14 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
       (recipePlan.candidates || []).filter((candidate) => recipeCandidateAllowedByRoute(candidate, policy)).forEach((candidate) => {
         const recipeCandidate = { ...candidate, score: clamp(candidate.score) };
         diagnostics.recipeCandidatesConsidered += 1;
-        const reasons = rejectionReasons({ protectedUntil, exit, entry, recipeCandidate, diagnostics: recipePlan.diagnostics || {} });
+        const reasons = rejectionReasons({
+          protectedUntil,
+          sourceDuration: fromProfile.duration,
+          exit,
+          entry,
+          recipeCandidate,
+          diagnostics: recipePlan.diagnostics || {},
+        });
         const window = rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics: recipePlan.diagnostics || {}, fromProfile, toProfile, policy });
         if (reasons.length) rejected.push({ ...window, rejectionReasons: reasons });
         else candidateWindows.push(window);
