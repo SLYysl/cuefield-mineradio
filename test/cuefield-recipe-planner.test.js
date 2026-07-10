@@ -2,7 +2,11 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { buildCueProfile } = require('../cuefield/cue-profile');
-const { planRecipeCandidates } = require('../cuefield/recipe-planner');
+const {
+  buildSafetyTimelineForAnchors,
+  measureTimelineWindow,
+  planRecipeCandidates,
+} = require('../cuefield/recipe-planner');
 
 function makeBeatMap(duration = 128, gridStep = 0.5) {
   const beats = [];
@@ -53,6 +57,48 @@ test('builds cue profile bars, cue points, and density windows from beatmap data
   assert.equal(profile.windows.bass.length > 0, true);
 });
 
+test('measures silent B pre-roll separately from an audible dual-deck overlap', () => {
+  const window = measureTimelineWindow([
+    { t: -5, deck: 'B', op: 'play', at: 8, volume: 0 },
+    { t: -1.8, deck: 'B', op: 'volume', value: 1, duration: 1800, curve: 'equal-power-in' },
+    { t: -1.8, deck: 'A', op: 'volume', value: 0, duration: 1800, curve: 'equal-power-out' },
+    { t: 0.6, deck: 'B', op: 'handoff' },
+  ]);
+
+  assert.equal(window.preRollDuration > window.audibleOverlap, true);
+  assert.equal(window.audibleOverlap >= 1.5 && window.audibleOverlap <= 2.1, true);
+  assert.equal(window.audibleStart > -5, true);
+  assert.equal(window.audibleEnd > window.audibleStart, true);
+  assert.equal(Number.isFinite(window.handoffOffset), true);
+});
+
+test('aligns safety B playback so the handoff lands at the requested B position', () => {
+  const execution = buildSafetyTimelineForAnchors({
+    bLandingAt: 32,
+    overlapClass: 'medium',
+    overlapDuration: 5.6,
+  });
+  const play = execution.timeline.find((action) => action.deck === 'B' && action.op === 'play');
+  const handoff = execution.timeline.find((action) => action.op === 'handoff');
+
+  assert.equal(Math.abs(play.at + (handoff.t - play.t) - 32) <= 0.01, true);
+});
+
+test('short safety keeps B bass reduced until the final handoff window', () => {
+  const execution = buildSafetyTimelineForAnchors({
+    bLandingAt: 32,
+    overlapClass: 'short',
+    overlapDuration: 3.4,
+  });
+  const bFullBass = execution.timeline.find((action) => action.deck === 'B' && action.op === 'bass' && action.value === 1);
+  const aFullBass = execution.timeline.find((action) => action.deck === 'A' && action.op === 'bass' && action.value === 1);
+  const window = measureTimelineWindow(execution.timeline);
+
+  assert.equal(window.audibleOverlap >= 3, true);
+  assert.equal(bFullBass.t >= 0, true);
+  assert.equal(aFullBass, undefined);
+});
+
 test('plans multiple recipe candidates with timelines and chooses the safest high score', () => {
   const fromProfile = buildCueProfile({
     track: { title: 'A', duration: 128 },
@@ -80,6 +126,7 @@ test('plans multiple recipe candidates with timelines and chooses the safest hig
   assert.equal(recipes.includes('bass-eq-handoff'), true);
   assert.equal(recipes.includes('quick-safe-fade'), true);
   assert.equal(plan.candidates.every((candidate) => candidate.timeline.length > 0), true);
+  assert.equal(plan.candidates.every((candidate) => Number.isFinite(candidate.window.audibleOverlap)), true);
   assert.equal(plan.chosen.recipe, 'safety-long-blend');
   assert.equal(plan.chosen.anchors.overlapClass, 'short');
   assert.equal(plan.chosen.risks.includes('hard cut'), false);
@@ -112,7 +159,7 @@ test('uses safety long blend for weak or rejected section choices', () => {
 
   assert.equal(plan.chosen.recipe, 'safety-long-blend');
   assert.equal(plan.chosen.anchors.overlapClass, 'short');
-  assert.equal(plan.chosen.anchors.overlapDuration <= 3.2, true);
+  assert.equal(plan.chosen.window.audibleOverlap >= 3, true);
   assert.equal(plan.chosen.timeline[0].op, 'play');
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'filter' && action.t < -2), false);
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'B' && action.op === 'bass' && action.value < 0.2), true);
@@ -138,14 +185,15 @@ test('keeps fallback entries on a short aligned overlap even with a high pair sc
     },
   });
   const play = plan.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play');
+  const handoff = plan.chosen.timeline.find((action) => action.op === 'handoff');
 
   assert.equal(plan.chosen.anchors.overlapClass, 'short');
-  assert.equal(plan.chosen.anchors.overlapDuration <= 3.2, true);
+  assert.equal(plan.chosen.window.audibleOverlap >= 3, true);
   assert.equal(plan.chosen.anchors.entrySource, 'fallback');
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'filter' && action.t < -2), false);
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'B' && action.op === 'volume' && action.curve === 'equal-power-in'), true);
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'volume' && action.curve === 'equal-power-out'), true);
-  assert.equal(Math.abs((play.at + plan.chosen.anchors.lead) - plan.chosen.anchors.bAnchor) <= 0.05, true);
+  assert.equal(Math.abs((play.at + (handoff.t - play.t)) - plan.chosen.anchors.bAnchor) <= 0.01, true);
 });
 
 test('uses medium overlap for a trusted entry with moderate tempo difference', () => {
@@ -167,6 +215,7 @@ test('uses medium overlap for a trusted entry with moderate tempo difference', (
   assert.equal(plan.chosen.anchors.overlapClass, 'medium');
   assert.equal(plan.chosen.anchors.overlapDuration >= 4, true);
   assert.equal(plan.chosen.anchors.overlapDuration <= 6, true);
+  assert.equal(plan.chosen.window.audibleOverlap >= 4 && plan.chosen.window.audibleOverlap <= 6, true);
 });
 
 test('uses long overlap only for a trusted entry with compatible tempo', () => {
@@ -188,6 +237,7 @@ test('uses long overlap only for a trusted entry with compatible tempo', () => {
   assert.equal(plan.chosen.anchors.overlapClass, 'long');
   assert.equal(plan.chosen.anchors.overlapDuration >= 8, true);
   assert.equal(plan.chosen.anchors.overlapDuration <= 12, true);
+  assert.equal(plan.chosen.window.audibleOverlap >= 6 && plan.chosen.window.audibleOverlap <= 10, true);
   assert.equal(plan.chosen.timeline.filter((action) => action.deck === 'B' && action.op === 'volume' && !action.curve).every((action) => action.value === 0), true);
 });
 
@@ -230,7 +280,7 @@ test('does not let an executable tier bypass the fallback compatibility gate', (
 
   assert.equal(plan.chosen.recipe, 'safety-long-blend');
   assert.equal(plan.chosen.anchors.overlapClass, 'short');
-  assert.equal(plan.chosen.anchors.overlapDuration <= 3.2, true);
+  assert.equal(plan.chosen.window.audibleOverlap >= 3, true);
 });
 
 test('does not trust a low-confidence beat grid for long overlap', () => {

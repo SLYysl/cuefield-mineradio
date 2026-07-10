@@ -4,6 +4,76 @@ function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, toNumber(value)));
 }
 
+function curveGain(progress, curve) {
+  const p = clamp(progress);
+  if (curve === 'equal-power-in') return Math.sin(p * Math.PI / 2);
+  if (curve === 'equal-power-out') return 1 - Math.cos(p * Math.PI / 2);
+  return p;
+}
+
+function volumeAt(timeline, deck, time) {
+  let gain = deck === 'A' ? 1 : 0;
+  const actions = (Array.isArray(timeline) ? timeline : [])
+    .filter((action) => action && action.deck === deck && (action.op === 'play' || action.op === 'volume'))
+    .sort((a, b) => toNumber(a.t) - toNumber(b.t));
+  actions.forEach((action) => {
+    const start = toNumber(action.t, NaN);
+    if (!Number.isFinite(start) || start > time) return;
+    if (action.op === 'play') {
+      gain = clamp(action.volume);
+      return;
+    }
+    const duration = Math.max(0, toNumber(action.duration) / 1000);
+    const target = clamp(action.value);
+    if (duration > 0 && time < start + duration) {
+      gain = gain + (target - gain) * curveGain((time - start) / duration, action.curve);
+    } else {
+      gain = target;
+    }
+  });
+  return clamp(gain);
+}
+
+function measureTimelineWindow(timeline, threshold = 0.08) {
+  const actions = Array.isArray(timeline) ? timeline : [];
+  const play = actions.find((action) => action && action.deck === 'B' && action.op === 'play');
+  const handoffs = actions.filter((action) => action && action.op === 'handoff');
+  const handoff = handoffs[handoffs.length - 1];
+  const playAt = play ? toNumber(play.t, 0) : 0;
+  const handoffAt = handoff ? toNumber(handoff.t, playAt) : playAt;
+  const boundaries = new Set([playAt, handoffAt]);
+  actions.forEach((action) => {
+    const start = toNumber(action && action.t, NaN);
+    if (!Number.isFinite(start)) return;
+    boundaries.add(start);
+    const duration = Math.max(0, toNumber(action.duration) / 1000);
+    if (duration > 0) boundaries.add(start + duration);
+  });
+  const points = Array.from(boundaries).filter(Number.isFinite).sort((a, b) => a - b);
+  let audibleStart = null;
+  let audibleEnd = null;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    const midpoint = start + (end - start) / 2;
+    const audible = volumeAt(actions, 'A', midpoint) >= threshold
+      && volumeAt(actions, 'B', midpoint) >= threshold;
+    if (!audible) continue;
+    if (audibleStart === null) audibleStart = start;
+    audibleEnd = end;
+  }
+  const hasAudibleWindow = audibleStart !== null && audibleEnd !== null;
+  const start = hasAudibleWindow ? audibleStart : handoffAt;
+  const end = hasAudibleWindow ? audibleEnd : start;
+  return {
+    preRollDuration: round(Math.max(0, start - playAt)),
+    audibleOverlap: round(Math.max(0, end - start)),
+    audibleStart: round(start),
+    audibleEnd: round(end),
+    handoffOffset: round(handoffAt - end),
+  };
+}
+
 function densityAt(windows, time) {
   const list = Array.isArray(windows) ? windows : [];
   const found = list.find((window) => time >= toNumber(window.start) && time < toNumber(window.end));
@@ -127,6 +197,7 @@ function baseCandidate(recipe, score, confidence, reason, risks, anchors, timeli
     risks,
     anchors,
     timeline,
+    window: measureTimelineWindow(timeline),
   };
 }
 
@@ -251,7 +322,7 @@ function safetyAssessment(fromProfile, toProfile, sectionChoice = {}) {
   let overlapClass = 'short';
   if (entryTrusted && beatGridTrusted && relativeTempoDelta <= 0.08) overlapClass = 'long';
   else if (entryTrusted && relativeTempoDelta <= 0.15) overlapClass = 'medium';
-  const overlapDuration = overlapClass === 'long' ? 10.5 : (overlapClass === 'medium' ? 5.6 : 3.1);
+  const overlapDuration = overlapClass === 'long' ? 10.5 : (overlapClass === 'medium' ? 5.6 : 3.4);
   return {
     entrySource,
     entryConfidence: round(entryConfidence),
@@ -265,22 +336,21 @@ function safetyAssessment(fromProfile, toProfile, sectionChoice = {}) {
   };
 }
 
-function safetyTimeline(anchors, assessment) {
-  const overlapClass = assessment.overlapClass;
-  const lead = overlapClass === 'long' ? 9.5 : (overlapClass === 'medium' ? 5 : 2.8);
-  const handoffAt = round(assessment.overlapDuration - lead);
-  const bStart = round(Math.max(0, anchors.bAnchor - lead));
+function buildSafetyTimelineForAnchors({ bLandingAt, overlapClass, overlapDuration }) {
+  const duration = toNumber(overlapDuration, overlapClass === 'long' ? 10.5 : (overlapClass === 'medium' ? 5.6 : 3.4));
+  const handoffAt = overlapClass === 'long' ? 1 : 0.6;
+  const playAt = round(handoffAt - duration);
+  const bStart = round(toNumber(bLandingAt) - duration);
   if (overlapClass === 'short') {
     return {
-      lead,
+      lead: round(-playAt),
       bStart,
       timeline: [
-        { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
-        { t: -lead, deck: 'B', op: 'bass', value: 0.15, duration: 0 },
-        { t: -lead, deck: 'B', op: 'volume', value: 0, duration: 1400 },
+        { t: playAt, deck: 'B', op: 'play', at: bStart, volume: 0 },
+        { t: playAt, deck: 'B', op: 'bass', value: 0.15, duration: 0 },
+        { t: playAt, deck: 'B', op: 'volume', value: 1, duration: Math.round(duration * 1000), curve: 'equal-power-in' },
         { t: -1.6, deck: 'A', op: 'bass', value: 0.5, duration: 700 },
-        { t: -1.4, deck: 'B', op: 'volume', value: 1, duration: 1400, curve: 'equal-power-in' },
-        { t: -1.4, deck: 'A', op: 'volume', value: 0, duration: 1400, curve: 'equal-power-out' },
+        { t: playAt, deck: 'A', op: 'volume', value: 0, duration: Math.round(duration * 1000), curve: 'equal-power-out' },
         { t: -0.8, deck: 'B', op: 'bass', value: 0.85, duration: 700 },
         { t: 0, deck: 'B', op: 'bass', value: 1, duration: 300 },
         { t: handoffAt, deck: 'B', op: 'handoff' },
@@ -289,36 +359,33 @@ function safetyTimeline(anchors, assessment) {
   }
   if (overlapClass === 'medium') {
     return {
-      lead,
+      lead: round(-playAt),
       bStart,
       timeline: [
-        { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
-        { t: -lead, deck: 'B', op: 'bass', value: 0.12, duration: 0 },
-        { t: -lead, deck: 'B', op: 'filter', type: 'highpass', value: 850, duration: 0 },
-        { t: -lead, deck: 'B', op: 'volume', value: 0, duration: 2800 },
-        { t: -1.8, deck: 'B', op: 'volume', value: 1, duration: 1800, curve: 'equal-power-in' },
+        { t: playAt, deck: 'B', op: 'play', at: bStart, volume: 0 },
+        { t: playAt, deck: 'B', op: 'bass', value: 0.12, duration: 0 },
+        { t: playAt, deck: 'B', op: 'filter', type: 'highpass', value: 850, duration: 0 },
+        { t: playAt + 0.2, deck: 'B', op: 'volume', value: 1, duration: Math.round((duration - 0.2) * 1000), curve: 'equal-power-in' },
         { t: -1.8, deck: 'A', op: 'bass', value: 0.3, duration: 1000 },
         { t: -1.2, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 1000 },
-        { t: -1.8, deck: 'A', op: 'volume', value: 0, duration: 1800, curve: 'equal-power-out' },
+        { t: playAt + 0.2, deck: 'A', op: 'volume', value: 0, duration: Math.round((duration - 0.2) * 1000), curve: 'equal-power-out' },
         { t: -0.8, deck: 'B', op: 'bass', value: 1, duration: 900 },
         { t: handoffAt, deck: 'B', op: 'handoff' },
       ],
     };
   }
   return {
-    lead,
+    lead: round(-playAt),
     bStart,
     timeline: [
-      { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
-      { t: -lead, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
-      { t: -lead, deck: 'B', op: 'filter', type: 'highpass', value: 1100, duration: 0 },
-      { t: -lead, deck: 'B', op: 'volume', value: 0, duration: 3600 },
-      { t: -5.4, deck: 'B', op: 'volume', value: 0, duration: 3000 },
+      { t: playAt, deck: 'B', op: 'play', at: bStart, volume: 0 },
+      { t: playAt, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
+      { t: playAt, deck: 'B', op: 'filter', type: 'highpass', value: 1100, duration: 0 },
+      { t: playAt + 1, deck: 'B', op: 'volume', value: 1, duration: Math.round((duration - 1) * 1000), curve: 'equal-power-in' },
       { t: -2, deck: 'A', op: 'filter', type: 'highpass', value: 160, duration: 1600 },
       { t: -1.8, deck: 'A', op: 'bass', value: 0.24, duration: 1200 },
-      { t: -2, deck: 'B', op: 'volume', value: 1, duration: 2000, curve: 'equal-power-in' },
       { t: -1.2, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 1100 },
-      { t: -2, deck: 'A', op: 'volume', value: 0, duration: 2000, curve: 'equal-power-out' },
+      { t: playAt + 1, deck: 'A', op: 'volume', value: 0, duration: Math.round((duration - 1) * 1000), curve: 'equal-power-out' },
       { t: -0.8, deck: 'B', op: 'bass', value: 1, duration: 900 },
       { t: handoffAt, deck: 'B', op: 'handoff' },
     ],
@@ -327,7 +394,11 @@ function safetyTimeline(anchors, assessment) {
 
 function makeSafetyLongBlend(anchors, scores, sectionChoice = {}, fromProfile = {}, toProfile = {}) {
   const assessment = safetyAssessment(fromProfile, toProfile, sectionChoice);
-  const execution = safetyTimeline(anchors, assessment);
+  const execution = buildSafetyTimelineForAnchors({
+    bLandingAt: anchors.bAnchor,
+    overlapClass: assessment.overlapClass,
+    overlapDuration: assessment.overlapDuration,
+  });
   const lead = execution.lead;
   const bStart = execution.bStart;
   const score = 0.48
@@ -425,5 +496,7 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
 }
 
 module.exports = {
+  buildSafetyTimelineForAnchors,
+  measureTimelineWindow,
   planRecipeCandidates,
 };
