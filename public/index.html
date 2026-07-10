@@ -11150,6 +11150,7 @@ function cuefieldVolumeOnlyExecution(execution, pending) {
     return window.CuefieldTimelineExecutor.buildVolumeOnlyCuefieldExecution({
       anchorTime: anchorTime,
       targetVolume: targetVolume,
+      outgoingCurve: gainNode && audioCtx ? 'linear' : 'cubic-ease-out',
     });
   }
   return execution;
@@ -11169,8 +11170,10 @@ function runCuefieldVolumeCurve(pending, nextMedia) {
   var actualMixStart = Number(pending.mixStart);
   if (!isFinite(actualMixStart)) actualMixStart = Number(pending.triggerAt);
   if (isFinite(actualMixStart)) {
-    pending.actualMixStart = actualMixStart;
     pending.actualHandoffAt = actualMixStart + Math.max(0, Number(execution.handoffDelayMs) || 0) / 1000;
+    if (execution.audibleStartDelayMs != null && isFinite(Number(execution.audibleStartDelayMs))) {
+      pending.actualMixStart = actualMixStart + Math.max(0, Number(execution.audibleStartDelayMs) || 0) / 1000;
+    }
   }
   pending.actualAudibleOverlap = execution.audibleOverlap;
   pending.actualPreRollDuration = execution.preRollDuration;

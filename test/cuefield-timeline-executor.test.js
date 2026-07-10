@@ -67,6 +67,19 @@ test('uses explicit transition window as the runtime clock without moving the B 
   assert.equal(Math.abs((play.at + execution.handoffDelayMs / 1000) - 18.6) <= 0.001, true);
 });
 
+test('falls back to legacy timing for an empty explicit transition window', () => {
+  const execution = buildCuefieldTimelineExecution({
+    mixStart: 50,
+    handoffAt: 50,
+    timeline: [
+      { t: -8, deck: 'B', op: 'play', at: 8, volume: 0 },
+      { t: 2.6, deck: 'B', op: 'handoff' },
+    ],
+  });
+
+  assert.equal(execution.handoffDelayMs, 10600);
+});
+
 test('falls back to the current soft handoff curve when no timeline exists', () => {
   const execution = buildCuefieldTimelineExecution({
     exitTime: 30,
@@ -117,11 +130,21 @@ test('realigns volume-only downgrade to the strong B anchor', () => {
   const play = execution.actions.find((action) => action.op === 'play');
 
   assert.equal(execution.handoffDelayMs, 2200);
-  assert.equal(execution.audibleOverlap, 2.2);
-  assert.equal(execution.preRollDuration, 0);
+  assert.equal(execution.audibleStartDelayMs, 60);
+  assert.equal(execution.audibleOverlap, 1.964);
+  assert.equal(execution.preRollDuration, 0.06);
   assert.equal(play.at, 9.8);
   assert.equal(play.at + execution.leadSec, 12);
   assert.equal(execution.actions.some((action) => action.op === 'filter' || action.op === 'bass'), false);
+});
+
+test('measures the shorter volume-only overlap when A also uses cubic media fading', () => {
+  const execution = buildVolumeOnlyCuefieldExecution({
+    anchorTime: 12,
+    outgoingCurve: 'cubic-ease-out',
+  });
+
+  assert.equal(execution.audibleOverlap, 1.192);
 });
 
 test('keeps an adopted active Cuefield graph connected across normal source changes', () => {

@@ -86,6 +86,8 @@ test('Cuefield runtime records the executed window after a volume-only downgrade
   const context = {
     window: { CuefieldTimelineExecutor },
     targetVolume: 0.7,
+    gainNode: { gain: {} },
+    audioCtx: {},
     cuefieldTimelineExecutionForPending: () => ({
       requiresBGraph: true,
       handoffDelayMs: 9015,
@@ -106,6 +108,7 @@ test('Cuefield runtime records the executed window after a volume-only downgrade
   assert.equal(pending.runtimeDowngrade, 'volume-only');
   assert.equal(handoffDelayMs, 2200);
   assert.equal(pending.actualHandoffAt, 50.45);
-  assert.equal(pending.actualAudibleOverlap, 2.2);
-  assert.equal(pending.actualPreRollDuration, 0);
+  assert.equal(pending.actualMixStart, 48.31);
+  assert.equal(pending.actualAudibleOverlap, 1.964);
+  assert.equal(pending.actualPreRollDuration, 0.06);
 });

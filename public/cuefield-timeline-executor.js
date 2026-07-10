@@ -43,6 +43,11 @@
   function buildVolumeOnlyCuefieldExecution(opts) {
     opts = opts || {};
     var leadSec = 2.2;
+    var threshold = 0.08;
+    var incomingAudibleAt = leadSec * (1 - Math.pow(1 - threshold, 1 / 3));
+    var outgoingSilentAt = opts.outgoingCurve === 'cubic-ease-out'
+      ? leadSec * (1 - Math.pow(threshold, 1 / 3))
+      : leadSec * (1 - threshold);
     var anchorTime = Math.max(0, toNumber(opts.anchorTime, 0));
     var targetVolume = clamp(opts.targetVolume == null ? 1 : opts.targetVolume, 0, 1);
     var bStart = round(Math.max(0, anchorTime - leadSec));
@@ -50,8 +55,9 @@
       leadSec: leadSec,
       bStart: bStart,
       handoffDelayMs: 2200,
-      audibleOverlap: 2.2,
-      preRollDuration: 0,
+      audibleStartDelayMs: Math.round(incomingAudibleAt * 1000),
+      audibleOverlap: round(Math.max(0, outgoingSilentAt - incomingAudibleAt)),
+      preRollDuration: round(incomingAudibleAt),
       requiresBGraph: false,
       actions: [
         { delayMs: 0, durationMs: 0, deck: 'B', op: 'play', type: '', curve: '', value: 1, at: bStart },
@@ -155,7 +161,7 @@
     var mixStart = finiteOption(opts.mixStart);
     var handoffAt = finiteOption(opts.handoffAt);
     var rawHandoff = timeline.filter(function(action) { return action && action.op === 'handoff'; }).slice(-1)[0];
-    var explicitWindow = mixStart != null && handoffAt != null && rawHandoff;
+    var explicitWindow = mixStart != null && handoffAt != null && handoffAt > mixStart && !!rawHandoff;
     var originT = explicitWindow
       ? toNumber(rawHandoff.t, 0) - Math.max(0, handoffAt - mixStart)
       : null;
@@ -185,7 +191,8 @@
     return {
       leadSec: round(leadSec),
       bStart: round(bStart),
-      handoffDelayMs: Math.max(520, handoffDelayMs),
+      handoffDelayMs: Math.max(explicitWindow ? 0 : 520, handoffDelayMs),
+      audibleStartDelayMs: explicitWindow ? 0 : null,
       audibleOverlap: finiteOption(opts.audibleOverlap),
       preRollDuration: finiteOption(opts.preRollDuration),
       requiresBGraph: requiresBGraph,
