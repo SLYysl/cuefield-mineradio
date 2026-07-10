@@ -37,6 +37,7 @@ function nearestBar(profile, target) {
 
 function chooseExit(exits) {
   return exits.reduce((best, exit) => {
+    if (exit && exit.source === 'fallback') return best;
     const time = finiteOrNull(exit && exit.time);
     if (time === null) return best;
     const type = String(exit.type || '').toLowerCase();
@@ -51,6 +52,7 @@ function chooseExit(exits) {
 
 function chooseEntry(entries) {
   return entries.reduce((best, entry) => {
+    if (entry && entry.source === 'fallback') return best;
     const time = firstFinite(entry && entry.landingAt, entry && entry.time);
     if (time === null) return best;
     const confidence = firstFinite(entry.confidence) ?? 0;

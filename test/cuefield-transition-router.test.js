@@ -78,6 +78,18 @@ test('routes missing structural evidence into terminal rescue', () => {
   assert.deepEqual(policy.preferredExitRange, [0.88, 0.96]);
 });
 
+test('treats a fallback-only entry as missing structural evidence', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 100, [{ start: 150, snapDensity: 0.3, energy: 0.5 }]),
+    toProfile: profile(220, 111, [{ start: 0, snapDensity: 0.3, energy: 0.5 }]),
+    exits: [{ time: 150, source: 'analysis', type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 0, source: 'fallback', landingType: 'start', confidence: 0.35 }],
+  });
+
+  assert.equal(policy.route, 'terminal-rescue');
+  assert.ok(policy.reasons.includes('missing-structure'));
+});
+
 test('routes unusable bars into terminal rescue instead of treating metrics as zero', () => {
   const policy = classifyTransitionRoute({
     fromProfile: profile(180, 100, [{ start: 'bad', snapDensity: 0.2, energy: 0.2 }]),
