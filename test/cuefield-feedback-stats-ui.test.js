@@ -30,17 +30,20 @@ test('Cuefield AutoMix treats the active in-memory beatmap as ready before disk 
 
 test('Cuefield AutoMix fetches paired raw lyrics for transition planning', () => {
   const html = readIndexHtml();
+  const pairStart = html.indexOf('async function planCuefieldSongPair');
   const initStart = html.indexOf('function initCuefieldAutoMix');
+  const pairBlock = html.slice(pairStart, initStart);
   const initEnd = html.indexOf('function cuefieldFeedbackSongMeta', initStart);
   const initBlock = html.slice(initStart, initEnd);
 
   assert.match(html, /<script src="cuefield-lyric-source\.js"><\/script>/);
-  assert.match(initBlock, /CuefieldLyricSource/);
-  assert.match(initBlock, /fetchRawLrc\(fromSong/);
-  assert.match(initBlock, /fetchRawLrc\(toSong/);
-  assert.match(initBlock, /fromLrc:/);
-  assert.match(initBlock, /toLrc:/);
-  assert.doesNotMatch(initBlock, /setOriginalLyricsState|applyPreferredLyricsForCurrent/);
+  assert.match(pairBlock, /CuefieldLyricSource/);
+  assert.match(pairBlock, /fetchRawLrc\(fromSong/);
+  assert.match(pairBlock, /fetchRawLrc\(toSong/);
+  assert.match(pairBlock, /fromLrc:/);
+  assert.match(pairBlock, /toLrc:/);
+  assert.match(initBlock, /planCuefieldSongPair/);
+  assert.doesNotMatch(pairBlock, /setOriginalLyricsState|applyPreferredLyricsForCurrent/);
 });
 
 test('Cuefield feedback captures adaptive planner and runtime diagnostics', () => {

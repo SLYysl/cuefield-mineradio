@@ -2737,6 +2737,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 
 <script src="cuefield-timeline-executor.js"></script>
 <script src="cuefield-lyric-source.js"></script>
+<script src="cuefield-set-planner.js"></script>
 <script src="cuefield-automix.js"></script>
 <script>
 'use strict';
@@ -2803,6 +2804,8 @@ var VISUAL_GUIDE_SEEN_STORE_KEY = 'mineradio-visual-guide-seen-v2';
 var LOCAL_BEATMAP_STORE_KEY = 'mineradio-local-beatmaps-v1';
 var LOCAL_BEAT_PREF_STORE_KEY = 'mineradio-local-beatmap-prefs-v1';
 var CUEFIELD_AUTOMIX_STORE_KEY = 'mineradio-cuefield-automix-v1';
+var CUEFIELD_SET_MODE_STORE_KEY = 'mineradio-cuefield-set-mode-v1';
+var CUEFIELD_PAIR_PLAN_TTL_MS = 5 * 60 * 1000;
 var LOCAL_BEAT_COMBOS = ['', 'downbeat', 'push', 'drop', 'rebound', 'accent'];
 var HOTKEY_ACTIONS = [
   { key:'togglePlay', label:'播放 / 暂停', category:'播放', local:'Space', global:'Ctrl+Alt+Space' },
@@ -2816,11 +2819,14 @@ var HOTKEY_ACTIONS = [
 var hotkeyCaptureState = null;
 var hotkeyGlobalStatus = {};
 var diyPlayerMode = readDiyModePreference();
-var cuefieldAutoMixEnabled = readCuefieldAutoMixPreference();
+var cuefieldSetMode = readCuefieldSetModePreference();
+var cuefieldAutoMixEnabled = cuefieldSetMode !== 'off';
 var cuefieldAutoMix = null;
 var cuefieldAutoMixPrepareTimer = null;
 var cuefieldAutoMixExecuting = false;
 var cuefieldAutoMixPreparedAudio = null;
+var cuefieldManualNextKey = '';
+var cuefieldPairPlanCache = new Map();
 var customCoverMap = readCustomCoverMap();
 var customLyricMap = readCustomLyricMap();
 var customLyricPrefs = readCustomLyricPrefs();
@@ -10400,22 +10406,29 @@ async function fetchBeatPrefetchAudioUrl(song) {
   return '/api/audio?url=' + encodeURIComponent(data.url);
 }
 
+function readCuefieldSetModePreference() {
+  try {
+    var mode = localStorage.getItem(CUEFIELD_SET_MODE_STORE_KEY);
+    if (mode === 'sequential' || mode === 'smart') return mode;
+    if (localStorage.getItem(CUEFIELD_AUTOMIX_STORE_KEY) === '1') return 'sequential';
+  } catch (e) {}
+  return 'off';
+}
+
 function readCuefieldAutoMixPreference() {
-  try { return localStorage.getItem(CUEFIELD_AUTOMIX_STORE_KEY) === '1'; }
-  catch (e) { return false; }
+  return readCuefieldSetModePreference() !== 'off';
 }
 
 function saveCuefieldAutoMixPreference() {
-  try { localStorage.setItem(CUEFIELD_AUTOMIX_STORE_KEY, cuefieldAutoMixEnabled ? '1' : '0'); } catch (e) {}
+  try {
+    localStorage.setItem(CUEFIELD_SET_MODE_STORE_KEY, cuefieldSetMode);
+    localStorage.setItem(CUEFIELD_AUTOMIX_STORE_KEY, cuefieldAutoMixEnabled ? '1' : '0');
+  } catch (e) {}
 }
 
 function cuefieldNextQueueIndex(idx) {
   if (!playQueue.length || playQueue.length < 2) return -1;
   if (playMode === 'single') return -1;
-  if (playMode === 'shuffle') {
-    var randomIdx = Math.floor(Math.random() * (playQueue.length - 1));
-    return randomIdx >= idx ? randomIdx + 1 : randomIdx;
-  }
   return (idx + 1) % playQueue.length;
 }
 
@@ -10458,9 +10471,40 @@ function updateCuefieldAutoMixUi(status) {
   var statusKey = status || snap && snap.lastStatus || 'on';
   btn.classList.toggle('cuefield-automix-on', !!cuefieldAutoMixEnabled);
   btn.classList.toggle('cuefield-automix-ready', !!cuefieldAutoMixEnabled && ready);
+  btn.classList.toggle('cuefield-automix-smart', cuefieldSetMode === 'smart');
+  var modeLabel = cuefieldSetMode === 'smart' ? '智能选歌' : '顺序选歌';
   btn.title = cuefieldAutoMixEnabled
-    ? ('Cuefield AutoMix: ' + (ready && statusKey !== 'terminal-rescue' ? 'ready' : cuefieldAutoMixStatusText(statusKey)))
+    ? ('Cuefield AutoMix · ' + modeLabel + ': ' + (ready && statusKey !== 'terminal-rescue' ? 'ready' : cuefieldAutoMixStatusText(statusKey)))
     : 'Cuefield AutoMix';
+}
+
+async function planCuefieldSongPair(fromSong, toSong, ctx) {
+  ctx = ctx || {};
+  var fromKey = beatMapSongKey(fromSong);
+  var toKey = beatMapSongKey(toSong);
+  if (!fromKey || !toKey) throw new Error('CUEFIELD_PAIR_KEYS_REQUIRED');
+  var cacheKey = fromKey + '->' + toKey;
+  var cached = cuefieldPairPlanCache.get(cacheKey);
+  if (cached && Date.now() - cached.createdAt < CUEFIELD_PAIR_PLAN_TTL_MS) return cached.plan;
+  var lyricSource = window.CuefieldLyricSource;
+  var lyrics = lyricSource ? await Promise.all([
+    lyricSource.fetchRawLrc(fromSong, songProviderKey(fromSong), apiJson),
+    lyricSource.fetchRawLrc(toSong, songProviderKey(toSong), apiJson),
+  ]) : ['', ''];
+  var plan = await apiJson('/api/cuefield/transition', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fromKey: fromKey,
+      toKey: toKey,
+      fromLrc: lyrics[0],
+      toLrc: lyrics[1],
+      exitBias: ctx.exitBias || 'late',
+    })
+  });
+  cuefieldPairPlanCache.set(cacheKey, { createdAt: Date.now(), plan: plan });
+  if (cuefieldPairPlanCache.size > 96) cuefieldPairPlanCache.delete(cuefieldPairPlanCache.keys().next().value);
+  return plan;
 }
 
 function initCuefieldAutoMix() {
@@ -10473,24 +10517,9 @@ function initCuefieldAutoMix() {
     ensureBeatMap: ensureCuefieldAutoMixBeatMap,
     planTransition: async function(fromKey, toKey, ctx) {
       ctx = ctx || {};
-      var lyricSource = window.CuefieldLyricSource;
       var fromSong = ctx.currentSong || {};
       var toSong = ctx.nextSong || {};
-      var lyrics = lyricSource ? await Promise.all([
-        lyricSource.fetchRawLrc(fromSong, songProviderKey(fromSong), apiJson),
-        lyricSource.fetchRawLrc(toSong, songProviderKey(toSong), apiJson),
-      ]) : ['', ''];
-      return apiJson('/api/cuefield/transition', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fromKey: fromKey,
-          toKey: toKey,
-          fromLrc: lyrics[0],
-          toLrc: lyrics[1],
-          exitBias: 'late',
-        })
-      });
+      return planCuefieldSongPair(fromSong, toSong, { exitBias: 'late' });
     },
     prepareAudioUrl: function(song) { return fetchBeatPrefetchAudioUrl(song); },
   });
@@ -10723,12 +10752,15 @@ window.toggleCuefieldFeedbackStats = toggleCuefieldFeedbackStats;
 window.loadCuefieldFeedbackStats = loadCuefieldFeedbackStats;
 
 function toggleCuefieldAutoMix() {
-  cuefieldAutoMixEnabled = !cuefieldAutoMixEnabled;
+  cuefieldSetMode = cuefieldSetMode === 'off' ? 'sequential' : (cuefieldSetMode === 'sequential' ? 'smart' : 'off');
+  cuefieldAutoMixEnabled = cuefieldSetMode !== 'off';
   saveCuefieldAutoMixPreference();
   initCuefieldAutoMix();
   if (cuefieldAutoMix) cuefieldAutoMix.setEnabled(cuefieldAutoMixEnabled);
   updateCuefieldAutoMixUi(cuefieldAutoMixEnabled ? 'on' : 'off');
-  showToast(cuefieldAutoMixEnabled ? 'Cuefield AutoMix 已开启' : 'Cuefield AutoMix 已关闭');
+  showToast(cuefieldSetMode === 'smart'
+    ? 'Cuefield AutoMix · 智能选歌'
+    : (cuefieldSetMode === 'sequential' ? 'Cuefield AutoMix · 顺序选歌' : 'Cuefield AutoMix 已关闭'));
   if (cuefieldAutoMixEnabled) scheduleCuefieldAutoMixPrepare(trackSwitchToken, currentIdx, 260);
 }
 
@@ -10771,6 +10803,122 @@ function resetCuefieldAutoMix(reason, opts) {
   updateCuefieldAutoMixUi(reason || 'reset');
 }
 
+function cuefieldPlanFacts(plan, fromSong, toSong) {
+  var chosen = plan && plan.chosen || {};
+  var evaluation = chosen.evaluation || {};
+  var diagnostics = plan && plan.diagnostics || {};
+  var recipe = chosen.transitionRecipe || chosen.recipe || chosen.recipeCandidate && chosen.recipeCandidate.recipe || '';
+  var immediate = Number(evaluation.score);
+  if (!isFinite(immediate)) immediate = Number(chosen.score);
+  if (!isFinite(immediate)) immediate = 0;
+  var lyricLink = Number(diagnostics.lyricLinkScore || chosen.bridgePlan && chosen.bridgePlan.lyricLinkScore || 0);
+  var contrast = diagnostics.compatibilityClass === 'contrast' ? 0.68 : 0.48;
+  var surprise = Math.max(contrast, isFinite(lyricLink) ? lyricLink : 0);
+  var energyShape = Number(chosen.energyContinuity);
+  if (!isFinite(energyShape)) energyShape = 0.5;
+  var timeline = Array.isArray(chosen.timeline) ? chosen.timeline : [];
+  var technicalFallback = recipe === 'honest-start-fallback' || chosen.technicalFailure === true;
+  return {
+    immediate: Math.max(0, Math.min(1, immediate)),
+    surprise: Math.max(0, Math.min(1, surprise)),
+    energyShape: Math.max(0, Math.min(1, energyShape)),
+    safe: !!(plan && plan.ok !== false && !technicalFallback && timeline.length),
+    executable: !!(plan && plan.ok !== false && timeline.length),
+    technicalFallback: technicalFallback,
+    recipe: recipe,
+    plan: plan,
+    fromSong: fromSong,
+    toSong: toSong,
+  };
+}
+
+function cuefieldSongArtistKey(song) {
+  song = song || {};
+  var artist = song.artist || (Array.isArray(song.artists) ? song.artists.map(function(item){ return item && item.name || ''; }).join(',') : '');
+  return String(artist || '').trim().toLowerCase();
+}
+
+async function cuefieldEvaluatePair(fromSong, toSong, currentIndex, token) {
+  var fromKey = beatMapSongKey(fromSong);
+  var toKey = beatMapSongKey(toSong);
+  if (!fromKey || !toKey || fromKey === toKey) return null;
+  var ctx = { currentIndex: currentIndex, currentSong: fromSong, nextSong: toSong };
+  var fromReady = await ensureCuefieldAutoMixBeatMap(fromSong, fromKey, ctx);
+  if (token !== trackSwitchToken) return null;
+  var toReady = await ensureCuefieldAutoMixBeatMap(toSong, toKey, ctx);
+  if (token !== trackSwitchToken || !fromReady || !toReady) return null;
+  try {
+    return cuefieldPlanFacts(await planCuefieldSongPair(fromSong, toSong), fromSong, toSong);
+  } catch (err) {
+    logCuefieldAutoMix('smart-pair-error', { fromKey: fromKey, toKey: toKey, error: err && err.message || String(err) });
+    return null;
+  }
+}
+
+async function resolveCuefieldNextIndex(token, currentIndex) {
+  var sequentialIndex = cuefieldNextQueueIndex(currentIndex);
+  if (sequentialIndex < 0 || cuefieldSetMode !== 'smart' || !window.CuefieldSetPlanner) return sequentialIndex;
+  var planner = window.CuefieldSetPlanner;
+  var manual = planner.resolveManualNext(playQueue, currentIndex, cuefieldManualNextKey, queueItemKey);
+  if (manual) return manual.index;
+  if (cuefieldManualNextKey) cuefieldManualNextKey = '';
+  var recentKeys = playQueue.slice(Math.max(0, currentIndex - 2), currentIndex + 1).map(queueItemKey);
+  var candidates = planner.collectCandidates(playQueue, currentIndex, {
+    getKey: queueItemKey,
+    recentKeys: recentKeys,
+    target: 16,
+  });
+  if (!candidates.length) return sequentialIndex;
+  var currentSong = playQueue[currentIndex];
+  var immediateCandidates = [];
+  for (var i = 0; i < candidates.length; i++) {
+    if (token !== trackSwitchToken || currentIndex !== currentIdx) return sequentialIndex;
+    var facts = await cuefieldEvaluatePair(currentSong, candidates[i].song, currentIndex, token);
+    if (!facts || !facts.executable) continue;
+    immediateCandidates.push(Object.assign({}, candidates[i], facts, {
+      score: facts.immediate,
+    }));
+  }
+  var finalists = immediateCandidates.sort(function(a, b){ return b.immediate - a.immediate; });
+  finalists = finalists.slice(0, 4);
+  for (var f = 0; f < finalists.length; f++) {
+    if (token !== trackSwitchToken || currentIndex !== currentIdx) return sequentialIndex;
+    var finalist = finalists[f];
+    var onwardCandidates = candidates.filter(function(candidate) {
+      return candidate.key !== finalist.key;
+    });
+    onwardCandidates = onwardCandidates.slice(0, 3);
+    var onward = 0;
+    for (var c = 0; c < onwardCandidates.length; c++) {
+      var onwardFacts = await cuefieldEvaluatePair(finalist.song, onwardCandidates[c].song, currentIndex, token);
+      if (onwardFacts && onwardFacts.safe) onward = Math.max(onward, onwardFacts.immediate);
+    }
+    finalist.onward = onward;
+    finalist.repeatedArtist = cuefieldSongArtistKey(currentSong) !== ''
+      && cuefieldSongArtistKey(currentSong) === cuefieldSongArtistKey(finalist.song);
+    finalist.repeatedStyle = false;
+    finalist.bpmMonotony = false;
+    finalist.score = planner.scoreCandidate(finalist);
+  }
+  var winner = planner.chooseTopCandidate(finalists);
+  if (!winner || token !== trackSwitchToken || currentIndex !== currentIdx) return sequentialIndex;
+  var promoted = planner.promoteCandidate(playQueue, currentIndex, winner.key, queueItemKey);
+  if (promoted.nextIndex < 0) return sequentialIndex;
+  if (promoted.moved) {
+    playQueue = promoted.queue;
+    safeRenderQueuePanel('cuefield-smart-promote');
+    safeShelfRebuild('cuefield-smart-promote');
+  }
+  logCuefieldAutoMix('smart-selected', {
+    next: winner.song && winner.song.name,
+    score: winner.score,
+    immediate: winner.immediate,
+    onward: winner.onward,
+    candidates: immediateCandidates.length,
+  });
+  return promoted.nextIndex;
+}
+
 function scheduleCuefieldAutoMixPrepare(token, idx, delayMs, attempt) {
   clearCuefieldAutoMixPrepareTimer();
   if (!cuefieldAutoMixEnabled) return;
@@ -10791,8 +10939,8 @@ function scheduleCuefieldAutoMixPrepare(token, idx, delayMs, attempt) {
     showToast('Cuefield AutoMix: 单曲循环下不会自动切歌');
     return;
   }
-  var nextIndex = cuefieldNextQueueIndex(currentIndex);
-  if (nextIndex < 0) {
+  var sequentialIndex = cuefieldNextQueueIndex(currentIndex);
+  if (sequentialIndex < 0) {
     resetCuefieldAutoMix('no-next');
     showToast('Cuefield AutoMix: 队列里需要至少两首歌');
     logCuefieldAutoMix('no-next', { currentIndex: currentIndex, queueLength: playQueue.length, playMode: playMode });
@@ -10800,9 +10948,11 @@ function scheduleCuefieldAutoMixPrepare(token, idx, delayMs, attempt) {
   }
   var wait = delayMs == null ? 900 : delayMs;
   updateCuefieldAutoMixUi('preparing');
-  logCuefieldAutoMix('scheduled', { currentIndex: currentIndex, nextIndex: nextIndex, playMode: playMode, delayMs: wait });
-  cuefieldAutoMixPrepareTimer = setTimeout(function(){
+  logCuefieldAutoMix('scheduled', { currentIndex: currentIndex, nextIndex: sequentialIndex, setMode: cuefieldSetMode, delayMs: wait });
+  cuefieldAutoMixPrepareTimer = setTimeout(async function(){
     cuefieldAutoMixPrepareTimer = null;
+    var nextIndex = await resolveCuefieldNextIndex(token, currentIndex);
+    if (token !== trackSwitchToken || currentIndex !== currentIdx || nextIndex < 0) return;
     runCuefieldAutoMixPrepare(token, currentIndex, nextIndex, attempt || 0);
   }, wait);
 }
@@ -19257,7 +19407,9 @@ function queueSong(song, opts) {
   return insertAt;
 }
 function queueSongNext(song) {
-  return queueSong(song, { position: 'next' });
+  var insertAt = queueSong(song, { position: 'next' });
+  if (insertAt >= 0 && playQueue[insertAt]) cuefieldManualNextKey = queueItemKey(playQueue[insertAt]);
+  return insertAt;
 }
 function queueSearchResult(i) {
   var song = playlist[i]; if (!song) return;
@@ -19647,6 +19799,7 @@ async function playQueueAt(idx, opts) {
   markPlayPhase('track-setup');
   var song = safePlaybackStep('hydrate-song', function(){ return hydrateCustomCover(playQueue[idx]); }) || playQueue[idx];
   playQueue[idx] = song;
+  if (cuefieldManualNextKey === queueItemKey(song)) cuefieldManualNextKey = '';
   var playbackContext = opts.context || (song && song.radioContext) || null;
   activeRadioContext = playbackContext || null;
   safeRenderQueuePanel('play-queue-at-switch', { scrollCurrent: miniQueueOpen });
