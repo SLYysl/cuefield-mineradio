@@ -2,6 +2,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
+
+const CuefieldTimelineExecutor = require('../public/cuefield-timeline-executor');
 
 function readIndexHtml() {
   return fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
@@ -55,4 +58,121 @@ test('Cuefield graph lifecycle and handoff timer remain owned by the active tran
   assert.match(volumeBlock, /audioGraphElement === audio/);
   assert.match(executeBlock, /cuefieldScheduleTimeline\(handoffDelayMs/);
   assert.doesNotMatch(executeBlock, /setTimeout\(function/);
+});
+
+test('adopting a prepared B graph preserves effective output gain', () => {
+  const html = readIndexHtml();
+  const initStart = html.indexOf('function adoptAudioGraphGainOwnership');
+  const initEnd = html.indexOf('function resumeAudioAnalysis', initStart);
+  assert.notEqual(initStart, -1, 'gain ownership helper should exist');
+
+  const audioParam = {
+    value: 0.7,
+    cancelScheduledValues() {},
+    setValueAtTime(value) { this.value = value; },
+    setTargetAtTime(value) { this.value = value; },
+  };
+  const node = { disconnect() {} };
+  const graph = {
+    ctx: { currentTime: 12 },
+    source: node,
+    analyser: node,
+    beatAnalyser: node,
+    filter: node,
+    bass: node,
+    gain: { gain: audioParam },
+  };
+  const media = {
+    volume: 1,
+    muted: false,
+    _cuefieldGainOwned: true,
+    _cuefieldDeckGraph: graph,
+  };
+  const context = {
+    window: { CuefieldTimelineExecutor },
+    audio: media,
+    audioCtx: graph.ctx,
+    source: node,
+    analyser: node,
+    beatAnalyser: node,
+    cuefieldFilterNode: node,
+    cuefieldBassNode: node,
+    gainNode: { gain: { value: 0.2 }, disconnect() {} },
+    audioReady: false,
+    audioGraphElement: {},
+    cuefieldBDeckGraph: graph,
+    targetVolume: 0.7,
+    frequencyData: { fill() {} },
+    beatFrequencyData: { fill() {} },
+    beatTimeDomainData: { fill() {} },
+    connectCuefieldDeckGraph(value) { return value; },
+    resetCuefieldToneControls() {},
+    resetRealtimeBeatEngine() {},
+  };
+  vm.createContext(context);
+  vm.runInContext(html.slice(initStart, initEnd), context);
+
+  const before = media.volume * audioParam.value;
+  vm.runInContext('initAudio();', context);
+  const after = media.volume * audioParam.value;
+
+  assert.equal(Math.abs(after - before) <= 0.03, true, `effective gain changed from ${before} to ${after}`);
+  assert.equal(media.volume, 1);
+  assert.equal(context.audioGraphElement, media);
+});
+
+test('initializing an ordinary graph transfers media gain without changing output', () => {
+  const html = readIndexHtml();
+  const initStart = html.indexOf('function adoptAudioGraphGainOwnership');
+  const initEnd = html.indexOf('function resumeAudioAnalysis', initStart);
+  const makeParam = (value) => ({
+    value,
+    cancelScheduledValues() {},
+    setValueAtTime(next) { this.value = next; },
+  });
+  const makeNode = (extra = {}) => ({ connect() {}, disconnect() {}, ...extra });
+  const media = { volume: 0.7, muted: false };
+  const graphGain = makeParam(1);
+  const audioContext = {
+    state: 'running',
+    currentTime: 4,
+    destination: {},
+    createMediaElementSource() { return makeNode(); },
+    createAnalyser() { return makeNode(); },
+    createBiquadFilter() {
+      return makeNode({ frequency: makeParam(0), Q: makeParam(0), gain: makeParam(0) });
+    },
+    createGain() { return makeNode({ gain: graphGain }); },
+  };
+  const context = {
+    window: { CuefieldTimelineExecutor },
+    audio: media,
+    audioCtx: audioContext,
+    source: null,
+    analyser: null,
+    beatAnalyser: null,
+    cuefieldFilterNode: null,
+    cuefieldBassNode: null,
+    gainNode: null,
+    audioReady: false,
+    audioGraphElement: null,
+    cuefieldBDeckGraph: null,
+    FFT_SIZE: 2048,
+    BEAT_FFT_SIZE: 1024,
+    frequencyData: { fill() {} },
+    beatFrequencyData: { fill() {} },
+    beatTimeDomainData: { fill() {} },
+    resetRealtimeBeatEngine() {},
+  };
+  vm.createContext(context);
+  vm.runInContext(html.slice(initStart, initEnd), context);
+
+  const before = media.volume;
+  vm.runInContext('initAudio();', context);
+  const after = media.volume * graphGain.value;
+
+  assert.equal(Math.abs(after - before) <= 0.03, true, `effective gain changed from ${before} to ${after}`);
+  assert.equal(media.volume, 1);
+  assert.equal(graphGain.value, 0.7);
+  assert.equal(context.audioGraphElement, media);
 });

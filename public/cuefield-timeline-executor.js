@@ -58,6 +58,17 @@
     return !!opts.hasGraph && !opts.isPrepared && !opts.isActiveGraph;
   }
 
+  function transferCuefieldGainOwnership(opts) {
+    opts = opts || {};
+    var mediaVolume = clamp(opts.mediaVolume == null ? 1 : opts.mediaVolume, 0, 1);
+    var graphGain = clamp(opts.graphGain == null ? 1 : opts.graphGain, 0, 1);
+    return {
+      mediaVolume: 1,
+      graphGain: round(opts.gainOwned ? graphGain : mediaVolume * graphGain, 6),
+      gainOwned: true,
+    };
+  }
+
   function normalizeAction(action, leadSec, targetVolume) {
     action = action || {};
     var value = clamp(action.value == null ? 1 : action.value, 0, 1);
@@ -164,5 +175,6 @@
     buildEqualPowerCurve: buildEqualPowerCurve,
     buildVolumeOnlyCuefieldExecution: buildVolumeOnlyCuefieldExecution,
     shouldReleaseCuefieldDeckGraph: shouldReleaseCuefieldDeckGraph,
+    transferCuefieldGainOwnership: transferCuefieldGainOwnership,
   };
 });

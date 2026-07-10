@@ -6,6 +6,7 @@ const {
   buildEqualPowerCurve,
   buildVolumeOnlyCuefieldExecution,
   shouldReleaseCuefieldDeckGraph,
+  transferCuefieldGainOwnership,
 } = require('../public/cuefield-timeline-executor');
 
 test('builds complementary equal-power curves', () => {
@@ -103,4 +104,25 @@ test('keeps an adopted active Cuefield graph connected across normal source chan
   assert.equal(typeof shouldReleaseCuefieldDeckGraph, 'function');
   assert.equal(shouldReleaseCuefieldDeckGraph({ hasGraph: true, isPrepared: false, isActiveGraph: true }), false);
   assert.equal(shouldReleaseCuefieldDeckGraph({ hasGraph: true, isPrepared: false, isActiveGraph: false }), true);
+});
+
+test('transfers media gain into a graph exactly once', () => {
+  assert.deepEqual(transferCuefieldGainOwnership({
+    mediaVolume: 0.7,
+    graphGain: 1,
+    gainOwned: false,
+  }), {
+    mediaVolume: 1,
+    graphGain: 0.7,
+    gainOwned: true,
+  });
+  assert.deepEqual(transferCuefieldGainOwnership({
+    mediaVolume: 1,
+    graphGain: 0.7,
+    gainOwned: true,
+  }), {
+    mediaVolume: 1,
+    graphGain: 0.7,
+    gainOwned: true,
+  });
 });

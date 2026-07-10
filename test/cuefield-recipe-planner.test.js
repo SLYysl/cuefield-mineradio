@@ -191,6 +191,27 @@ test('uses long overlap only for a trusted entry with compatible tempo', () => {
   assert.equal(plan.chosen.timeline.filter((action) => action.deck === 'B' && action.op === 'volume' && !action.curve).every((action) => action.value === 0), true);
 });
 
+test('reports overlap diagnostics from the chosen recipe timeline', () => {
+  const fromProfile = buildCueProfile({
+    track: { title: 'A', duration: 128 },
+    map: makeBeatMap(128, 0.5),
+    candidates: [{ type: 'outro', role: 'exit', time: 112, confidence: 0.82 }],
+  });
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 0, confidence: 0.8, resolvesTo: { time: 12 } };
+  const toProfile = buildCueProfile({
+    track: { title: 'B', duration: 120 },
+    map: makeBeatMap(120, 0.52),
+    candidates: [entry],
+  });
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { time: 112 }, entry, evaluation: { tier: 'usable', risks: [] } },
+  });
+
+  assert.equal(plan.chosen.recipe, 'bass-eq-handoff');
+  assert.equal(plan.diagnostics.overlapClass, 'medium');
+  assert.equal(plan.diagnostics.overlapDuration, 7);
+});
+
 test('does not let an executable tier bypass the fallback compatibility gate', () => {
   const fromProfile = buildCueProfile({
     track: { title: 'A', duration: 128 },

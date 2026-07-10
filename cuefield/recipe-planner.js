@@ -357,6 +357,19 @@ function makeSafetyLongBlend(anchors, scores, sectionChoice = {}, fromProfile = 
   );
 }
 
+function chosenOverlapDiagnostics(candidate, fallback) {
+  const timeline = candidate && Array.isArray(candidate.timeline) ? candidate.timeline : [];
+  const play = timeline.find((action) => action && action.deck === 'B' && action.op === 'play');
+  const handoffs = timeline.filter((action) => action && action.op === 'handoff');
+  const handoff = handoffs[handoffs.length - 1];
+  const duration = play && handoff ? round(toNumber(handoff.t) - toNumber(play.t)) : 0;
+  if (!(duration > 0)) return fallback;
+  return {
+    overlapClass: duration <= 4 ? 'short' : (duration <= 7 ? 'medium' : 'long'),
+    overlapDuration: duration,
+  };
+}
+
 function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
   const anchors = pickAnchors(fromProfile || {}, toProfile || {}, opts);
   const scores = commonScores(fromProfile || {}, toProfile || {}, anchors);
@@ -378,6 +391,10 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
   const chosen = requiresAdaptiveSafety
     ? safety
     : (candidates.find((candidate) => !candidate.risks.includes('hard cut')) || candidates[0]);
+  const chosenOverlap = chosenOverlapDiagnostics(chosen, {
+    overlapClass: safety.anchors.overlapClass,
+    overlapDuration: safety.anchors.overlapDuration,
+  });
 
   return {
     chosen,
@@ -401,8 +418,8 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
       bpmB: safety.anchors.bpmB,
       relativeTempoDelta: safety.anchors.relativeTempoDelta,
       beatGridTrusted: safety.anchors.beatGridTrusted,
-      overlapClass: safety.anchors.overlapClass,
-      overlapDuration: safety.anchors.overlapDuration,
+      overlapClass: chosenOverlap.overlapClass,
+      overlapDuration: chosenOverlap.overlapDuration,
     },
   };
 }

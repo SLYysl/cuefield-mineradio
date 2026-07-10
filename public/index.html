@@ -18665,6 +18665,25 @@ async function doSearch(q, opts) {
 // ============================================================
 //  音频上下文 & 频谱分析
 // ============================================================
+function adoptAudioGraphGainOwnership(graph) {
+  if (!audio || !graph || !graph.gain || !graph.gain.gain) return;
+  var param = graph.gain.gain;
+  var transfer = window.CuefieldTimelineExecutor && window.CuefieldTimelineExecutor.transferCuefieldGainOwnership
+    ? window.CuefieldTimelineExecutor.transferCuefieldGainOwnership({
+      mediaVolume: audio.volume,
+      graphGain: param.value,
+      gainOwned: !!audio._cuefieldGainOwned,
+    })
+    : { mediaVolume: 1, graphGain: audio._cuefieldGainOwned ? param.value : audio.volume * param.value, gainOwned: true };
+  var now = graph.ctx && graph.ctx.currentTime || 0;
+  try {
+    param.cancelScheduledValues(now);
+    param.setValueAtTime(transfer.graphGain, now);
+  } catch (e) { param.value = transfer.graphGain; }
+  audio.volume = transfer.mediaVolume;
+  audio._cuefieldGainOwned = transfer.gainOwned;
+}
+
 function initAudio() {
   if (!audio) return;
   if (audioReady && audioGraphElement === audio) return;
@@ -18684,14 +18703,14 @@ function initAudio() {
     cuefieldFilterNode = existingCuefieldGraph.filter;
     cuefieldBassNode = existingCuefieldGraph.bass;
     gainNode = existingCuefieldGraph.gain;
-    applyVolumeToAudio();
+    adoptAudioGraphGainOwnership(existingCuefieldGraph);
+    audioGraphElement = audio;
+    audioReady = true;
     resetCuefieldToneControls(180);
     frequencyData.fill(0);
     beatFrequencyData.fill(0);
     beatTimeDomainData.fill(128);
     resetRealtimeBeatEngine();
-    audioGraphElement = audio;
-    audioReady = true;
     cuefieldBDeckGraph = null;
     return;
   }
@@ -18718,13 +18737,13 @@ function initAudio() {
   cuefieldFilterNode.connect(cuefieldBassNode);
   cuefieldBassNode.connect(gainNode);
   gainNode.connect(audioCtx.destination);
-  applyVolumeToAudio();
+  adoptAudioGraphGainOwnership({ ctx: audioCtx, gain: gainNode });
+  audioGraphElement = audio;
+  audioReady = true;
   frequencyData.fill(0);
   beatFrequencyData.fill(0);
   beatTimeDomainData.fill(128);
   resetRealtimeBeatEngine();
-  audioGraphElement = audio;
-  audioReady = true;
 }
 function resumeAudioAnalysis() {
   if (audioCtx && audioCtx.state === 'suspended') return audioCtx.resume().catch(function(e){ console.warn('audio context resume failed:', e); });
@@ -19590,7 +19609,7 @@ async function playQueueAt(idx, opts) {
       audio.pause();
     }
     bindPlaybackProgressEvents(audio);
-    applyVolumeToAudio();
+    if (!(preparedAudio && preparedAudio._cuefieldDeckGraph)) applyVolumeToAudio();
     var proxyAudioUrl = opts.preparedProxyAudioUrl || ('/api/audio?url=' + encodeURIComponent(data.url));
     if (!preparedAudio) audio.src = proxyAudioUrl;
     updatePlaybackProgressUi();
