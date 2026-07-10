@@ -31,15 +31,13 @@ function repeatedLyricBlocks(lines) {
     pairs.get(key).push(index);
   }
   const repeated = Array.from(pairs.values()).filter((indexes) => indexes.length >= 2);
-  if (!repeated.length) return null;
-  const indexes = repeated
-    .sort((a, b) => a[0] - b[0])[0];
-  const firstIndex = indexes[0];
-  return {
-    lines: sorted.slice(firstIndex, firstIndex + 2),
-    occurrences: indexes.length,
-    firstTime: toNumber(sorted[firstIndex].time),
-  };
+  return repeated
+    .flatMap((indexes) => indexes.map((firstIndex) => ({
+      lines: sorted.slice(firstIndex, firstIndex + 2),
+      occurrences: indexes.length,
+      firstTime: toNumber(sorted[firstIndex].time),
+    })))
+    .sort((a, b) => a.firstTime - b.firstTime);
 }
 
 function phraseForTime(phrases, time) {
@@ -49,8 +47,8 @@ function phraseForTime(phrases, time) {
 function signaturePhrase(profile, lrcLines) {
   const phrases = profile.phrases || [];
   const mean = average(phrases.map((phrase) => toNumber(phrase.energy, NaN)));
-  const block = repeatedLyricBlocks(lrcLines);
-  if (block) {
+  const blocks = repeatedLyricBlocks(lrcLines);
+  for (const block of blocks) {
     const blockPhrases = block.lines.map((line) => phraseForTime(phrases, line.time)).filter(Boolean);
     const firstPhrase = blockPhrases[0];
     const lastPhrase = blockPhrases[blockPhrases.length - 1];
@@ -171,7 +169,7 @@ function buildStructureMap(opts = {}) {
     beatStability: 0,
     playFrom: 0,
     landingAt: 0,
-    landingType: 'intro',
+    landingType: 'start',
   };
   const signatureType = signature.source === 'lyric+beat' ? (signature.type || 'hook') : (signature.type || 'drop');
   const signatureEntry = signature.phrase && signature.confidence >= 0.6 ? {

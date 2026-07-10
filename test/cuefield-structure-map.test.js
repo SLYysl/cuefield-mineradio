@@ -60,6 +60,27 @@ test('one repeated lyric line is only a hook candidate', () => {
   assert.equal(map.entryCandidates.some((candidate) => candidate.type === 'hook'), false);
 });
 
+test('skips an early low-energy repeated block for a later valid hook', () => {
+  const map = buildStructureMap({
+    profile: makeProfile([0.3, 0.32, 0.31, 0.3, 0.78, 0.76, 0.42, 0.7]),
+    lrcLines: [
+      { time: 2, normalized: 'early low line' },
+      { time: 18, normalized: 'early low answer' },
+      { time: 34, normalized: 'early low line' },
+      { time: 50, normalized: 'early low answer' },
+      { time: 66, normalized: 'we own the night' },
+      { time: 82, normalized: 'nothing feels the same' },
+      { time: 98, normalized: 'we own the night' },
+      { time: 114, normalized: 'nothing feels the same' },
+    ],
+  });
+
+  const hook = map.sections.find((section) => section.type === 'hook');
+  assert.equal(hook.start, 64);
+  assert.equal(hook.end, 96);
+  assert.equal(map.protectedUntil, 96);
+});
+
 test('does not end protection on a transient early peak', () => {
   const map = buildStructureMap({ profile: makeProfile([0.9, 0.35, 0.72, 0.69, 0.4]), lrcLines: [] });
 
@@ -72,6 +93,8 @@ test('uses a real zero-second fallback instead of a synthetic intro', () => {
   const fallback = map.entryCandidates.find((item) => item.source === 'fallback');
 
   assert.equal(fallback.time, 0);
+  assert.equal(fallback.type, 'start');
+  assert.equal(fallback.landingType, 'start');
   assert.equal(map.entryCandidates.length, 1);
   assert.equal(map.entryCandidates.some((item) => item.time >= 12 && item.time <= 16 && item.source === 'fallback'), false);
 });
