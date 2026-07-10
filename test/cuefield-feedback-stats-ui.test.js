@@ -2,6 +2,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
+
+const CuefieldTimelineExecutor = require('../public/cuefield-timeline-executor');
 
 function readIndexHtml() {
   return fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
@@ -63,5 +66,46 @@ test('Cuefield feedback captures adaptive planner and runtime diagnostics', () =
     'grooveContinuity', 'tempoCompatibility', 'windowRejectionReasons',
   ].forEach((field) => assert.match(contextBlock, new RegExp('plannerDiagnostics\\.' + field)));
   assert.match(contextBlock, /pending\.runtimeDowngrade/);
+  assert.match(contextBlock, /pending\.actualHandoffAt/);
+  assert.match(contextBlock, /pending\.actualAudibleOverlap/);
+  assert.match(contextBlock, /pending\.actualPreRollDuration/);
   assert.equal(executeBlock.indexOf('runCuefieldVolumeCurve') < executeBlock.indexOf('cuefieldFeedbackContextFromPending'), true);
+});
+
+test('Cuefield runtime records the executed window after a volume-only downgrade', () => {
+  const html = readIndexHtml();
+  const runtimeStart = html.indexOf('function cuefieldVolumeOnlyExecution');
+  const runtimeEnd = html.indexOf('function prepareCuefieldPendingAudio', runtimeStart);
+  const runtimeBlock = html.slice(runtimeStart, runtimeEnd);
+  const pending = {
+    mixStart: 48.25,
+    triggerAt: 48.25,
+    entryTime: 8,
+    plan: { chosen: { recipeCandidate: { anchors: { bAnchor: 12 } } } },
+  };
+  const context = {
+    window: { CuefieldTimelineExecutor },
+    targetVolume: 0.7,
+    cuefieldTimelineExecutionForPending: () => ({
+      requiresBGraph: true,
+      handoffDelayMs: 9015,
+      audibleOverlap: 4.85,
+      preRollDuration: 0.475,
+      actions: [],
+    }),
+    clearCuefieldTimelineTimers() {},
+    ensureCuefieldBDeckGraph: () => null,
+    primeCuefieldBDeckGain() {},
+    cuefieldScheduleTimeline() {},
+    applyCuefieldTimelineAction() {},
+  };
+  vm.createContext(context);
+  vm.runInContext(runtimeBlock, context);
+
+  const handoffDelayMs = context.runCuefieldVolumeCurve(pending, {});
+  assert.equal(pending.runtimeDowngrade, 'volume-only');
+  assert.equal(handoffDelayMs, 2200);
+  assert.equal(pending.actualHandoffAt, 50.45);
+  assert.equal(pending.actualAudibleOverlap, 2.2);
+  assert.equal(pending.actualPreRollDuration, 0);
 });

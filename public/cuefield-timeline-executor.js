@@ -18,6 +18,12 @@
     return Math.round(toNumber(value, 0) * factor) / factor;
   }
 
+  function finiteOption(value) {
+    if (value == null) return null;
+    var n = Number(value);
+    return isFinite(n) ? n : null;
+  }
+
   function buildEqualPowerCurve(direction, points) {
     var count = Math.max(2, Math.round(toNumber(points, 33)));
     var incoming = direction !== 'out';
@@ -44,6 +50,8 @@
       leadSec: leadSec,
       bStart: bStart,
       handoffDelayMs: 2200,
+      audibleOverlap: 2.2,
+      preRollDuration: 0,
       requiresBGraph: false,
       actions: [
         { delayMs: 0, durationMs: 0, deck: 'B', op: 'play', type: '', curve: '', value: 1, at: bStart },
@@ -69,12 +77,13 @@
     };
   }
 
-  function normalizeAction(action, leadSec, targetVolume) {
+  function normalizeAction(action, offsetSec, targetVolume, originT) {
     action = action || {};
+    var actionTime = toNumber(action.t, 0);
     var value = clamp(action.value == null ? 1 : action.value, 0, 1);
     var normalized = {
-      t: round(toNumber(action.t, 0)),
-      delayMs: Math.max(0, Math.round((toNumber(action.t, 0) + leadSec) * 1000)),
+      t: round(actionTime),
+      delayMs: Math.max(0, Math.round((actionTime + offsetSec) * 1000)),
       durationMs: Math.max(0, Math.round(toNumber(action.duration, 0))),
       deck: action.deck === 'A' ? 'A' : 'B',
       op: String(action.op || ''),
@@ -83,6 +92,9 @@
       value: value,
       at: Math.max(0, toNumber(action.at, 0)),
     };
+    if (normalized.deck === 'B' && normalized.op === 'play' && originT != null && actionTime < originT) {
+      normalized.at = round(normalized.at + originT - actionTime);
+    }
     if (normalized.op === 'volume') normalized.target = round(targetVolume * value);
     return normalized;
   }
@@ -140,14 +152,23 @@
     var fallback = rawTimeline.length ? null : fallbackTimeline(opts);
     var timeline = rawTimeline.length ? rawTimeline : fallback.actions;
     var leadSec = rawTimeline.length ? leadFromTimeline(timeline, 2.8) : fallback.leadSec;
+    var mixStart = finiteOption(opts.mixStart);
+    var handoffAt = finiteOption(opts.handoffAt);
+    var rawHandoff = timeline.filter(function(action) { return action && action.op === 'handoff'; }).slice(-1)[0];
+    var explicitWindow = mixStart != null && handoffAt != null && rawHandoff;
+    var originT = explicitWindow
+      ? toNumber(rawHandoff.t, 0) - Math.max(0, handoffAt - mixStart)
+      : null;
+    var offsetSec = explicitWindow ? -originT : leadSec;
     var entryTime = Math.max(0, toNumber(opts.entryTime, 0));
-    var bStart = rawTimeline.length ? bStartFromTimeline(timeline, entryTime) : fallback.bStart;
     var actions = timeline
-      .map(function(action) { return normalizeAction(action, leadSec, targetVolume); })
+      .map(function(action) { return normalizeAction(action, offsetSec, targetVolume, originT); })
       .filter(function(action) { return !!action.op; })
       .sort(function(a, b) {
         return a.delayMs - b.delayMs || a.t - b.t;
       });
+    var play = actions.filter(function(action) { return action.deck === 'B' && action.op === 'play'; })[0];
+    var bStart = play ? play.at : (rawTimeline.length ? bStartFromTimeline(timeline, entryTime) : fallback.bStart);
     var requiresBGraph = actions.some(function(action) {
       return action.deck === 'B' && (
         action.op === 'filter'
@@ -165,6 +186,8 @@
       leadSec: round(leadSec),
       bStart: round(bStart),
       handoffDelayMs: Math.max(520, handoffDelayMs),
+      audibleOverlap: finiteOption(opts.audibleOverlap),
+      preRollDuration: finiteOption(opts.preRollDuration),
       requiresBGraph: requiresBGraph,
       actions: actions,
     };

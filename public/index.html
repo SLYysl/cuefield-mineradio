@@ -10554,11 +10554,11 @@ function cuefieldFeedbackContextFromPending(pending) {
       hookConfidence: plannerDiagnostics.hookConfidence,
       hookEvidence: plannerDiagnostics.hookEvidence,
       exitRatio: plannerDiagnostics.exitRatio,
-      mixStart: plannerDiagnostics.mixStart,
-      handoffAt: plannerDiagnostics.handoffAt,
+      mixStart: pending.actualMixStart != null && isFinite(Number(pending.actualMixStart)) ? Number(pending.actualMixStart) : plannerDiagnostics.mixStart,
+      handoffAt: pending.actualHandoffAt != null && isFinite(Number(pending.actualHandoffAt)) ? Number(pending.actualHandoffAt) : plannerDiagnostics.handoffAt,
       landingAt: plannerDiagnostics.landingAt,
-      audibleOverlap: plannerDiagnostics.audibleOverlap,
-      preRollDuration: plannerDiagnostics.preRollDuration,
+      audibleOverlap: pending.actualAudibleOverlap != null && isFinite(Number(pending.actualAudibleOverlap)) ? Number(pending.actualAudibleOverlap) : plannerDiagnostics.audibleOverlap,
+      preRollDuration: pending.actualPreRollDuration != null && isFinite(Number(pending.actualPreRollDuration)) ? Number(pending.actualPreRollDuration) : plannerDiagnostics.preRollDuration,
       energyContinuity: plannerDiagnostics.energyContinuity,
       grooveContinuity: plannerDiagnostics.grooveContinuity,
       tempoCompatibility: plannerDiagnostics.tempoCompatibility,
@@ -10886,6 +10886,10 @@ function cuefieldTimelineExecutionForPending(pending) {
         timeline: pending.timeline,
         executionMode: pending.executionMode,
         targetVolume: targetVolume,
+        mixStart: pending.mixStart,
+        handoffAt: pending.handoffAt,
+        audibleOverlap: pending.audibleOverlap,
+        preRollDuration: pending.preRollDuration,
       });
     } catch (err) {
       console.warn('[CuefieldAutoMix] timeline execution build failed:', err && (err.message || err));
@@ -11162,6 +11166,14 @@ function runCuefieldVolumeCurve(pending, nextMedia) {
     execution = cuefieldVolumeOnlyExecution(execution, pending);
   }
   pending.timelineExecution = execution;
+  var actualMixStart = Number(pending.mixStart);
+  if (!isFinite(actualMixStart)) actualMixStart = Number(pending.triggerAt);
+  if (isFinite(actualMixStart)) {
+    pending.actualMixStart = actualMixStart;
+    pending.actualHandoffAt = actualMixStart + Math.max(0, Number(execution.handoffDelayMs) || 0) / 1000;
+  }
+  pending.actualAudibleOverlap = execution.audibleOverlap;
+  pending.actualPreRollDuration = execution.preRollDuration;
   for (var i = 0; i < execution.actions.length; i++) {
     (function(action) {
       cuefieldScheduleTimeline(action.delayMs, function() {

@@ -45,6 +45,28 @@ test('builds delayed execution actions from a Cuefield recipe timeline', () => {
   assert.equal(execution.handoffDelayMs, 10600);
 });
 
+test('uses explicit transition window as the runtime clock without moving the B landing', () => {
+  const execution = buildCuefieldTimelineExecution({
+    entryTime: 8,
+    mixStart: 75.985,
+    handoffAt: 85,
+    audibleOverlap: 4.85,
+    preRollDuration: 0.475,
+    timeline: [
+      { t: -8, deck: 'B', op: 'play', at: 8, volume: 0 },
+      { t: -8, deck: 'B', op: 'volume', value: 0.58, duration: 5200 },
+      { t: -3.2, deck: 'A', op: 'bass', value: 0.38, duration: 2200 },
+      { t: 2.6, deck: 'B', op: 'handoff' },
+    ],
+  });
+  const play = execution.actions.find((action) => action.op === 'play');
+
+  assert.equal(execution.handoffDelayMs, 9015);
+  assert.equal(execution.audibleOverlap, 4.85);
+  assert.equal(execution.preRollDuration, 0.475);
+  assert.equal(Math.abs((play.at + execution.handoffDelayMs / 1000) - 18.6) <= 0.001, true);
+});
+
 test('falls back to the current soft handoff curve when no timeline exists', () => {
   const execution = buildCuefieldTimelineExecution({
     exitTime: 30,
@@ -95,6 +117,8 @@ test('realigns volume-only downgrade to the strong B anchor', () => {
   const play = execution.actions.find((action) => action.op === 'play');
 
   assert.equal(execution.handoffDelayMs, 2200);
+  assert.equal(execution.audibleOverlap, 2.2);
+  assert.equal(execution.preRollDuration, 0);
   assert.equal(play.at, 9.8);
   assert.equal(play.at + execution.leadSec, 12);
   assert.equal(execution.actions.some((action) => action.op === 'filter' || action.op === 'bass'), false);
