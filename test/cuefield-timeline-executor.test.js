@@ -154,6 +154,24 @@ test('marks B-deck echo as a B graph requirement', () => {
   assert.equal(execution.requiresAGraph, false);
 });
 
+test('normalizes a bounded bridge action and marks bridge runtime as required', () => {
+  const execution = buildCuefieldTimelineExecution({
+    timeline: [
+      { t: 0, deck: 'A', op: 'bridge', duration: 999999, bridge: { template: 'unknown', bars: 30, bpmFrom: 1, bpmTo: 999, stageDurations: [2, 4, 2] } },
+      { t: 8, deck: 'B', op: 'handoff' },
+    ],
+  });
+  const bridge = execution.actions.find((action) => action.op === 'bridge');
+
+  assert.equal(bridge.bridge.template, 'drum-build');
+  assert.equal(bridge.bridge.bars, 16);
+  assert.equal(bridge.bridge.bpmFrom, 40);
+  assert.equal(bridge.bridge.bpmTo, 240);
+  assert.deepEqual(bridge.bridge.stageDurations, [2, 4, 2]);
+  assert.equal(bridge.durationMs, 64000);
+  assert.equal(execution.requiresBridge, true);
+});
+
 test('realigns volume-only downgrade to the strong B anchor', () => {
   assert.equal(typeof buildVolumeOnlyCuefieldExecution, 'function');
   const execution = buildVolumeOnlyCuefieldExecution({

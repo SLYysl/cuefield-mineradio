@@ -109,6 +109,24 @@
       normalized.feedback = round(clamp(toNumber(action.feedback, 0), 0, 0.72));
       normalized.wet = round(clamp(toNumber(action.wet, 0), 0, 0.5));
     }
+    if (normalized.op === 'bridge') {
+      var bridge = action.bridge || {};
+      var template = ['drum-build', 'echo-break', 'loop-rise', 'impact-drop'].indexOf(bridge.template) >= 0
+        ? bridge.template
+        : 'drum-build';
+      var requestedBars = toNumber(bridge.bars, 4);
+      var bars = requestedBars >= 12 ? 16 : (requestedBars >= 6 ? 8 : 4);
+      normalized.durationMs = Math.min(64000, normalized.durationMs);
+      normalized.bridge = {
+        template: template,
+        bars: bars,
+        bpmFrom: round(clamp(toNumber(bridge.bpmFrom, 120), 40, 240)),
+        bpmTo: round(clamp(toNumber(bridge.bpmTo, 120), 40, 240)),
+        stageDurations: Array.isArray(bridge.stageDurations)
+          ? bridge.stageDurations.slice(0, 3).map(function(value){ return round(Math.max(0, toNumber(value, 0))); })
+          : [],
+      };
+    }
     return normalized;
   }
 
@@ -193,6 +211,7 @@
     var requiresAGraph = actions.some(function(action) {
       return action.deck === 'A' && action.op === 'echo';
     });
+    var requiresBridge = actions.some(function(action) { return action.op === 'bridge'; });
     var handoff = actions.filter(function(action) { return action.op === 'handoff'; }).slice(-1)[0];
     var lastAction = actions[actions.length - 1] || null;
     var handoffDelayMs = handoff
@@ -208,6 +227,7 @@
       preRollDuration: finiteOption(opts.preRollDuration),
       requiresAGraph: requiresAGraph,
       requiresBGraph: requiresBGraph,
+      requiresBridge: requiresBridge,
       actions: actions,
     };
   }
