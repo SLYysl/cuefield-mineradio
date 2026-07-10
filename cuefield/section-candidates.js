@@ -340,4 +340,7 @@ function chooseTransitionCandidates(fromAnalysis, toAnalysis, opts = {}) {
 module.exports = {
   analyzeSectionCandidates,
   chooseTransitionCandidates,
+  scoreExit,
+  scoreEntry,
+  scoreCandidatePair,
 };
