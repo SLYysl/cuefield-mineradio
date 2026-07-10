@@ -120,6 +120,7 @@ test('exposes the validated transition window and sanitized diagnostics', () => 
   });
 
   const { chosen, diagnostics } = result;
+  assert.equal(Object.prototype.hasOwnProperty.call(result, 'windowPlan'), false);
   assert.equal(chosen.mixStart >= chosen.protectedUntil, true);
   assert.equal(chosen.audibleOverlap >= 3, true);
   assert.equal(chosen.exitRatio < 0.78, true);
@@ -130,9 +131,9 @@ test('exposes the validated transition window and sanitized diagnostics', () => 
   assert.equal(diagnostics.audibleOverlap, chosen.audibleOverlap);
   assert.equal(diagnostics.preRollDuration, chosen.preRollDuration);
   assert.equal(diagnostics.exitRatio, chosen.exitRatio);
-  assert.equal(Number.isFinite(chosen.energyContinuity), true);
-  assert.equal(Number.isFinite(chosen.grooveContinuity), true);
-  assert.equal(Number.isFinite(chosen.tempoCompatibility), true);
+  assert.equal(diagnostics.energyContinuity, chosen.energyContinuity);
+  assert.equal(diagnostics.grooveContinuity, chosen.grooveContinuity);
+  assert.equal(diagnostics.tempoCompatibility, chosen.tempoCompatibility);
   assert.equal(diagnostics.firstHookStart, 16);
   assert.equal(diagnostics.firstHookEnd, 40);
   assert.equal(diagnostics.hookConfidence, 0.88);
@@ -174,4 +175,22 @@ test('uses a real zero-second fallback when paired lyrics are unavailable', () =
   assert.equal(result.diagnostics.structureSource, 'beat-only');
   assert.equal(fallback.time, 0);
   assert.equal(result.to.structureMap.entryCandidates.some((item) => item.source === 'fallback' && item.time >= 12 && item.time <= 16), false);
+});
+
+test('preserves a lyric-backed B hook when A is beat-only', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
+    'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(96) },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    toLrc: '[00:18.00]take me higher\n[00:34.00]feel it rising\n[01:06.00]take me higher\n[01:22.00]feel it rising',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+
+  assert.equal(result.from.structureMap.structureSource, 'beat-only');
+  assert.equal(result.to.structureMap.structureSource, 'lyric+beat');
+  assert.equal(result.chosen.entry.landingType, 'hook');
+  assert.equal(result.diagnostics.entryType, 'hook');
 });

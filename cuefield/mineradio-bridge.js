@@ -78,7 +78,7 @@ function credibleFirstHook(structureMap) {
     section
     && structureMap.structureSource === 'lyric+beat'
     && String(section.type || '').toLowerCase() === 'hook'
-    && Number(section.confidence) >= 0.6
+    && Number(section.confidence) >= 0.65
   )) || null;
 }
 
@@ -89,7 +89,7 @@ function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
   const recipeDiagnostics = windowPlan.diagnostics || {};
   const entry = chosen.entry || {};
   const rawLandingType = String(entry.landingType || entry.type || 'start').toLowerCase();
-  const landingType = structureSource === 'beat-only' && rawLandingType === 'hook'
+  const landingType = toStructure.structureSource !== 'lyric+beat' && rawLandingType === 'hook'
     ? (entry.source === 'fallback' ? 'start' : 'drop')
     : rawLandingType;
   return {
@@ -114,6 +114,9 @@ function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
     handoffAt: chosen.handoffAt,
     audibleOverlap: chosen.audibleOverlap,
     preRollDuration: chosen.preRollDuration,
+    energyContinuity: chosen.energyContinuity,
+    grooveContinuity: chosen.grooveContinuity,
+    tempoCompatibility: chosen.tempoCompatibility,
     windowRejectionReasons: Array.isArray(chosen.rejectionReasons) ? chosen.rejectionReasons.slice() : [],
     sourceExitCount: recipeDiagnostics.sourceExitCount,
     sourceLandingCount: recipeDiagnostics.sourceLandingCount,
@@ -177,10 +180,6 @@ function planCuefieldTransitionFromCache(opts = {}) {
     chosen,
     candidates: windowPlan.candidates,
     rejected: windowPlan.rejected,
-    windowPlan: {
-      candidates: windowPlan.candidates,
-      rejected: windowPlan.rejected,
-    },
     diagnostics: transitionDiagnostics(from, to, windowPlan, chosen, structureSource),
   };
 }

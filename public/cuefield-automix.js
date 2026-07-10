@@ -157,8 +157,9 @@
           : toNumber(ctx.leadSec, 1);
         var leadSec = timelineLeadSec(timeline, fallbackLeadSec);
         var protectedUntil = Math.max(0, toNumber(chosen.protectedUntil, 0));
-        var explicitMixStart = toNumber(chosen.mixStart, NaN);
-        var triggerAt = isFinite(explicitMixStart)
+        var hasExplicitMixStart = chosen.mixStart != null && Number.isFinite(Number(chosen.mixStart));
+        var explicitMixStart = hasExplicitMixStart ? Number(chosen.mixStart) : NaN;
+        var triggerAt = hasExplicitMixStart
           ? Math.max(protectedUntil, explicitMixStart)
           : (isFinite(exitTime) ? Math.max(protectedUntil, exitTime - leadSec) : protectedUntil);
         var entryTime = timelineBStart(timeline, Math.max(0, toNumber(chosen.entry && chosen.entry.time, 0)));
@@ -175,6 +176,7 @@
           entryTime: entryTime,
           exitTime: exitTime,
           protectedUntil: protectedUntil,
+          mixStart: chosen.mixStart,
           handoffAt: chosen.handoffAt,
           audibleOverlap: chosen.audibleOverlap,
           preRollDuration: chosen.preRollDuration,
