@@ -323,6 +323,11 @@ function terminalRescuePolicy(policy, fromProfile, protectedUntil) {
 
 function terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, rejected) {
   const duration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
+  if (!(duration > toNumber(protectedUntil))) {
+    const error = new Error('TERMINAL_RESCUE_NO_POST_PROTECTION_RUNWAY');
+    error.code = 'TERMINAL_RESCUE_NO_POST_PROTECTION_RUNWAY';
+    throw error;
+  }
   const [minRatio, maxRatio] = policy.preferredExitRange;
   const rangeExits = sourceExits(fromAnalysis, protectedUntil)
     .filter((candidate) => {

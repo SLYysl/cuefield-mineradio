@@ -305,6 +305,29 @@ test('terminal rescue respects a very late protected section without negative ti
   assert.equal(timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
 });
 
+test('rejects terminal rescue when protection leaves no post-protection runway', () => {
+  const from = profile({ duration: 12, protectedUntil: 12 });
+  const to = profile({ duration: 24 });
+
+  assert.throws(
+    () => chooseTransitionWindow(from, to),
+    (error) => error && error.code === 'TERMINAL_RESCUE_NO_POST_PROTECTION_RUNWAY',
+  );
+});
+
+test('terminal rescue keeps a tiny positive post-protection runway internally bounded', () => {
+  const from = profile({ duration: 12, protectedUntil: 11.999 });
+  const to = profile({ duration: 24 });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.chosen.mixStart, 11.999);
+  assert.equal(result.chosen.mixStart < result.chosen.handoffAt, true);
+  assert.equal(result.chosen.handoffAt <= 12, true);
+  assert.equal(result.chosen.audibleOverlap > 0, true);
+  assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= result.chosen.audibleOverlap), true);
+});
+
 test('uses .35 conservative groove continuity without a trusted beat grid', () => {
   const from = profile({ exits: [exit(80)], beatGridTrusted: false });
   const to = profile({ entries: [entry('intro', 16)], beatGridTrusted: false });
