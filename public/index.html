@@ -10899,6 +10899,38 @@ function rampCuefieldParamInContext(ctx, param, value, durationMs) {
   }
 }
 
+function rampCuefieldGainParamInContext(ctx, param, value, durationMs, curve) {
+  if (!ctx || !param || !curve || !window.CuefieldTimelineExecutor || !window.CuefieldTimelineExecutor.buildEqualPowerCurve) {
+    rampCuefieldParamInContext(ctx, param, value, durationMs);
+    return;
+  }
+  durationMs = Math.max(0, Number(durationMs) || 0);
+  if (durationMs <= 0 || typeof param.setValueCurveAtTime !== 'function') {
+    rampCuefieldParamInContext(ctx, param, value, durationMs);
+    return;
+  }
+  var now = ctx.currentTime || 0;
+  var current = isFinite(param.value) ? Number(param.value) : Number(value) || 0;
+  var direction = curve === 'equal-power-out' ? 'out' : 'in';
+  var base = window.CuefieldTimelineExecutor.buildEqualPowerCurve(direction, 33);
+  var values = new Float32Array(base.length);
+  for (var i = 0; i < base.length; i++) {
+    values[i] = direction === 'out'
+      ? value + (current - value) * base[i]
+      : current + (value - current) * base[i];
+  }
+  try {
+    if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(now);
+    else {
+      param.cancelScheduledValues(now);
+      param.setValueAtTime(current, now);
+    }
+    param.setValueCurveAtTime(values, now, durationMs / 1000);
+  } catch (e) {
+    rampCuefieldParamInContext(ctx, param, value, durationMs);
+  }
+}
+
 function rampCuefieldHighpass(type, value, durationMs) {
   if (!cuefieldFilterNode || !cuefieldFilterNode.frequency) return;
   var freq = type === 'none' ? 20 : clampRange(Number(value) || 20, 20, 6000);
@@ -10976,6 +11008,16 @@ function ensureCuefieldBDeckGraph(media) {
   }
 }
 
+function primeCuefieldBDeckGain(graph, nextMedia) {
+  if (!graph || !graph.gain || !graph.gain.gain || !nextMedia || nextMedia._cuefieldGainOwned) return graph;
+  var mediaGain = clampRange(Number(nextMedia.volume) || 0, 0, 1);
+  var graphGain = isFinite(graph.gain.gain.value) ? Number(graph.gain.gain.value) : 1;
+  rampCuefieldParamInContext(graph.ctx, graph.gain.gain, mediaGain * graphGain, 0);
+  nextMedia.volume = 1;
+  nextMedia._cuefieldGainOwned = true;
+  return graph;
+}
+
 function releaseCuefieldBDeckGraph(media) {
   var graph = media && media._cuefieldDeckGraph || cuefieldBDeckGraph;
   if (!graph) return;
@@ -11003,6 +11045,11 @@ function rampCuefieldGraphBass(graph, value, durationMs) {
   rampCuefieldParamInContext(graph.ctx, graph.bass.gain, (value - 1) * 18, durationMs);
 }
 
+function rampCuefieldGraphGain(graph, value, durationMs, curve) {
+  if (!graph || !graph.gain || !graph.gain.gain) return;
+  rampCuefieldGainParamInContext(graph.ctx, graph.gain.gain, value, durationMs, curve);
+}
+
 function applyCuefieldTimelineAction(action, pending, nextMedia) {
   if (!action || !pending || pending.token !== trackSwitchToken || pending.currentIndex !== currentIdx) return;
   if (action.op === 'handoff') return;
@@ -11016,7 +11063,9 @@ function applyCuefieldTimelineAction(action, pending, nextMedia) {
         });
       }
     } else if (action.op === 'volume') {
-      fadeCuefieldMediaVolume(nextMedia, action.target == null ? targetVolume * (Number(action.value) || 0) : action.target, action.durationMs);
+      var bTarget = action.target == null ? targetVolume * (Number(action.value) || 0) : action.target;
+      if (bGraph) rampCuefieldGraphGain(bGraph, bTarget, action.durationMs, action.curve);
+      else fadeCuefieldMediaVolume(nextMedia, bTarget, action.durationMs);
     } else if (action.op === 'filter') {
       rampCuefieldGraphHighpass(bGraph, action.type, action.value, action.durationMs);
     } else if (action.op === 'bass') {
@@ -11027,7 +11076,7 @@ function applyCuefieldTimelineAction(action, pending, nextMedia) {
     return;
   }
   if (action.op === 'volume') {
-    rampAudioOutputGain(action.target == null ? targetVolume * (Number(action.value) || 0) : action.target, action.durationMs);
+    rampAudioOutputGain(action.target == null ? targetVolume * (Number(action.value) || 0) : action.target, action.durationMs, action.curve);
   } else if (action.op === 'filter') {
     rampCuefieldHighpass(action.type, action.value, action.durationMs);
   } else if (action.op === 'bass') {
@@ -11037,12 +11086,32 @@ function applyCuefieldTimelineAction(action, pending, nextMedia) {
   }
 }
 
+function cuefieldVolumeOnlyExecution(execution) {
+  var play = execution.actions.find(function(action) { return action.deck === 'B' && action.op === 'play'; });
+  return {
+    leadSec: 2.2,
+    bStart: execution.bStart,
+    handoffDelayMs: 2200,
+    requiresBGraph: false,
+    actions: [
+      play ? Object.assign({}, play, { delayMs: 0 }) : null,
+      { delayMs: 0, durationMs: 2200, deck: 'B', op: 'volume', value: 1, target: targetVolume, curve: '' },
+      { delayMs: 0, durationMs: 2200, deck: 'A', op: 'volume', value: 0, target: 0, curve: '' },
+    ].filter(Boolean),
+  };
+}
+
 function runCuefieldVolumeCurve(pending, nextMedia) {
   var execution = cuefieldTimelineExecutionForPending(pending);
   if (!execution) return cuefieldCrossfadeMsForPending(pending);
   clearCuefieldTimelineTimers();
+  var bGraph = execution.requiresBGraph ? ensureCuefieldBDeckGraph(nextMedia) : null;
+  if (bGraph) primeCuefieldBDeckGain(bGraph, nextMedia);
+  else if (execution.requiresBGraph) {
+    pending.runtimeDowngrade = 'volume-only';
+    execution = cuefieldVolumeOnlyExecution(execution);
+  }
   pending.timelineExecution = execution;
-  if (execution.requiresBGraph) ensureCuefieldBDeckGraph(nextMedia);
   for (var i = 0; i < execution.actions.length; i++) {
     (function(action) {
       cuefieldScheduleTimeline(action.delayMs, function() {
@@ -18781,12 +18850,16 @@ function setAudioOutputGainImmediate(value) {
     audio.volume = value;
   }
 }
-function rampAudioOutputGain(value, durationMs) {
+function rampAudioOutputGain(value, durationMs, curve) {
   value = normalizeAudioFadeTarget(value);
   durationMs = Math.max(0, Number(durationMs) || 0);
   clearAudioFadeTimers();
   var serial = audioFadeSerial;
   if (gainNode && audioCtx) {
+    if (curve) {
+      rampCuefieldGainParamInContext(audioCtx, gainNode.gain, value, durationMs, curve);
+      return;
+    }
     var now = audioCtx.currentTime || 0;
     holdAudioOutputGain(now);
     if (durationMs <= 0) {
@@ -19465,6 +19538,7 @@ async function playQueueAt(idx, opts) {
     var preparedAudio = preparedAudioForSwitch;
     if (preparedAudio && cuefieldAutoMixPreparedAudio === preparedAudio) cuefieldAutoMixPreparedAudio = null;
     if (preparedAudio) {
+      if (preparedAudio && preparedAudio._cuefieldDeckGraph) cuefieldBDeckGraph = preparedAudio._cuefieldDeckGraph;
       if (audio && audio !== preparedAudio) {
         audioFadeSerial++;
         clearAudioFadeTimers();

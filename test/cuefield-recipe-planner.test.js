@@ -142,6 +142,8 @@ test('keeps fallback entries on a short aligned overlap even with a high pair sc
   assert.equal(plan.chosen.anchors.overlapDuration <= 3.2, true);
   assert.equal(plan.chosen.anchors.entrySource, 'fallback');
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'filter' && action.t < -2), false);
+  assert.equal(plan.chosen.timeline.some((action) => action.deck === 'B' && action.op === 'volume' && action.curve === 'equal-power-in'), true);
+  assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'volume' && action.curve === 'equal-power-out'), true);
   assert.equal(Math.abs((play.at + plan.chosen.anchors.lead) - plan.chosen.anchors.bAnchor) <= 0.05, true);
 });
 

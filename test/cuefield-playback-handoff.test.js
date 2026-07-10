@@ -25,3 +25,16 @@ test('Cuefield handoff suppresses the normal ended next-track path', () => {
   assert.equal(guardIndex < nextTrackIndex, true);
   assert.match(handler.slice(guardIndex, nextTrackIndex), /return;/);
 });
+
+test('Cuefield transition keeps prepared B volume in its WebAudio graph', () => {
+  const html = readIndexHtml();
+  const start = html.indexOf('function ensureCuefieldBDeckGraph');
+  const end = html.indexOf('function scheduleQueueBeatPrefetch', start);
+  const cuefieldRuntime = html.slice(start, end);
+
+  assert.match(cuefieldRuntime, /function primeCuefieldBDeckGain\(/);
+  assert.match(cuefieldRuntime, /rampCuefieldGraphGain\(bGraph,/);
+  assert.match(cuefieldRuntime, /nextMedia\.volume = 1/);
+  assert.match(cuefieldRuntime, /pending\.runtimeDowngrade = 'volume-only'/);
+  assert.match(html, /preparedAudio && preparedAudio\._cuefieldDeckGraph/);
+});

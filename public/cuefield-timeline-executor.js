@@ -18,6 +18,22 @@
     return Math.round(toNumber(value, 0) * factor) / factor;
   }
 
+  function buildEqualPowerCurve(direction, points) {
+    var count = Math.max(2, Math.round(toNumber(points, 33)));
+    var incoming = direction !== 'out';
+    var values = [];
+    for (var i = 0; i < count; i++) {
+      var progress = i / (count - 1);
+      var value = incoming
+        ? Math.sin(progress * Math.PI / 2)
+        : Math.cos(progress * Math.PI / 2);
+      values.push(round(value, 6));
+    }
+    values[0] = incoming ? 0 : 1;
+    values[count - 1] = incoming ? 1 : 0;
+    return values;
+  }
+
   function normalizeAction(action, leadSec, targetVolume) {
     action = action || {};
     var value = clamp(action.value == null ? 1 : action.value, 0, 1);
@@ -28,6 +44,7 @@
       deck: action.deck === 'A' ? 'A' : 'B',
       op: String(action.op || ''),
       type: String(action.type || ''),
+      curve: String(action.curve || ''),
       value: value,
       at: Math.max(0, toNumber(action.at, 0)),
     };
@@ -97,7 +114,11 @@
         return a.delayMs - b.delayMs || a.t - b.t;
       });
     var requiresBGraph = actions.some(function(action) {
-      return action.deck === 'B' && (action.op === 'filter' || action.op === 'bass');
+      return action.deck === 'B' && (
+        action.op === 'filter'
+        || action.op === 'bass'
+        || (action.op === 'volume' && action.curve.indexOf('equal-power-') === 0)
+      );
     });
     var handoff = actions.filter(function(action) { return action.op === 'handoff'; }).slice(-1)[0];
     var lastAction = actions[actions.length - 1] || null;
@@ -116,5 +137,6 @@
 
   return {
     buildCuefieldTimelineExecution: buildCuefieldTimelineExecution,
+    buildEqualPowerCurve: buildEqualPowerCurve,
   };
 });
