@@ -140,6 +140,7 @@ test('late contrast rise constrains exits to its late range and uses a short ove
   assert.equal(result.chosen.exitRatio >= 0.75 && result.chosen.exitRatio <= 0.9, true);
   assert.equal(result.chosen.audibleOverlap <= 3.5, true);
   assert.notEqual(result.chosen.entry.type, 'hook');
+  assert.equal(['filtered-pickup', 'echo-out', 'quick-safe-fade'].includes(result.chosen.recipeCandidate.recipe), true);
 });
 
 test('late contrast rise with only an early exit escalates to terminal rescue', () => {
@@ -308,6 +309,9 @@ test('terminal rescue returns an executable late timeline when structural window
   assert.equal(result.chosen.mixStart < result.chosen.handoffAt, true);
   assert.equal(result.chosen.handoffAt <= from.duration, true);
   assert.equal(result.chosen.timeline.some((action) => action.op === 'handoff'), true);
+  assert.equal(result.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'echo'), true);
+  assert.equal(Array.isArray(result.chosen.recipeCandidate.fallbackTimeline), true);
+  assert.equal(result.chosen.recipeCandidate.fallbackTimeline.some((action) => action.op === 'echo'), false);
   assert.equal(result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
 });
 

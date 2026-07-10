@@ -247,7 +247,12 @@ function recipeCandidateAllowedByRoute(candidate, policy) {
   const route = policy && policy.route;
   const overlap = toNumber(candidate && candidate.window && candidate.window.audibleOverlap);
   if (route === 'late-contrast-rise') {
-    return candidate.recipe === 'safety-long-blend' && overlap <= 3.5;
+    return [
+      'filtered-pickup',
+      'echo-out',
+      'quick-safe-fade',
+      'safety-long-blend',
+    ].includes(candidate.recipe) && overlap <= 3.5;
   }
   if (route === 'late-contrast-release') return overlap <= 6;
   return true;
@@ -423,7 +428,7 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
     landingType: 'start',
     confidence: 0.35,
   };
-  const timeline = [
+  const fallbackTimeline = [
     { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
     { t: 0, deck: 'B', op: 'bass', value: 0.2, duration: 0 },
     { t: 0, deck: 'B', op: 'volume', value: 1, duration: fadeDuration, curve: 'equal-power-in' },
@@ -431,6 +436,18 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
     { t: bassRestoreAt, deck: 'B', op: 'bass', value: 1, duration: boundedBassRestoreDuration },
     { t: overlapDuration, deck: 'B', op: 'handoff' },
   ];
+  const echoEnabled = overlapDuration >= 2.4;
+  const echoDisableAt = round(Math.max(0.4, overlapDuration - 0.6));
+  const timeline = echoEnabled ? [
+    { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
+    { t: 0, deck: 'B', op: 'bass', value: 0.2, duration: 0 },
+    { t: 0, deck: 'A', op: 'echo', enabled: true, bpm: toNumber(fromProfile && fromProfile.bpm, 120), delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 180 },
+    { t: 0, deck: 'B', op: 'volume', value: 1, duration: fadeDuration, curve: 'equal-power-in' },
+    { t: 0, deck: 'A', op: 'volume', value: 0, duration: fadeDuration, curve: 'equal-power-out' },
+    { t: bassRestoreAt, deck: 'B', op: 'bass', value: 1, duration: boundedBassRestoreDuration },
+    { t: echoDisableAt, deck: 'A', op: 'echo', enabled: false, bpm: toNumber(fromProfile && fromProfile.bpm, 120), delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 160 },
+    { t: overlapDuration, deck: 'B', op: 'handoff' },
+  ] : fallbackTimeline;
   const exit = selectedExit ? { ...selectedExit, time: mixStart } : {
     type: 'terminal-boundary',
     role: 'exit',
@@ -441,7 +458,13 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
     exit,
     entry,
     sectionChoice: null,
-    recipeCandidate: { recipe: 'terminal-rescue', score: 0, timeline, window: { audibleStart: 0, audibleEnd: overlapDuration, audibleOverlap: overlapDuration, preRollDuration: 0, handoffOffset: overlapDuration, runwayAvailable: true, landingError: 0 } },
+    recipeCandidate: {
+      recipe: 'terminal-rescue',
+      score: 0,
+      timeline,
+      fallbackTimeline,
+      window: { audibleStart: 0, audibleEnd: overlapDuration, audibleOverlap: overlapDuration, preRollDuration: 0, handoffOffset: overlapDuration, runwayAvailable: true, landingError: 0 },
+    },
     timeline,
     mixStart,
     handoffAt: round(mixStart + overlapDuration),
