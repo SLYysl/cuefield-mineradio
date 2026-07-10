@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 function roundNumber(value, digits = 3) {
+  if (value == null || value === '') return null;
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
   const factor = Math.pow(10, digits);

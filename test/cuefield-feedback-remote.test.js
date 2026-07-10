@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+const { buildCuefieldFeedbackRecord } = require('../cuefield/feedback-log');
+
 const {
   buildRemoteFeedbackPayload,
   forwardCuefieldFeedback,
@@ -183,6 +185,58 @@ test('bounds the remote envelope before serialization', () => {
   assert.equal(json.length < 10 * 1024, true);
   assert.equal(json.includes('raw-audio.mp3'), false);
   assert.equal(json.includes('raw lyric sentinel'), false);
+});
+
+test('preserves nullable numeric diagnostics when forwarding a local record', () => {
+  const local = buildCuefieldFeedbackRecord({
+    rating: 1,
+    transition: {
+      entryTime: 0,
+      score: '',
+      evalScore: undefined,
+      exitTime: null,
+      overlapDuration: '',
+      entryConfidence: undefined,
+      bpmA: null,
+      bpmB: '',
+      relativeTempoDelta: undefined,
+      diagnostics: {
+        outroCompleteness: null,
+        bIntroAggression: '',
+        styleTextureDistance: undefined,
+      },
+      structureConfidence: null,
+      protectedUntil: undefined,
+      exitConfidence: '',
+      entryType: '',
+      firstHookStart: undefined,
+      hookEvidence: {},
+      mixStart: null,
+    },
+  });
+  const remote = buildRemoteFeedbackPayload(local);
+  const transition = remote.record.transition;
+
+  assert.equal(local.transition.entryTime, 0);
+  [
+    'score', 'evalScore', 'exitTime', 'overlapDuration', 'entryConfidence',
+    'bpmA', 'bpmB', 'relativeTempoDelta',
+  ].forEach((field) => assert.equal(local.transition[field], null));
+  assert.deepEqual(local.transition.diagnostics, {
+    outroCompleteness: null,
+    bIntroAggression: null,
+    styleTextureDistance: null,
+  });
+  assert.equal(local.transition.structure.confidence, null);
+  assert.equal(local.transition.structure.protectedUntil, null);
+  assert.equal(local.transition.structure.exitConfidence, null);
+  assert.equal(local.transition.structure.entryConfidence, null);
+  Object.values(local.transition.window).forEach((value) => {
+    if (typeof value === 'number') assert.equal(value, null);
+  });
+  assert.deepEqual(transition, local.transition);
+  assert.equal(transition.entryTime, 0);
+  assert.equal(transition.window.mixStart, null);
 });
 
 test('forwards Cuefield feedback with bearer auth when configured', async () => {
