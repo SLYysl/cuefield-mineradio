@@ -378,6 +378,9 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
   const protectedBoundary = toNumber(protectedUntil);
   if (!(duration > 0)) return technicalFailure('TERMINAL_RESCUE_INVALID_DURATION', rejected);
   if (!(targetDuration > 0)) return technicalFailure('TERMINAL_RESCUE_INVALID_TARGET_DURATION', rejected);
+  if (targetDuration < MINIMUM_TERMINAL_OVERLAP - 0.000001) {
+    return technicalFailure('TERMINAL_RESCUE_INSUFFICIENT_TARGET_RUNWAY', rejected);
+  }
   if (duration - protectedBoundary < MINIMUM_TERMINAL_OVERLAP - 0.000001) {
     return technicalFailure('TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY', rejected);
   }
@@ -402,7 +405,7 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
       protectedBoundary,
       Math.min(duration - MINIMUM_TERMINAL_OVERLAP, preferredStart),
     ));
-  const overlapDuration = round(Math.max(0, Math.min(3.4, duration - mixStart)));
+  const overlapDuration = round(Math.max(0, Math.min(3.4, duration - mixStart, targetDuration)));
   const fadeDuration = Math.max(1, Math.round(overlapDuration * 1000));
   const bassRestoreDuration = Math.min(800, fadeDuration);
   const bassRestoreAt = round(Math.max(0, overlapDuration - bassRestoreDuration / 1000 - 0.001));

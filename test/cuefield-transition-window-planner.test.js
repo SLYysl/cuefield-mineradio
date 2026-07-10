@@ -370,6 +370,24 @@ test('returns a non-executable technical result for an invalid target duration',
   assert.equal(result.chosen.handoffAt, null);
 });
 
+test('returns a technical result when the target is shorter than the minimum rescue runway', () => {
+  const result = chooseTransitionWindow(profile({ duration: 128 }), profile({ duration: 1 }));
+
+  assert.equal(result.chosen.technicalFailure, true);
+  assert.equal(result.chosen.errorCode, 'TERMINAL_RESCUE_INSUFFICIENT_TARGET_RUNWAY');
+  assert.deepEqual(result.chosen.timeline, []);
+});
+
+test('caps terminal rescue overlap to the playable target duration', () => {
+  const result = chooseTransitionWindow(profile({ duration: 128 }), profile({ duration: 2.5 }));
+
+  assert.equal(result.chosen.technicalFailure, undefined);
+  assert.equal(result.chosen.audibleOverlap, 2.5);
+  assert.equal(result.chosen.entry.landingAt, 2.5);
+  assert.equal(result.chosen.handoffAt - result.chosen.mixStart, 2.5);
+  assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= 2.5), true);
+});
+
 test('terminal rescue executes an exact 2.2-second post-protection runway', () => {
   const from = profile({ duration: 12, protectedUntil: 9.8 });
   const to = profile({ duration: 24 });
