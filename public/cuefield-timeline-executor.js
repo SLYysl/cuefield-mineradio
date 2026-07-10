@@ -102,6 +102,13 @@
       normalized.at = round(normalized.at + originT - actionTime);
     }
     if (normalized.op === 'volume') normalized.target = round(targetVolume * value);
+    if (normalized.op === 'echo') {
+      normalized.enabled = action.enabled !== false;
+      normalized.bpm = round(clamp(toNumber(action.bpm, 120), 40, 240));
+      normalized.delayBeats = round(clamp(toNumber(action.delayBeats, 0.5), 0.125, 2));
+      normalized.feedback = round(clamp(toNumber(action.feedback, 0), 0, 0.72));
+      normalized.wet = round(clamp(toNumber(action.wet, 0), 0, 0.5));
+    }
     return normalized;
   }
 
@@ -179,8 +186,12 @@
       return action.deck === 'B' && (
         action.op === 'filter'
         || action.op === 'bass'
+        || action.op === 'echo'
         || (action.op === 'volume' && action.curve.indexOf('equal-power-') === 0)
       );
+    });
+    var requiresAGraph = actions.some(function(action) {
+      return action.deck === 'A' && action.op === 'echo';
     });
     var handoff = actions.filter(function(action) { return action.op === 'handoff'; }).slice(-1)[0];
     var lastAction = actions[actions.length - 1] || null;
@@ -195,6 +206,7 @@
       audibleStartDelayMs: explicitWindow ? 0 : null,
       audibleOverlap: finiteOption(opts.audibleOverlap),
       preRollDuration: finiteOption(opts.preRollDuration),
+      requiresAGraph: requiresAGraph,
       requiresBGraph: requiresBGraph,
       actions: actions,
     };

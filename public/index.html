@@ -2746,6 +2746,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 // ============================================================
 var audio = null, audioCtx = null, source = null, analyser = null, beatAnalyser = null, gainNode = null, audioReady = false, audioGraphElement = null;
 var cuefieldFilterNode = null, cuefieldBassNode = null, cuefieldTimelineTimers = [], cuefieldBDeckGraph = null;
+var cuefieldEchoSendNode = null, cuefieldEchoDelayNode = null, cuefieldEchoFeedbackNode = null, cuefieldEchoWetNode = null;
 var uiSfxCtx = null, lastShelfSelectSfxAt = 0;
 var FFT_SIZE = 2048;
 var frequencyData = new Uint8Array(FFT_SIZE / 2);
@@ -11018,6 +11019,13 @@ function rampCuefieldBass(value, durationMs) {
 function resetCuefieldToneControls(durationMs) {
   rampCuefieldHighpass('none', 20, durationMs || 0);
   rampCuefieldBass(1, durationMs || 0);
+  resetCuefieldGraphEcho({
+    ctx: audioCtx,
+    echoSend: cuefieldEchoSendNode,
+    echoDelay: cuefieldEchoDelayNode,
+    echoFeedback: cuefieldEchoFeedbackNode,
+    echoWet: cuefieldEchoWetNode,
+  }, durationMs || 0);
 }
 
 function configureCuefieldDeckGraph(graph) {
@@ -11034,7 +11042,31 @@ function configureCuefieldDeckGraph(graph) {
   graph.bass.frequency.setValueAtTime(180, now);
   graph.bass.gain.setValueAtTime(0, now);
   graph.gain.gain.setValueAtTime(1, now);
+  resetCuefieldGraphEcho(graph, 0);
   return graph;
+}
+
+function createCuefieldEchoNodes(ctx) {
+  if (!ctx || typeof ctx.createDelay !== 'function' || typeof ctx.createGain !== 'function') {
+    return { echoSend: null, echoDelay: null, echoFeedback: null, echoWet: null };
+  }
+  return {
+    echoSend: ctx.createGain(),
+    echoDelay: ctx.createDelay(1),
+    echoFeedback: ctx.createGain(),
+    echoWet: ctx.createGain(),
+  };
+}
+
+function cuefieldGraphHasEcho(graph) {
+  return !!(graph && graph.ctx && graph.echoSend && graph.echoDelay && graph.echoFeedback && graph.echoWet);
+}
+
+function resetCuefieldGraphEcho(graph, durationMs) {
+  if (!cuefieldGraphHasEcho(graph)) return;
+  rampCuefieldParamInContext(graph.ctx, graph.echoSend.gain, 0, durationMs || 0);
+  rampCuefieldParamInContext(graph.ctx, graph.echoFeedback.gain, 0, durationMs || 0);
+  rampCuefieldParamInContext(graph.ctx, graph.echoWet.gain, 0, durationMs || 0);
 }
 
 function connectCuefieldDeckGraph(graph) {
@@ -11045,6 +11077,14 @@ function connectCuefieldDeckGraph(graph) {
   graph.filter.connect(graph.bass);
   graph.bass.connect(graph.gain);
   graph.gain.connect(graph.ctx.destination);
+  if (cuefieldGraphHasEcho(graph)) {
+    graph.bass.connect(graph.echoSend);
+    graph.echoSend.connect(graph.echoDelay);
+    graph.echoDelay.connect(graph.echoWet);
+    graph.echoDelay.connect(graph.echoFeedback);
+    graph.echoFeedback.connect(graph.echoDelay);
+    graph.echoWet.connect(graph.ctx.destination);
+  }
   graph.connected = true;
   return graph;
 }
@@ -11059,6 +11099,7 @@ function ensureCuefieldBDeckGraph(media) {
     return connectCuefieldDeckGraph(cuefieldBDeckGraph);
   }
   try {
+    var echoNodes = createCuefieldEchoNodes(audioCtx);
     var graph = configureCuefieldDeckGraph({
       media: media,
       ctx: audioCtx,
@@ -11068,6 +11109,10 @@ function ensureCuefieldBDeckGraph(media) {
       filter: audioCtx.createBiquadFilter(),
       bass: audioCtx.createBiquadFilter(),
       gain: audioCtx.createGain(),
+      echoSend: echoNodes.echoSend,
+      echoDelay: echoNodes.echoDelay,
+      echoFeedback: echoNodes.echoFeedback,
+      echoWet: echoNodes.echoWet,
       connected: false,
     });
     media._cuefieldDeckGraph = graph;
@@ -11098,6 +11143,10 @@ function releaseCuefieldBDeckGraph(media) {
   try { graph.filter.disconnect(); } catch (e) {}
   try { graph.bass.disconnect(); } catch (e) {}
   try { graph.gain.disconnect(); } catch (e) {}
+  try { graph.echoSend.disconnect(); } catch (e) {}
+  try { graph.echoDelay.disconnect(); } catch (e) {}
+  try { graph.echoFeedback.disconnect(); } catch (e) {}
+  try { graph.echoWet.disconnect(); } catch (e) {}
   graph.connected = false;
   if (media && media._cuefieldDeckGraph === graph) {
     try { delete media._cuefieldDeckGraph; } catch (e) { media._cuefieldDeckGraph = null; }
@@ -11121,6 +11170,23 @@ function rampCuefieldGraphGain(graph, value, durationMs, curve) {
   rampCuefieldGainParamInContext(graph.ctx, graph.gain.gain, value, durationMs, curve);
 }
 
+function rampCuefieldGraphEcho(graph, action) {
+  if (!cuefieldGraphHasEcho(graph) || !action) return false;
+  var bpm = clampRange(Number(action.bpm) || 120, 40, 240);
+  var delayBeats = clampRange(Number(action.delayBeats) || 0.5, 0.125, 2);
+  var delaySeconds = clampRange(60 / bpm * delayBeats, 0.08, 0.75);
+  var durationMs = Math.max(0, Number(action.durationMs) || 0);
+  rampCuefieldParamInContext(graph.ctx, graph.echoDelay.delayTime, delaySeconds, durationMs);
+  if (action.enabled === false) {
+    rampCuefieldParamInContext(graph.ctx, graph.echoSend.gain, 0, durationMs);
+    return true;
+  }
+  rampCuefieldParamInContext(graph.ctx, graph.echoFeedback.gain, clampRange(Number(action.feedback) || 0, 0, 0.72), durationMs);
+  rampCuefieldParamInContext(graph.ctx, graph.echoWet.gain, clampRange(Number(action.wet) || 0, 0, 0.5), durationMs);
+  rampCuefieldParamInContext(graph.ctx, graph.echoSend.gain, 1, durationMs);
+  return true;
+}
+
 function applyCuefieldTimelineAction(action, pending, nextMedia) {
   if (!action || !pending || pending.token !== trackSwitchToken || pending.currentIndex !== currentIdx) return;
   if (action.op === 'handoff') return;
@@ -11141,6 +11207,8 @@ function applyCuefieldTimelineAction(action, pending, nextMedia) {
       rampCuefieldGraphHighpass(bGraph, action.type, action.value, action.durationMs);
     } else if (action.op === 'bass') {
       rampCuefieldGraphBass(bGraph, action.value, action.durationMs);
+    } else if (action.op === 'echo') {
+      rampCuefieldGraphEcho(bGraph, action);
     } else if (action.op === 'stop') {
       stopCuefieldPreparedAudio(nextMedia);
     }
@@ -11152,6 +11220,14 @@ function applyCuefieldTimelineAction(action, pending, nextMedia) {
     rampCuefieldHighpass(action.type, action.value, action.durationMs);
   } else if (action.op === 'bass') {
     rampCuefieldBass(action.value, action.durationMs);
+  } else if (action.op === 'echo') {
+    rampCuefieldGraphEcho({
+      ctx: audioCtx,
+      echoSend: cuefieldEchoSendNode,
+      echoDelay: cuefieldEchoDelayNode,
+      echoFeedback: cuefieldEchoFeedbackNode,
+      echoWet: cuefieldEchoWetNode,
+    }, action);
   } else if (action.op === 'stop') {
     rampAudioOutputGain(0, action.durationMs || 280);
   }
@@ -18761,6 +18837,10 @@ function initAudio() {
   try { if (cuefieldFilterNode && (!existingCuefieldGraph || cuefieldFilterNode !== existingCuefieldGraph.filter)) cuefieldFilterNode.disconnect(); } catch (e) {}
   try { if (cuefieldBassNode && (!existingCuefieldGraph || cuefieldBassNode !== existingCuefieldGraph.bass)) cuefieldBassNode.disconnect(); } catch (e) {}
   try { if (gainNode && (!existingCuefieldGraph || gainNode !== existingCuefieldGraph.gain)) gainNode.disconnect(); } catch (e) {}
+  try { if (cuefieldEchoSendNode && (!existingCuefieldGraph || cuefieldEchoSendNode !== existingCuefieldGraph.echoSend)) cuefieldEchoSendNode.disconnect(); } catch (e) {}
+  try { if (cuefieldEchoDelayNode && (!existingCuefieldGraph || cuefieldEchoDelayNode !== existingCuefieldGraph.echoDelay)) cuefieldEchoDelayNode.disconnect(); } catch (e) {}
+  try { if (cuefieldEchoFeedbackNode && (!existingCuefieldGraph || cuefieldEchoFeedbackNode !== existingCuefieldGraph.echoFeedback)) cuefieldEchoFeedbackNode.disconnect(); } catch (e) {}
+  try { if (cuefieldEchoWetNode && (!existingCuefieldGraph || cuefieldEchoWetNode !== existingCuefieldGraph.echoWet)) cuefieldEchoWetNode.disconnect(); } catch (e) {}
   if (existingCuefieldGraph) {
     audioCtx = existingCuefieldGraph.ctx || audioCtx;
     connectCuefieldDeckGraph(existingCuefieldGraph);
@@ -18770,6 +18850,10 @@ function initAudio() {
     cuefieldFilterNode = existingCuefieldGraph.filter;
     cuefieldBassNode = existingCuefieldGraph.bass;
     gainNode = existingCuefieldGraph.gain;
+    cuefieldEchoSendNode = existingCuefieldGraph.echoSend || null;
+    cuefieldEchoDelayNode = existingCuefieldGraph.echoDelay || null;
+    cuefieldEchoFeedbackNode = existingCuefieldGraph.echoFeedback || null;
+    cuefieldEchoWetNode = existingCuefieldGraph.echoWet || null;
     adoptAudioGraphGainOwnership(existingCuefieldGraph);
     audioGraphElement = audio;
     audioReady = true;
@@ -18788,6 +18872,17 @@ function initAudio() {
   cuefieldFilterNode = audioCtx.createBiquadFilter();
   cuefieldBassNode = audioCtx.createBiquadFilter();
   gainNode = audioCtx.createGain();
+  var echoNodes = { echoSend: null, echoDelay: null, echoFeedback: null, echoWet: null };
+  if (typeof audioCtx.createDelay === 'function' && typeof audioCtx.createGain === 'function') {
+    echoNodes.echoSend = audioCtx.createGain();
+    echoNodes.echoDelay = audioCtx.createDelay(1);
+    echoNodes.echoFeedback = audioCtx.createGain();
+    echoNodes.echoWet = audioCtx.createGain();
+  }
+  cuefieldEchoSendNode = echoNodes.echoSend;
+  cuefieldEchoDelayNode = echoNodes.echoDelay;
+  cuefieldEchoFeedbackNode = echoNodes.echoFeedback;
+  cuefieldEchoWetNode = echoNodes.echoWet;
   analyser.fftSize = FFT_SIZE;
   analyser.smoothingTimeConstant = 0.58;
   beatAnalyser.fftSize = BEAT_FFT_SIZE;
@@ -18804,6 +18899,17 @@ function initAudio() {
   cuefieldFilterNode.connect(cuefieldBassNode);
   cuefieldBassNode.connect(gainNode);
   gainNode.connect(audioCtx.destination);
+  if (cuefieldEchoSendNode && cuefieldEchoDelayNode && cuefieldEchoFeedbackNode && cuefieldEchoWetNode) {
+    cuefieldBassNode.connect(cuefieldEchoSendNode);
+    cuefieldEchoSendNode.connect(cuefieldEchoDelayNode);
+    cuefieldEchoDelayNode.connect(cuefieldEchoWetNode);
+    cuefieldEchoDelayNode.connect(cuefieldEchoFeedbackNode);
+    cuefieldEchoFeedbackNode.connect(cuefieldEchoDelayNode);
+    cuefieldEchoWetNode.connect(audioCtx.destination);
+    cuefieldEchoSendNode.gain.setValueAtTime(0, audioCtx.currentTime || 0);
+    cuefieldEchoFeedbackNode.gain.setValueAtTime(0, audioCtx.currentTime || 0);
+    cuefieldEchoWetNode.gain.setValueAtTime(0, audioCtx.currentTime || 0);
+  }
   adoptAudioGraphGainOwnership({ ctx: audioCtx, gain: gainNode });
   audioGraphElement = audio;
   audioReady = true;
@@ -19660,10 +19766,18 @@ async function playQueueAt(idx, opts) {
       try { if (cuefieldFilterNode) cuefieldFilterNode.disconnect(); } catch (e) {}
       try { if (cuefieldBassNode) cuefieldBassNode.disconnect(); } catch (e) {}
       try { if (gainNode) gainNode.disconnect(); } catch (e) {}
+      try { if (cuefieldEchoSendNode) cuefieldEchoSendNode.disconnect(); } catch (e) {}
+      try { if (cuefieldEchoDelayNode) cuefieldEchoDelayNode.disconnect(); } catch (e) {}
+      try { if (cuefieldEchoFeedbackNode) cuefieldEchoFeedbackNode.disconnect(); } catch (e) {}
+      try { if (cuefieldEchoWetNode) cuefieldEchoWetNode.disconnect(); } catch (e) {}
       source = null;
       analyser = null;
       beatAnalyser = null;
       gainNode = null;
+      cuefieldEchoSendNode = null;
+      cuefieldEchoDelayNode = null;
+      cuefieldEchoFeedbackNode = null;
+      cuefieldEchoWetNode = null;
       audioGraphElement = null;
       audioReady = false;
       audio = new Audio();

@@ -438,12 +438,13 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
   ];
   const echoEnabled = overlapDuration >= 2.4;
   const echoDisableAt = round(Math.max(0.4, overlapDuration - 0.6));
+  const echoDryFadeDuration = Math.max(900, Math.round(overlapDuration * 650));
   const timeline = echoEnabled ? [
     { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
     { t: 0, deck: 'B', op: 'bass', value: 0.2, duration: 0 },
     { t: 0, deck: 'A', op: 'echo', enabled: true, bpm: toNumber(fromProfile && fromProfile.bpm, 120), delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 180 },
     { t: 0, deck: 'B', op: 'volume', value: 1, duration: fadeDuration, curve: 'equal-power-in' },
-    { t: 0, deck: 'A', op: 'volume', value: 0, duration: fadeDuration, curve: 'equal-power-out' },
+    { t: 0, deck: 'A', op: 'volume', value: 0, duration: echoDryFadeDuration, curve: 'equal-power-out' },
     { t: bassRestoreAt, deck: 'B', op: 'bass', value: 1, duration: boundedBassRestoreDuration },
     { t: echoDisableAt, deck: 'A', op: 'echo', enabled: false, bpm: toNumber(fromProfile && fromProfile.bpm, 120), delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 160 },
     { t: overlapDuration, deck: 'B', op: 'handoff' },

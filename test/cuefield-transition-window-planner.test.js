@@ -312,6 +312,7 @@ test('terminal rescue returns an executable late timeline when structural window
   assert.equal(result.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'echo'), true);
   assert.equal(Array.isArray(result.chosen.recipeCandidate.fallbackTimeline), true);
   assert.equal(result.chosen.recipeCandidate.fallbackTimeline.some((action) => action.op === 'echo'), false);
+  assert.equal(result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'volume').duration < result.chosen.audibleOverlap * 1000, true);
   assert.equal(result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
 });
 

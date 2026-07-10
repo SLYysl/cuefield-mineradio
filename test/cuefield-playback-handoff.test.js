@@ -42,6 +42,29 @@ test('Cuefield transition keeps prepared B volume in its WebAudio graph', () => 
   assert.match(html, /preparedAudio && preparedAudio\._cuefieldDeckGraph/);
 });
 
+test('Cuefield deck graphs keep an echo tail outside the dry gain lifecycle', () => {
+  const html = readIndexHtml();
+  const start = html.indexOf('function configureCuefieldDeckGraph');
+  const end = html.indexOf('function cuefieldVolumeOnlyExecution', start);
+  const cuefieldRuntime = html.slice(start, end);
+
+  assert.match(cuefieldRuntime, /createDelay\(/);
+  assert.match(cuefieldRuntime, /echoSend/);
+  assert.match(cuefieldRuntime, /echoDelay/);
+  assert.match(cuefieldRuntime, /echoFeedback/);
+  assert.match(cuefieldRuntime, /echoWet/);
+  assert.match(cuefieldRuntime, /graph\.bass\.connect\(graph\.echoSend\)/);
+  assert.match(cuefieldRuntime, /graph\.echoDelay\.connect\(graph\.echoFeedback\)/);
+  assert.match(cuefieldRuntime, /graph\.echoFeedback\.connect\(graph\.echoDelay\)/);
+  assert.match(cuefieldRuntime, /graph\.echoWet\.connect\(graph\.ctx\.destination\)/);
+  assert.match(cuefieldRuntime, /graph\.echoSend\.disconnect\(\)/);
+  assert.match(cuefieldRuntime, /graph\.echoDelay\.disconnect\(\)/);
+  assert.match(cuefieldRuntime, /graph\.echoFeedback\.disconnect\(\)/);
+  assert.match(cuefieldRuntime, /graph\.echoWet\.disconnect\(\)/);
+  assert.match(cuefieldRuntime, /action\.op === 'echo'/);
+  assert.match(cuefieldRuntime, /rampCuefieldGraphEcho\(/);
+});
+
 test('Cuefield graph lifecycle and handoff timer remain owned by the active transition', () => {
   const html = readIndexHtml();
   const pauseStart = html.indexOf('function pauseCurrentAudioForTrackSwitch');
@@ -97,6 +120,10 @@ test('adopting a prepared B graph preserves effective output gain', () => {
     beatAnalyser: node,
     cuefieldFilterNode: node,
     cuefieldBassNode: node,
+    cuefieldEchoSendNode: null,
+    cuefieldEchoDelayNode: null,
+    cuefieldEchoFeedbackNode: null,
+    cuefieldEchoWetNode: null,
     gainNode: { gain: { value: 0.2 }, disconnect() {} },
     audioReady: false,
     audioGraphElement: {},
@@ -153,6 +180,10 @@ test('initializing an ordinary graph transfers media gain without changing outpu
     beatAnalyser: null,
     cuefieldFilterNode: null,
     cuefieldBassNode: null,
+    cuefieldEchoSendNode: null,
+    cuefieldEchoDelayNode: null,
+    cuefieldEchoFeedbackNode: null,
+    cuefieldEchoWetNode: null,
     gainNode: null,
     audioReady: false,
     audioGraphElement: null,

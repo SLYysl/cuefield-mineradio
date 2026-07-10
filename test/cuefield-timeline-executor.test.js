@@ -121,6 +121,39 @@ test('requires a B deck graph for equal-power volume curves', () => {
   assert.equal(execution.requiresBGraph, true);
 });
 
+test('normalizes bounded echo actions and requires the addressed deck graph', () => {
+  const execution = buildCuefieldTimelineExecution({
+    timeline: [
+      { t: -2, deck: 'B', op: 'play', at: 4, volume: 0 },
+      { t: -1.4, deck: 'A', op: 'echo', enabled: true, bpm: NaN, delayBeats: 0.5, feedback: 2, wet: 2, duration: 180 },
+      { t: -1.2, deck: 'A', op: 'volume', value: 0, duration: 1400, curve: 'equal-power-out' },
+      { t: 0, deck: 'B', op: 'handoff' },
+    ],
+  });
+  const echo = execution.actions.find((action) => action.op === 'echo');
+
+  assert.equal(echo.delayMs, 600);
+  assert.equal(echo.enabled, true);
+  assert.equal(echo.bpm, 120);
+  assert.equal(echo.delayBeats, 0.5);
+  assert.equal(echo.feedback, 0.72);
+  assert.equal(echo.wet, 0.5);
+  assert.equal(execution.requiresAGraph, true);
+});
+
+test('marks B-deck echo as a B graph requirement', () => {
+  const execution = buildCuefieldTimelineExecution({
+    timeline: [
+      { t: -1, deck: 'B', op: 'play', at: 0, volume: 0 },
+      { t: -0.5, deck: 'B', op: 'echo', enabled: true, bpm: 120, delayBeats: 0.5, feedback: 0.4, wet: 0.3 },
+      { t: 0, deck: 'B', op: 'handoff' },
+    ],
+  });
+
+  assert.equal(execution.requiresBGraph, true);
+  assert.equal(execution.requiresAGraph, false);
+});
+
 test('realigns volume-only downgrade to the strong B anchor', () => {
   assert.equal(typeof buildVolumeOnlyCuefieldExecution, 'function');
   const execution = buildVolumeOnlyCuefieldExecution({
@@ -136,6 +169,7 @@ test('realigns volume-only downgrade to the strong B anchor', () => {
   assert.equal(play.at, 9.8);
   assert.equal(play.at + execution.leadSec, 12);
   assert.equal(execution.actions.some((action) => action.op === 'filter' || action.op === 'bass'), false);
+  assert.equal(execution.actions.some((action) => action.op === 'echo'), false);
 });
 
 test('measures the shorter volume-only overlap when A also uses cubic media fading', () => {
