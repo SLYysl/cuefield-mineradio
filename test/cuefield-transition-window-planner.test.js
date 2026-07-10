@@ -25,6 +25,39 @@ function profile({
   beatGridTrusted = true,
 } = {}) {
   const grid = beatGridTrusted ? Array.from({ length: 8 }, (_, index) => ({ confidence: 0.9, time: index * 2 })) : [];
+  const hookEvidence = {
+    repeatedLineCount: 2,
+    repeatedBlockCount: 2,
+    energyLift: 0.2,
+    sustainedEnergy: true,
+  };
+  const structureEntries = entries.map((candidate) => {
+    const type = String(candidate.landingType || candidate.type || '').toLowerCase();
+    if (!['hook', 'chorus'].includes(type) || candidate.type === 'pre-hook') return candidate;
+    return { ...candidate, source: candidate.source || 'lyric+beat', evidence: candidate.evidence || hookEvidence };
+  });
+  structureEntries
+    .filter((candidate) => candidate.type === 'pre-hook')
+    .forEach((candidate) => {
+      const landingAt = candidate.landingAt ?? (candidate.resolvesTo && candidate.resolvesTo.time);
+      const hasHook = structureEntries.some((item) => item.type !== 'pre-hook' && Math.abs((item.landingAt ?? item.time) - landingAt) < 1.5);
+      if (!hasHook) structureEntries.push(entry('hook', landingAt, {
+        source: 'lyric+beat',
+        confidence: 0.88,
+        playFrom: landingAt,
+        landingAt,
+        landingType: 'hook',
+        evidence: hookEvidence,
+      }));
+    });
+  const hookSections = structureEntries
+    .filter((candidate) => candidate.type !== 'pre-hook' && ['hook', 'chorus'].includes(String(candidate.landingType || candidate.type).toLowerCase()))
+    .map((candidate) => ({
+      type: String(candidate.landingType || candidate.type).toLowerCase(),
+      start: candidate.landingAt ?? candidate.time,
+      confidence: candidate.confidence,
+      evidence: candidate.evidence,
+    }));
   return {
     duration,
     bpm,
@@ -36,9 +69,11 @@ function profile({
       bass: [{ start: 0, end: duration, value: 0.25 }],
     },
     structureMap: {
+      structureSource: hookSections.length ? 'lyric+beat' : 'beat-only',
       protectedUntil,
       exitCandidates: exits,
-      entryCandidates: entries,
+      entryCandidates: structureEntries,
+      sections: hookSections,
     },
     candidates,
   };
@@ -286,4 +321,35 @@ test('rejects anchored windows without a finite landing diagnostic', () => {
   assert.equal(isAnchoredLandingDiagnosticValid(entry('hook', 32, { landingType: 'hook' }), { landingError: null }), false);
   assert.equal(isAnchoredLandingDiagnosticValid(entry('intro', 16, { landingType: 'intro' }), { landingError: undefined }), false);
   assert.equal(isAnchoredLandingDiagnosticValid(entry('drop', 24, { landingType: 'drop' }), { landingError: NaN }), false);
+});
+
+test('does not promote a raw single-line lyric candidate to a Hook landing', () => {
+  const from = profile({ exits: [exit(80)] });
+  const fallback = entry('start', 0, {
+    source: 'fallback',
+    confidence: 0.35,
+    playFrom: 0,
+    landingAt: 0,
+    landingType: 'start',
+  });
+  const rawHook = entry('hook', 32, {
+    source: 'lyric',
+    confidence: 0.78,
+    text: 'single repeated line',
+    playFrom: 32,
+    landingAt: 32,
+    landingType: 'hook',
+  });
+  const to = profile({ candidates: [rawHook] });
+  to.structureMap = {
+    structureSource: 'lyric+beat',
+    sections: [{ type: 'hook-candidate', start: 32, confidence: 0.5 }],
+    entryCandidates: [fallback],
+  };
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.notEqual(result.chosen.entry.landingType, 'hook');
+  assert.equal(result.candidates.some((candidate) => candidate.entry.landingType === 'hook'), false);
+  assert.equal(result.rejected.some((candidate) => candidate.entry.landingType === 'hook'), false);
 });

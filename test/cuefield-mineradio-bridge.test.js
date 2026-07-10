@@ -221,3 +221,21 @@ test('preserves a lyric-backed B hook when A is beat-only', () => {
   assert.equal(result.chosen.entry.landingType, 'hook');
   assert.equal(result.diagnostics.entryType, 'hook');
 });
+
+test('does not expose a Hook landing from one repeated B lyric line', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
+    'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(96) },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    toLrc: '[00:18.00]one repeated line\n[01:06.00]one repeated line',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+
+  assert.equal(result.to.structureMap.sections.some((section) => section.type === 'hook-candidate'), true);
+  assert.notEqual(result.diagnostics.entryType, 'hook');
+  assert.equal(result.candidates.some((candidate) => candidate.entry.landingType === 'hook'), false);
+  assert.equal(result.rejected.some((candidate) => candidate.entry.landingType === 'hook'), false);
+});

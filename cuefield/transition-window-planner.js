@@ -22,6 +22,7 @@ function landingKind(entry) {
   if (explicit) return explicit;
   const type = String(entry && entry.type || 'start').toLowerCase();
   if (type === 'pre-hook' || type === 'hook' || type === 'chorus') return 'hook';
+  if (type === 'low-density-start') return 'start';
   if (type === 'intro' || type === 'drop' || type === 'start') return type;
   return entry && entry.source === 'fallback' ? 'start' : type;
 }
@@ -39,10 +40,73 @@ function normalizeEntry(candidate) {
   };
 }
 
+function credibleHookEvidence(candidate) {
+  const evidence = candidate && candidate.evidence || candidate || {};
+  return toNumber(evidence.repeatedLineCount) >= 2
+    && toNumber(evidence.repeatedBlockCount) >= 2
+    && evidence.sustainedEnergy === true;
+}
+
+function landingTime(candidate) {
+  const values = [
+    candidate && candidate.landingAt,
+    candidate && candidate.resolvesTo && candidate.resolvesTo.time,
+    candidate && candidate.time,
+    candidate && candidate.start,
+  ];
+  const value = values.find((item) => Number.isFinite(Number(item)));
+  return value === undefined ? null : Number(value);
+}
+
+function sameLanding(first, second) {
+  const firstTime = landingTime(first);
+  const secondTime = landingTime(second);
+  return firstTime !== null && secondTime !== null && Math.abs(firstTime - secondTime) < 1.5;
+}
+
+function trustedStructureHookEntries(structure) {
+  if (!structure || structure.structureSource !== 'lyric+beat') return [];
+  const sections = (structure.sections || []).filter((section) => (
+    section
+    && ['hook', 'chorus'].includes(String(section.type || '').toLowerCase())
+    && toNumber(section.confidence) >= 0.65
+    && credibleHookEvidence(section)
+  ));
+  const entries = (structure.entryCandidates || []).filter((candidate) => candidate && candidate.role === 'entry');
+  const directHooks = entries.filter((candidate) => (
+    ['hook', 'chorus'].includes(String(candidate.type || '').toLowerCase())
+    && landingKind(candidate) === 'hook'
+    && toNumber(candidate.confidence) >= 0.65
+    && credibleHookEvidence(candidate)
+    && sections.some((section) => sameLanding(candidate, section))
+  ));
+  const preHooks = entries.filter((candidate) => (
+    String(candidate.type || '').toLowerCase() === 'pre-hook'
+    && landingKind(candidate) === 'hook'
+    && toNumber(candidate.confidence) >= 0.65
+    && candidate.resolvesTo
+    && ['hook', 'chorus'].includes(String(candidate.resolvesTo.type || '').toLowerCase())
+    && directHooks.some((hook) => sameLanding(candidate.resolvesTo, hook) && sameLanding(candidate, hook))
+  ));
+  return [...directHooks, ...preHooks];
+}
+
+function naturalLanding(candidate) {
+  if (!candidate || candidate.role !== 'entry' || String(candidate.source || '').toLowerCase() === 'lyric') return false;
+  const type = String(candidate.type || '').toLowerCase();
+  if (['hook', 'chorus', 'pre-hook', 'pre-section'].includes(type)) return false;
+  return ['start', 'intro', 'drop'].includes(landingKind(candidate));
+}
+
 function sourceLandings(analysis) {
   const structure = analysis && analysis.structureMap || {};
-  return [...(structure.entryCandidates || []), ...(analysis && analysis.candidates || [])]
-    .filter((candidate) => candidate && candidate.role === 'entry');
+  const structureEntries = (structure.entryCandidates || []).filter((candidate) => naturalLanding(candidate));
+  const supplementalEntries = (analysis && analysis.candidates || []).filter((candidate) => naturalLanding(candidate));
+  return [
+    ...structureEntries,
+    ...trustedStructureHookEntries(structure),
+    ...supplementalEntries,
+  ];
 }
 
 function landingOptions(analysis) {
