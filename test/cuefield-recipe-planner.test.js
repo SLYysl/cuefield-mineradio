@@ -69,7 +69,45 @@ test('measures silent B pre-roll separately from an audible dual-deck overlap', 
   assert.equal(window.audibleOverlap >= 1.5 && window.audibleOverlap <= 2.1, true);
   assert.equal(window.audibleStart > -5, true);
   assert.equal(window.audibleEnd > window.audibleStart, true);
-  assert.equal(Number.isFinite(window.handoffOffset), true);
+  assert.equal(window.handoffOffset, 0.6);
+});
+
+test('measures linear and equal-power threshold crossings within 0.02 seconds', () => {
+  const linear = measureTimelineWindow([
+    { t: -2, deck: 'B', op: 'play', at: 0, volume: 0 },
+    { t: -2, deck: 'B', op: 'volume', value: 1, duration: 4000 },
+    { t: -2, deck: 'A', op: 'volume', value: 0, duration: 4000 },
+    { t: 2, deck: 'B', op: 'handoff' },
+  ], 0.25);
+  const equalPower = measureTimelineWindow([
+    { t: -2, deck: 'B', op: 'play', at: 0, volume: 0 },
+    { t: -2, deck: 'B', op: 'volume', value: 1, duration: 4000, curve: 'equal-power-in' },
+    { t: -2, deck: 'A', op: 'volume', value: 0, duration: 4000, curve: 'equal-power-out' },
+    { t: 2, deck: 'B', op: 'handoff' },
+  ]);
+
+  assert.equal(Math.abs(linear.audibleStart - -1) <= 0.02, true);
+  assert.equal(Math.abs(linear.audibleEnd - 1) <= 0.02, true);
+  assert.equal(Math.abs(linear.audibleOverlap - 2) <= 0.02, true);
+  assert.equal(Math.abs(equalPower.audibleStart - -1.796) <= 0.02, true);
+  assert.equal(Math.abs(equalPower.audibleEnd - 1.796) <= 0.02, true);
+  assert.equal(Math.abs(equalPower.audibleOverlap - 3.592) <= 0.02, true);
+});
+
+test('reports the longest separated dual-audible interval without merging gaps', () => {
+  const window = measureTimelineWindow([
+    { t: -4, deck: 'B', op: 'play', at: 0, volume: 0 },
+    { t: -4, deck: 'B', op: 'volume', value: 1, duration: 1000 },
+    { t: -3, deck: 'B', op: 'volume', value: 0, duration: 0 },
+    { t: -2, deck: 'B', op: 'volume', value: 1, duration: 1000 },
+    { t: -1, deck: 'B', op: 'volume', value: 0, duration: 0 },
+    { t: 0, deck: 'B', op: 'handoff' },
+  ], 0.5);
+
+  assert.equal(Math.abs(window.audibleStart - -3.5) <= 0.01, true);
+  assert.equal(Math.abs(window.audibleEnd - -3) <= 0.01, true);
+  assert.equal(Math.abs(window.audibleOverlap - 0.5) <= 0.01, true);
+  assert.equal(window.preRollDuration, 0.5);
 });
 
 test('aligns safety B playback so the handoff lands at the requested B position', () => {
@@ -82,6 +120,22 @@ test('aligns safety B playback so the handoff lands at the requested B position'
   const handoff = execution.timeline.find((action) => action.op === 'handoff');
 
   assert.equal(Math.abs(play.at + (handoff.t - play.t) - 32) <= 0.01, true);
+  assert.equal(execution.runwayAvailable, true);
+  assert.equal(execution.landingError, 0);
+  assert.equal(measureTimelineWindow(execution.timeline).handoffOffset, handoff.t);
+});
+
+test('marks insufficient B runway explicitly and never emits a negative media position', () => {
+  const execution = buildSafetyTimelineForAnchors({
+    bLandingAt: 2,
+    overlapClass: 'short',
+    overlapDuration: 3.4,
+  });
+  const playActions = execution.timeline.filter((action) => action.deck === 'B' && action.op === 'play');
+
+  assert.equal(playActions.every((action) => action.at >= 0), true);
+  assert.equal(execution.runwayAvailable, false);
+  assert.equal(Math.abs(execution.landingError) > 0.01, true);
 });
 
 test('short safety keeps B bass reduced until the final handoff window', () => {
@@ -95,6 +149,7 @@ test('short safety keeps B bass reduced until the final handoff window', () => {
   const window = measureTimelineWindow(execution.timeline);
 
   assert.equal(window.audibleOverlap >= 3, true);
+  assert.equal(window.handoffOffset, 0.6);
   assert.equal(bFullBass.t >= 0, true);
   assert.equal(aFullBass, undefined);
 });
@@ -160,6 +215,10 @@ test('uses safety long blend for weak or rejected section choices', () => {
   assert.equal(plan.chosen.recipe, 'safety-long-blend');
   assert.equal(plan.chosen.anchors.overlapClass, 'short');
   assert.equal(plan.chosen.window.audibleOverlap >= 3, true);
+  assert.equal(plan.chosen.anchors.runwayAvailable, true);
+  assert.equal(plan.chosen.anchors.landingError, 0);
+  assert.equal(plan.chosen.window.runwayAvailable, true);
+  assert.equal(plan.chosen.window.landingError, 0);
   assert.equal(plan.chosen.timeline[0].op, 'play');
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'filter' && action.t < -2), false);
   assert.equal(plan.chosen.timeline.some((action) => action.deck === 'B' && action.op === 'bass' && action.value < 0.2), true);
@@ -216,6 +275,7 @@ test('uses medium overlap for a trusted entry with moderate tempo difference', (
   assert.equal(plan.chosen.anchors.overlapDuration >= 4, true);
   assert.equal(plan.chosen.anchors.overlapDuration <= 6, true);
   assert.equal(plan.chosen.window.audibleOverlap >= 4 && plan.chosen.window.audibleOverlap <= 6, true);
+  assert.equal(plan.chosen.window.handoffOffset, 0.6);
 });
 
 test('uses long overlap only for a trusted entry with compatible tempo', () => {
@@ -238,6 +298,7 @@ test('uses long overlap only for a trusted entry with compatible tempo', () => {
   assert.equal(plan.chosen.anchors.overlapDuration >= 8, true);
   assert.equal(plan.chosen.anchors.overlapDuration <= 12, true);
   assert.equal(plan.chosen.window.audibleOverlap >= 6 && plan.chosen.window.audibleOverlap <= 10, true);
+  assert.equal(plan.chosen.window.handoffOffset, 1);
   assert.equal(plan.chosen.timeline.filter((action) => action.deck === 'B' && action.op === 'volume' && !action.curve).every((action) => action.value === 0), true);
 });
 

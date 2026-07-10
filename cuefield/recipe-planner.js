@@ -41,28 +41,38 @@ function measureTimelineWindow(timeline, threshold = 0.08) {
   const handoff = handoffs[handoffs.length - 1];
   const playAt = play ? toNumber(play.t, 0) : 0;
   const handoffAt = handoff ? toNumber(handoff.t, playAt) : playAt;
-  const boundaries = new Set([playAt, handoffAt]);
+  const starts = [playAt, handoffAt];
+  const ends = [playAt, handoffAt];
   actions.forEach((action) => {
     const start = toNumber(action && action.t, NaN);
     if (!Number.isFinite(start)) return;
-    boundaries.add(start);
+    starts.push(start);
     const duration = Math.max(0, toNumber(action.duration) / 1000);
-    if (duration > 0) boundaries.add(start + duration);
+    if (duration > 0) ends.push(start + duration);
   });
-  const points = Array.from(boundaries).filter(Number.isFinite).sort((a, b) => a - b);
-  let audibleStart = null;
-  let audibleEnd = null;
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const start = points[index];
-    const end = points[index + 1];
+  const startTime = Math.min(...starts.filter(Number.isFinite));
+  const endTime = Math.max(...ends.filter(Number.isFinite));
+  const sampleStep = 0.005;
+  const intervals = [];
+  let activeStart = null;
+  for (let time = startTime; time < endTime; time += sampleStep) {
+    const start = round(time, 3);
+    const end = Math.min(endTime, start + sampleStep);
     const midpoint = start + (end - start) / 2;
     const audible = volumeAt(actions, 'A', midpoint) >= threshold
       && volumeAt(actions, 'B', midpoint) >= threshold;
-    if (!audible) continue;
-    if (audibleStart === null) audibleStart = start;
-    audibleEnd = end;
+    if (audible && activeStart === null) activeStart = start;
+    if (!audible && activeStart !== null) {
+      intervals.push({ start: activeStart, end: start });
+      activeStart = null;
+    }
   }
-  const hasAudibleWindow = audibleStart !== null && audibleEnd !== null;
+  if (activeStart !== null) intervals.push({ start: activeStart, end: endTime });
+  const longest = intervals
+    .sort((a, b) => (b.end - b.start) - (a.end - a.start) || a.start - b.start)[0];
+  const hasAudibleWindow = !!longest;
+  const audibleStart = hasAudibleWindow ? longest.start : handoffAt;
+  const audibleEnd = hasAudibleWindow ? longest.end : audibleStart;
   const start = hasAudibleWindow ? audibleStart : handoffAt;
   const end = hasAudibleWindow ? audibleEnd : start;
   return {
@@ -70,7 +80,7 @@ function measureTimelineWindow(timeline, threshold = 0.08) {
     audibleOverlap: round(Math.max(0, end - start)),
     audibleStart: round(start),
     audibleEnd: round(end),
-    handoffOffset: round(handoffAt - end),
+    handoffOffset: handoff ? handoff.t : 0,
   };
 }
 
@@ -188,7 +198,7 @@ function commonScores(fromProfile, toProfile, anchors) {
   };
 }
 
-function baseCandidate(recipe, score, confidence, reason, risks, anchors, timeline) {
+function baseCandidate(recipe, score, confidence, reason, risks, anchors, timeline, windowMetadata = {}) {
   return {
     recipe,
     score: round(score),
@@ -197,7 +207,7 @@ function baseCandidate(recipe, score, confidence, reason, risks, anchors, timeli
     risks,
     anchors,
     timeline,
-    window: measureTimelineWindow(timeline),
+    window: { ...measureTimelineWindow(timeline), ...windowMetadata },
   };
 }
 
@@ -340,11 +350,17 @@ function buildSafetyTimelineForAnchors({ bLandingAt, overlapClass, overlapDurati
   const duration = toNumber(overlapDuration, overlapClass === 'long' ? 10.5 : (overlapClass === 'medium' ? 5.6 : 3.4));
   const handoffAt = overlapClass === 'long' ? 1 : 0.6;
   const playAt = round(handoffAt - duration);
-  const bStart = round(toNumber(bLandingAt) - duration);
+  const requestedLanding = toNumber(bLandingAt);
+  const bStart = Math.max(0, round(requestedLanding - duration));
+  const actualLanding = round(bStart + (handoffAt - playAt));
+  const landingError = round(actualLanding - requestedLanding);
+  const runwayAvailable = Math.abs(landingError) <= 0.01;
   if (overlapClass === 'short') {
     return {
       lead: round(-playAt),
       bStart,
+      runwayAvailable,
+      landingError,
       timeline: [
         { t: playAt, deck: 'B', op: 'play', at: bStart, volume: 0 },
         { t: playAt, deck: 'B', op: 'bass', value: 0.15, duration: 0 },
@@ -361,6 +377,8 @@ function buildSafetyTimelineForAnchors({ bLandingAt, overlapClass, overlapDurati
     return {
       lead: round(-playAt),
       bStart,
+      runwayAvailable,
+      landingError,
       timeline: [
         { t: playAt, deck: 'B', op: 'play', at: bStart, volume: 0 },
         { t: playAt, deck: 'B', op: 'bass', value: 0.12, duration: 0 },
@@ -377,6 +395,8 @@ function buildSafetyTimelineForAnchors({ bLandingAt, overlapClass, overlapDurati
   return {
     lead: round(-playAt),
     bStart,
+    runwayAvailable,
+    landingError,
     timeline: [
       { t: playAt, deck: 'B', op: 'play', at: bStart, volume: 0 },
       { t: playAt, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
@@ -423,8 +443,17 @@ function makeSafetyLongBlend(anchors, scores, sectionChoice = {}, fromProfile = 
       'low end is delayed to avoid bass collision',
     ],
     risks,
-    { ...anchors, ...assessment, bStart, lead, safetyFallback: true },
+    {
+      ...anchors,
+      ...assessment,
+      bStart,
+      lead,
+      runwayAvailable: execution.runwayAvailable,
+      landingError: execution.landingError,
+      safetyFallback: true,
+    },
     execution.timeline,
+    { runwayAvailable: execution.runwayAvailable, landingError: execution.landingError },
   );
 }
 
@@ -491,6 +520,8 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
       beatGridTrusted: safety.anchors.beatGridTrusted,
       overlapClass: chosenOverlap.overlapClass,
       overlapDuration: chosenOverlap.overlapDuration,
+      runwayAvailable: chosen.window.runwayAvailable,
+      landingError: chosen.window.landingError,
     },
   };
 }
