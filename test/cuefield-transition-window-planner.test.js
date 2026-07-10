@@ -128,12 +128,26 @@ test('uses audible overlap rather than silent B preroll as mixStart', () => {
 });
 
 test('returns an honest start fallback when no anchored window is valid', () => {
-  const from = profile({ exits: [exit(80)] });
+  const from = profile({
+    protectedUntil: 60,
+    exits: [
+      exit(80, 0.95, { exitRatio: 0.63, latePenalty: 0 }),
+      exit(64, 0.45, { exitRatio: 0.5, latePenalty: 0 }),
+    ],
+  });
   const to = profile({ entries: [entry('hook', 1, { playFrom: 1, landingAt: 1, landingType: 'hook' })] });
 
   const result = chooseTransitionWindow(from, to);
 
   assert.equal(result.chosen.entry.landingType, 'start');
+  assert.equal(result.chosen.entry.type, 'start');
+  assert.equal(result.chosen.entry.source, 'fallback');
+  assert.equal('landingAt' in result.chosen.entry, false);
+  assert.equal(result.chosen.exit.time, 64);
+  assert.equal(result.chosen.mixStart >= 60, true);
+  assert.equal(result.chosen.handoffAt, result.chosen.mixStart + 3.4);
+  assert.equal(result.chosen.audibleOverlap >= 3, true);
+  assert.equal(result.chosen.recipeCandidate.window.landingError, null);
   assert.equal(result.chosen.rejectionReasons.includes('no valid complete transition window'), true);
 });
 
@@ -158,4 +172,48 @@ test('latePenalty changes selection between otherwise similar windows', () => {
   const result = chooseTransitionWindow(from, to);
 
   assert.equal(result.chosen.exit.time, 88);
+});
+
+test('uses cueProfile runtime data while retaining wrapper structure metadata', () => {
+  const fromProfile = profile({ duration: 128, bpm: 120 });
+  const toProfile = profile({ duration: 128, bpm: 120 });
+  const from = {
+    duration: 128,
+    candidates: [],
+    structureMap: { protectedUntil: 0, exitCandidates: [exit(80)] },
+    cueProfile: fromProfile,
+  };
+  const to = {
+    duration: 128,
+    candidates: [],
+    structureMap: { entryCandidates: [entry('intro', 16, { playFrom: 0, landingAt: 16, landingType: 'intro' })] },
+    cueProfile: toProfile,
+  };
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.chosen.entry.landingType, 'intro');
+  assert.notEqual(result.chosen.recipeCandidate.recipe, 'honest-start-fallback');
+  assert.equal(result.chosen.tempoCompatibility > 0.9, true);
+  assert.equal(result.chosen.grooveContinuity > 0.35, true);
+});
+
+test('keeps an early usable exit when late outro candidates exceed the top-eight cap', () => {
+  const lateOutros = Array.from({ length: 9 }, (_, index) => exit(116 + index, 0.99, {
+    type: 'outro',
+    energyBefore: 0.5,
+    energyAfter: 0.5,
+    exitRatio: 0.9 + index * 0.005,
+    latePenalty: 0.55,
+  }));
+  const from = profile({
+    duration: 140,
+    exits: [exit(72, 0.7, { exitRatio: 0.51, latePenalty: 0 }), ...lateOutros],
+  });
+  const to = profile({ entries: [entry('intro', 16)] });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.diagnostics.exitCount, 8);
+  assert.equal(result.chosen.exit.time, 72);
 });
