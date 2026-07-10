@@ -55,7 +55,7 @@ function compactWindow(window = {}) {
     energyContinuity: roundNumber(window.energyContinuity),
     grooveContinuity: roundNumber(window.grooveContinuity),
     tempoCompatibility: roundNumber(window.tempoCompatibility),
-    rejectionReasons: compactRejectionReasons(window.rejectionReasons),
+    rejectionReasons: compactRejectionReasons(window.rejectionReasons != null ? window.rejectionReasons : window.windowRejectionReasons),
   };
 }
 

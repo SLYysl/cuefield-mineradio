@@ -59,7 +59,7 @@ test('builds a compact remote feedback payload without audio URLs', () => {
       energyContinuity: 0.7654,
       grooveContinuity: 0.6543,
       tempoCompatibility: 0.5432,
-      rejectionReasons: ['late', 'late'],
+      windowRejectionReasons: ['late', 'late'],
     },
   }, { source: 'tester-a' });
 
@@ -112,7 +112,7 @@ test('remote transition window uses the same sanitized semantics as local feedba
       firstHookStart: Infinity,
       hookEvidence: { repeatedLineCount: NaN, sustainedEnergy: 0.12345 },
       mixStart: 10.98765,
-      rejectionReasons: ['x'.repeat(120), 'x'.repeat(120)],
+      windowRejectionReasons: ['x'.repeat(120), 'x'.repeat(120)],
     },
   });
   assert.deepEqual(payload.record.transition.window, {
@@ -132,6 +132,18 @@ test('remote transition window uses the same sanitized semantics as local feedba
     rejectionReasons: ['x'.repeat(96)],
   });
   assert.equal(JSON.stringify(payload).includes('Infinity'), false);
+});
+
+test('remote preserves rejection reasons from an already-sanitized nested window', () => {
+  const payload = buildRemoteFeedbackPayload({
+    transition: {
+      window: {
+        rejectionReasons: ['nested remote reason', 'nested remote reason'],
+      },
+    },
+  });
+
+  assert.deepEqual(payload.record.transition.window.rejectionReasons, ['nested remote reason']);
 });
 
 test('forwards Cuefield feedback with bearer auth when configured', async () => {

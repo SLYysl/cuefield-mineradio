@@ -74,7 +74,7 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
       energyContinuity: 0.76543,
       grooveContinuity: 0.65432,
       tempoCompatibility: 0.54321,
-      rejectionReasons: ['too late', 'too late', 'x'.repeat(120)],
+      windowRejectionReasons: ['too late', 'too late', 'x'.repeat(120)],
     },
   }, new Date('2026-07-09T02:00:00.000Z'));
 
@@ -158,7 +158,7 @@ test('normalizes malformed transition window values and keeps reasons bounded', 
       energyContinuity: 4.56789,
       grooveContinuity: -Infinity,
       tempoCompatibility: 5.6789,
-      rejectionReasons: ['same', 'same', '', null, ...Array.from({ length: 10 }, (_, i) => 'reason ' + i)],
+      windowRejectionReasons: ['same', 'same', '', null, ...Array.from({ length: 10 }, (_, i) => 'reason ' + i)],
     },
   });
 
@@ -185,6 +185,19 @@ test('normalizes malformed transition window values and keeps reasons bounded', 
   });
   assert.equal(JSON.stringify(record).includes('Infinity'), false);
   assert.equal(JSON.stringify(record).includes('NaN'), false);
+});
+
+test('accepts rejection reasons from an already-sanitized nested transition window', () => {
+  const record = buildCuefieldFeedbackRecord({
+    rating: 1,
+    transition: {
+      window: {
+        rejectionReasons: ['nested reason', 'nested reason'],
+      },
+    },
+  });
+
+  assert.deepEqual(record.transition.window.rejectionReasons, ['nested reason']);
 });
 
 test('rejects ratings outside the 1 to 3 scoring scale', () => {
