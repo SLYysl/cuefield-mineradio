@@ -20,6 +20,20 @@ test('builds a compact remote feedback payload without audio URLs', () => {
     pair: { fromKey: 'song:a', toKey: 'song:b' },
     transition: {
       transitionRecipe: 'safety-long-blend',
+      overlapClass: 'short',
+      overlapDuration: 3.1,
+      entrySource: 'fallback',
+      entryConfidence: 0.52,
+      bpmA: 81.08,
+      bpmB: 127.66,
+      relativeTempoDelta: 0.365,
+      beatGridTrusted: true,
+      runtimeDowngrade: 'volume-only',
+      diagnostics: {
+        outroCompleteness: 0.72,
+        bIntroAggression: 0.53,
+        styleTextureDistance: 0.17,
+      },
       audioUrl: 'https://example.com/song.mp3',
     },
   }, { source: 'tester-a' });
@@ -28,6 +42,15 @@ test('builds a compact remote feedback payload without audio URLs', () => {
   assert.equal(payload.schema, 'cuefield-feedback-v1');
   assert.equal(payload.record.rating, 1);
   assert.equal(payload.record.transition.transitionRecipe, 'safety-long-blend');
+  assert.equal(payload.record.transition.overlapClass, 'short');
+  assert.equal(payload.record.transition.relativeTempoDelta, 0.365);
+  assert.equal(payload.record.transition.beatGridTrusted, true);
+  assert.equal(payload.record.transition.runtimeDowngrade, 'volume-only');
+  assert.deepEqual(payload.record.transition.diagnostics, {
+    outroCompleteness: 0.72,
+    bIntroAggression: 0.53,
+    styleTextureDistance: 0.17,
+  });
   assert.equal(Object.prototype.hasOwnProperty.call(payload.record.transition, 'audioUrl'), false);
 });
 

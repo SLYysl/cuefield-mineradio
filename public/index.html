@@ -10497,6 +10497,7 @@ function cuefieldFeedbackContextFromPending(pending) {
   var toMeta = cuefieldFeedbackSongMeta(toSong);
   var chosen = pending.plan && pending.plan.chosen || {};
   var evaluation = chosen.evaluation || {};
+  var plannerDiagnostics = pending.plan && pending.plan.diagnostics || {};
   return {
     pair: {
       fromKey: pending.fromKey || fromMeta.key,
@@ -10516,6 +10517,20 @@ function cuefieldFeedbackContextFromPending(pending) {
       risks: evaluation.risks || [],
       exitTime: pending.exitTime,
       entryTime: pending.entryTime,
+      overlapClass: plannerDiagnostics.overlapClass || '',
+      overlapDuration: plannerDiagnostics.overlapDuration,
+      entrySource: plannerDiagnostics.entrySource || '',
+      entryConfidence: plannerDiagnostics.entryConfidence,
+      bpmA: plannerDiagnostics.bpmA,
+      bpmB: plannerDiagnostics.bpmB,
+      relativeTempoDelta: plannerDiagnostics.relativeTempoDelta,
+      beatGridTrusted: plannerDiagnostics.beatGridTrusted === true,
+      runtimeDowngrade: pending.runtimeDowngrade || '',
+      diagnostics: {
+        outroCompleteness: plannerDiagnostics.outroCompleteness,
+        bIntroAggression: plannerDiagnostics.bIntroAggression,
+        styleTextureDistance: plannerDiagnostics.styleTextureDistance,
+      },
     },
   };
 }
@@ -11185,7 +11200,6 @@ async function executeCuefieldSoftHandoff(pending) {
   cuefieldAutoMixExecuting = true;
   updateCuefieldAutoMixUi('handoff');
   var chosen = pending.plan && pending.plan.chosen || {};
-  var feedbackContext = cuefieldFeedbackContextFromPending(pending);
   showSourceFallbackNotice('Cuefield AutoMix', (pending.executionMode || 'filtered-pickup') + ' · ' + (chosen.recipe || 'section-jump') + ' · ' + cuefieldTierLabel(chosen.evaluation && chosen.evaluation.tier));
   var nextMedia = await startCuefieldPreparedAudio(pending);
   if (pending.token !== trackSwitchToken || pending.currentIndex !== currentIdx) {
@@ -11201,6 +11215,7 @@ async function executeCuefieldSoftHandoff(pending) {
     return;
   }
   var handoffDelayMs = runCuefieldVolumeCurve(pending, nextMedia);
+  var feedbackContext = cuefieldFeedbackContextFromPending(pending);
   setTimeout(function(){
     if (pending.token !== trackSwitchToken || pending.currentIndex !== currentIdx) {
       cuefieldAutoMixExecuting = false;

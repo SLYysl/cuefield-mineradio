@@ -40,6 +40,14 @@ function compactPair(pair = {}) {
   };
 }
 
+function compactDiagnostics(diagnostics = {}) {
+  return {
+    outroCompleteness: roundNumber(diagnostics.outroCompleteness),
+    bIntroAggression: roundNumber(diagnostics.bIntroAggression),
+    styleTextureDistance: roundNumber(diagnostics.styleTextureDistance),
+  };
+}
+
 function compactTransition(transition = {}) {
   return {
     recipe: compactString(transition.recipe, 80),
@@ -50,6 +58,16 @@ function compactTransition(transition = {}) {
     evalScore: roundNumber(transition.evalScore),
     exitTime: roundNumber(transition.exitTime),
     entryTime: roundNumber(transition.entryTime),
+    overlapClass: compactString(transition.overlapClass, 24),
+    overlapDuration: roundNumber(transition.overlapDuration),
+    entrySource: compactString(transition.entrySource, 24),
+    entryConfidence: roundNumber(transition.entryConfidence),
+    bpmA: roundNumber(transition.bpmA),
+    bpmB: roundNumber(transition.bpmB),
+    relativeTempoDelta: roundNumber(transition.relativeTempoDelta),
+    beatGridTrusted: transition.beatGridTrusted === true,
+    runtimeDowngrade: compactString(transition.runtimeDowngrade, 40),
+    diagnostics: compactDiagnostics(transition.diagnostics),
     risks: compactList(transition.risks),
   };
 }
@@ -105,6 +123,7 @@ function appendCuefieldFeedback(filePath, input = {}, now = new Date()) {
 function readCuefieldFeedbackStats(filePath) {
   const byRecipe = new Map();
   const byTier = new Map();
+  const byOverlapClass = new Map();
   const byRisk = new Map();
   const byPair = new Map();
   const ratingCounts = { 1: 0, 2: 0, 3: 0 };
@@ -124,6 +143,7 @@ function readCuefieldFeedbackStats(filePath) {
     ratingCounts[rating] += 1;
     addToBucket(byRecipe, recipe, rating);
     addToBucket(byTier, tier, rating);
+    addToBucket(byOverlapClass, transition.overlapClass || 'unknown', rating);
     addToBucket(byPair, pairKey, rating);
     (Array.isArray(transition.risks) && transition.risks.length ? transition.risks : ['none'])
       .forEach((risk) => addToBucket(byRisk, risk, rating));
@@ -146,6 +166,7 @@ function readCuefieldFeedbackStats(filePath) {
     passRate: roundNumber(total ? ratingCounts[1] / total : 0),
     byRecipe: finalizeBuckets(byRecipe),
     byTier: finalizeBuckets(byTier),
+    byOverlapClass: finalizeBuckets(byOverlapClass),
     byRisk: finalizeBuckets(byRisk),
     byPair: finalizeBuckets(byPair).slice(0, 20),
     failedSamples: failedSamples

@@ -24,3 +24,18 @@ test('Cuefield AutoMix treats the active in-memory beatmap as ready before disk 
   assert.match(html, /beatMapCache\[key\] = currentBeatMap;\s*writeBeatDiskCache\(key, currentBeatMap, song, 'mr'\)\.catch/);
   assert.match(html, /return true;\s*\}\s*var diskMap = await readBeatDiskCache\(key\);/);
 });
+
+test('Cuefield feedback captures adaptive planner and runtime diagnostics', () => {
+  const html = readIndexHtml();
+  const contextStart = html.indexOf('function cuefieldFeedbackContextFromPending');
+  const contextEnd = html.indexOf('function hideCuefieldFeedbackPrompt', contextStart);
+  const contextBlock = html.slice(contextStart, contextEnd);
+  const executeStart = html.indexOf('async function executeCuefieldSoftHandoff');
+  const executeEnd = html.indexOf('function scheduleQueueBeatPrefetch', executeStart);
+  const executeBlock = html.slice(executeStart, executeEnd);
+
+  assert.match(contextBlock, /plannerDiagnostics\.overlapClass/);
+  assert.match(contextBlock, /plannerDiagnostics\.relativeTempoDelta/);
+  assert.match(contextBlock, /pending\.runtimeDowngrade/);
+  assert.equal(executeBlock.indexOf('runCuefieldVolumeCurve') < executeBlock.indexOf('cuefieldFeedbackContextFromPending'), true);
+});

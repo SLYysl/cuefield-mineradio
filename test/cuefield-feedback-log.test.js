@@ -32,6 +32,20 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
       exitTime: 120.456,
       entryTime: 0,
       executionMode: 'safety-long-blend',
+      overlapClass: 'short',
+      overlapDuration: 3.1234,
+      entrySource: 'fallback',
+      entryConfidence: 0.5234,
+      bpmA: 81.081,
+      bpmB: 127.659,
+      relativeTempoDelta: 0.36491,
+      beatGridTrusted: true,
+      runtimeDowngrade: 'volume-only',
+      diagnostics: {
+        outroCompleteness: 0.7234,
+        bIntroAggression: 0.5294,
+        styleTextureDistance: 0.1654,
+      },
       audioUrl: 'https://example.com/audio.mp3',
     },
   }, new Date('2026-07-09T02:00:00.000Z'));
@@ -43,6 +57,20 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
   assert.equal(record.transition.score, 0.812);
   assert.equal(record.transition.evalScore, 0.493);
   assert.equal(record.transition.exitTime, 120.456);
+  assert.equal(record.transition.overlapClass, 'short');
+  assert.equal(record.transition.overlapDuration, 3.123);
+  assert.equal(record.transition.entrySource, 'fallback');
+  assert.equal(record.transition.entryConfidence, 0.523);
+  assert.equal(record.transition.bpmA, 81.081);
+  assert.equal(record.transition.bpmB, 127.659);
+  assert.equal(record.transition.relativeTempoDelta, 0.365);
+  assert.equal(record.transition.beatGridTrusted, true);
+  assert.equal(record.transition.runtimeDowngrade, 'volume-only');
+  assert.deepEqual(record.transition.diagnostics, {
+    outroCompleteness: 0.723,
+    bIntroAggression: 0.529,
+    styleTextureDistance: 0.165,
+  });
   assert.deepEqual(record.transition.risks, ['directionality mismatch']);
   assert.equal(Object.prototype.hasOwnProperty.call(record.transition, 'audioUrl'), false);
 });
@@ -68,6 +96,18 @@ test('appends one feedback record per JSONL line', () => {
   assert.equal(record.rating, 3);
 });
 
+test('keeps older feedback records readable without adaptive diagnostics', () => {
+  const record = buildCuefieldFeedbackRecord({
+    rating: 1,
+    transition: { transitionRecipe: 'safety-long-blend' },
+  });
+
+  assert.equal(record.transition.transitionRecipe, 'safety-long-blend');
+  assert.equal(record.transition.overlapClass, '');
+  assert.equal(record.transition.overlapDuration, null);
+  assert.equal(record.transition.beatGridTrusted, false);
+});
+
 test('summarizes Cuefield feedback by recipe, tier, risk, and failed samples', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuefield-feedback-'));
   const file = path.join(dir, 'feedback.jsonl');
@@ -75,18 +115,18 @@ test('summarizes Cuefield feedback by recipe, tier, risk, and failed samples', (
     {
       rating: 1,
       pair: { fromKey: 'a', toKey: 'b', fromTitle: 'A', toTitle: 'B' },
-      transition: { transitionRecipe: 'safety-long-blend', tier: 'reject', risks: ['directionality mismatch'] },
+      transition: { transitionRecipe: 'safety-long-blend', tier: 'reject', overlapClass: 'long', risks: ['directionality mismatch'] },
     },
     {
       rating: 2,
       note: 'B too loud',
       pair: { fromKey: 'c', toKey: 'd', fromTitle: 'C', toTitle: 'D' },
-      transition: { transitionRecipe: 'safety-long-blend', tier: 'reject', risks: ['style bridge mismatch'] },
+      transition: { transitionRecipe: 'safety-long-blend', tier: 'reject', overlapClass: 'short', risks: ['style bridge mismatch'] },
     },
     {
       rating: 3,
       pair: { fromKey: 'e', toKey: 'f', fromTitle: 'E', toTitle: 'F' },
-      transition: { transitionRecipe: 'filtered-pickup', tier: 'weak', risks: ['noticeable energy change'] },
+      transition: { transitionRecipe: 'filtered-pickup', tier: 'weak', overlapClass: 'short', risks: ['noticeable energy change'] },
     },
   ];
   rows.forEach((row, index) => appendCuefieldFeedback(file, row, new Date(Date.UTC(2026, 6, 9, 3, index))));
@@ -105,6 +145,8 @@ test('summarizes Cuefield feedback by recipe, tier, risk, and failed samples', (
     passRate: 0.5,
   });
   assert.equal(stats.byTier.find((item) => item.key === 'reject').passRate, 0.5);
+  assert.equal(stats.byOverlapClass.find((item) => item.key === 'short').failed, 1);
+  assert.equal(stats.byOverlapClass.find((item) => item.key === 'long').passed, 1);
   assert.equal(stats.byRisk.find((item) => item.key === 'style bridge mismatch').failed, 1);
   assert.equal(stats.failedSamples.length, 2);
   assert.equal(stats.failedSamples[0].rating, 2);
