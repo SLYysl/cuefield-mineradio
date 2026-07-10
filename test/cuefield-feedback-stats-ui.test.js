@@ -51,6 +51,11 @@ test('Cuefield feedback captures adaptive planner and runtime diagnostics', () =
 
   assert.match(contextBlock, /plannerDiagnostics\.overlapClass/);
   assert.match(contextBlock, /plannerDiagnostics\.relativeTempoDelta/);
+  assert.match(contextBlock, /plannerDiagnostics\.structureSource/);
+  assert.match(contextBlock, /plannerDiagnostics\.protectedUntil/);
+  assert.match(contextBlock, /plannerDiagnostics\.exitType/);
+  assert.match(contextBlock, /plannerDiagnostics\.entryType/);
+  assert.match(contextBlock, /plannerDiagnostics\.exitCandidateCount/);
   assert.match(contextBlock, /pending\.runtimeDowngrade/);
   assert.equal(executeBlock.indexOf('runCuefieldVolumeCurve') < executeBlock.indexOf('cuefieldFeedbackContextFromPending'), true);
 });

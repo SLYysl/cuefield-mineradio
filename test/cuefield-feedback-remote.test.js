@@ -29,6 +29,17 @@ test('builds a compact remote feedback payload without audio URLs', () => {
       relativeTempoDelta: 0.365,
       beatGridTrusted: true,
       runtimeDowngrade: 'volume-only',
+      structure: {
+        source: 'lyric+beat',
+        confidence: 0.78,
+        protectedUntil: 64,
+        exitType: 'release',
+        exitConfidence: 0.81,
+        entryType: 'hook',
+        entryConfidence: 0.84,
+        exitCandidateCount: 4,
+        entryCandidateCount: 3,
+      },
       diagnostics: {
         outroCompleteness: 0.72,
         bIntroAggression: 0.53,
@@ -50,6 +61,17 @@ test('builds a compact remote feedback payload without audio URLs', () => {
     outroCompleteness: 0.72,
     bIntroAggression: 0.53,
     styleTextureDistance: 0.17,
+  });
+  assert.deepEqual(payload.record.transition.structure, {
+    source: 'lyric+beat',
+    confidence: 0.78,
+    protectedUntil: 64,
+    exitType: 'release',
+    exitConfidence: 0.81,
+    entryType: 'hook',
+    entryConfidence: 0.84,
+    exitCandidateCount: 4,
+    entryCandidateCount: 3,
   });
   assert.equal(Object.prototype.hasOwnProperty.call(payload.record.transition, 'audioUrl'), false);
 });

@@ -41,6 +41,15 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
       relativeTempoDelta: 0.36491,
       beatGridTrusted: true,
       runtimeDowngrade: 'volume-only',
+      structureSource: 'lyric+beat',
+      structureConfidence: 0.7842,
+      protectedUntil: 64,
+      exitType: 'release',
+      exitConfidence: 0.8123,
+      entryType: 'hook',
+      exitCandidateCount: 4,
+      entryCandidateCount: 3,
+      rawLrc: '[00:01.00]must not persist',
       diagnostics: {
         outroCompleteness: 0.7234,
         bIntroAggression: 0.5294,
@@ -71,8 +80,20 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
     bIntroAggression: 0.529,
     styleTextureDistance: 0.165,
   });
+  assert.deepEqual(record.transition.structure, {
+    source: 'lyric+beat',
+    confidence: 0.784,
+    protectedUntil: 64,
+    exitType: 'release',
+    exitConfidence: 0.812,
+    entryType: 'hook',
+    entryConfidence: 0.523,
+    exitCandidateCount: 4,
+    entryCandidateCount: 3,
+  });
   assert.deepEqual(record.transition.risks, ['directionality mismatch']);
   assert.equal(Object.prototype.hasOwnProperty.call(record.transition, 'audioUrl'), false);
+  assert.equal(JSON.stringify(record).includes('must not persist'), false);
 });
 
 test('rejects ratings outside the 1 to 3 scoring scale', () => {

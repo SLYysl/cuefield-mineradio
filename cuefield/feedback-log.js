@@ -48,6 +48,20 @@ function compactDiagnostics(diagnostics = {}) {
   };
 }
 
+function compactStructure(transition = {}) {
+  return {
+    source: compactString(transition.structureSource, 24),
+    confidence: roundNumber(transition.structureConfidence),
+    protectedUntil: roundNumber(transition.protectedUntil),
+    exitType: compactString(transition.exitType, 32),
+    exitConfidence: roundNumber(transition.exitConfidence),
+    entryType: compactString(transition.entryType, 32),
+    entryConfidence: roundNumber(transition.entryConfidence),
+    exitCandidateCount: Math.max(0, Math.min(12, Number(transition.exitCandidateCount) || 0)),
+    entryCandidateCount: Math.max(0, Math.min(12, Number(transition.entryCandidateCount) || 0)),
+  };
+}
+
 function compactTransition(transition = {}) {
   return {
     recipe: compactString(transition.recipe, 80),
@@ -68,6 +82,7 @@ function compactTransition(transition = {}) {
     beatGridTrusted: transition.beatGridTrusted === true,
     runtimeDowngrade: compactString(transition.runtimeDowngrade, 40),
     diagnostics: compactDiagnostics(transition.diagnostics),
+    structure: compactStructure(transition),
     risks: compactList(transition.risks),
   };
 }
