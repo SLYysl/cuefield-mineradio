@@ -74,17 +74,30 @@ test('Cuefield feedback captures adaptive planner and runtime diagnostics', () =
   assert.equal(executeBlock.indexOf('runCuefieldVolumeCurve') < executeBlock.indexOf('cuefieldFeedbackContextFromPending'), true);
 });
 
-test('Cuefield uses musical rescue copy without changing technical statuses', () => {
+test('Cuefield separates terminal fallback from musical rescue status', () => {
   const html = readIndexHtml();
   const statusStart = html.indexOf('function cuefieldAutoMixStatusText');
   const statusEnd = html.indexOf('function logCuefieldAutoMix', statusStart);
   const statusBlock = html.slice(statusStart, statusEnd);
 
-  assert.match(statusBlock, /'fallback': '正在准备末尾保底过渡'/);
+  assert.match(statusBlock, /'terminal-rescue': '正在准备末尾保底过渡'/);
+  assert.match(statusBlock, /'fallback': '未找到可执行过渡'/);
   assert.doesNotMatch(statusBlock, /这两首暂不适合自动切/);
   assert.match(statusBlock, /'waiting-beatmap': '等待节拍分析完成'/);
   assert.match(statusBlock, /'missing-audio': '下一首音频暂时不可用'/);
   assert.match(statusBlock, /'error': '准备失败'/);
+
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(statusBlock, context);
+  assert.equal(context.cuefieldAutoMixStatusText('terminal-rescue'), '正在准备末尾保底过渡');
+  assert.equal(context.cuefieldAutoMixStatusText('fallback'), '未找到可执行过渡');
+
+  const prepareStart = html.indexOf('async function runCuefieldAutoMixPrepare');
+  const prepareEnd = html.indexOf('function stopCuefieldPreparedAudio', prepareStart);
+  const prepareBlock = html.slice(prepareStart, prepareEnd);
+  assert.match(prepareBlock, /pending\.executionMode === 'terminal-rescue'/);
+  assert.match(prepareBlock, /updateCuefieldAutoMixUi\(uiStatus\)/);
 });
 
 test('Cuefield runtime records the executed window after a volume-only downgrade', () => {

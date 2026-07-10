@@ -65,7 +65,6 @@ test('plans a Cuefield transition directly from Mineradio beatmap cache keys', (
   assert.equal(result.to.track.title, 'TAKE ME');
   assert.equal(result.chosen.exit.role, 'exit');
   assert.equal(result.chosen.entry.role, 'entry');
-  assert.equal(result.to.structureMap.entryCandidates.some((candidate) => candidate.source === 'fallback' && candidate.time === 0), true);
   assert.equal(result.chosen.entry.source, 'fallback');
   assert.equal(result.chosen.entry.time, 0);
   assert.equal(typeof result.chosen.recipe, 'string');
@@ -137,11 +136,12 @@ test('exposes the validated transition window and sanitized diagnostics', () => 
   assert.equal(diagnostics.firstHookStart, 16);
   assert.equal(diagnostics.firstHookEnd, 40);
   assert.equal(diagnostics.hookConfidence, 0.88);
-  assert.deepEqual(diagnostics.hookEvidence, result.from.structureMap.sections.find((section) => section.type === 'hook').evidence);
+  assert.equal(diagnostics.hookEvidence.repeatedLineCount, 2);
+  assert.equal(diagnostics.hookEvidence.repeatedBlockCount, 2);
   assert.equal(JSON.stringify({ diagnostics, candidates: result.candidates, rejected: result.rejected }).includes('we own the night'), false);
 });
 
-test('propagates compact route policy without profiles or raw lyrics', () => {
+test('returns only compact summaries without profiles or raw lyrics', () => {
   const cache = {
     'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
     'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(96) },
@@ -149,8 +149,8 @@ test('propagates compact route policy without profiles or raw lyrics', () => {
   const result = planCuefieldTransitionFromCache({
     fromKey: 'song:a',
     toKey: 'song:b',
-    fromLrc: '[00:18.00]private lyric a\n[01:06.00]private lyric a',
-    toLrc: '[00:18.00]private lyric b\n[01:06.00]private lyric b',
+    fromLrc: '[00:18.00]private lyric a sentinel\n[00:34.00]private lyric a second\n[01:06.00]private lyric a sentinel\n[01:22.00]private lyric a second',
+    toLrc: '[00:18.00]private lyric b sentinel\n[00:34.00]private lyric b second\n[01:06.00]private lyric b sentinel\n[01:22.00]private lyric b second',
     readBeatMapCache: (key) => cache[key] || null,
   });
 
@@ -162,14 +162,20 @@ test('propagates compact route policy without profiles or raw lyrics', () => {
   assert.deepEqual(result.chosen.policy.reasons, result.diagnostics.routeReasons);
   assert.equal(typeof result.chosen.routeFallbackUsed, 'boolean');
   assert.equal(result.chosen.routeFallbackUsed, result.diagnostics.routeFallbackUsed);
-  const routePayload = JSON.stringify({ policy: result.chosen.policy, diagnostics: result.diagnostics });
-  assert.equal(routePayload.includes('private lyric'), false);
-  assert.equal(routePayload.includes('fromProfile'), false);
-  assert.equal(routePayload.includes('toProfile'), false);
-  assert.equal(routePayload.includes('rawLrc'), false);
+  assert.deepEqual(Object.keys(result.from).sort(), ['structureMap', 'track']);
+  assert.deepEqual(Object.keys(result.to).sort(), ['structureMap', 'track']);
+  const structureKeys = [
+    'entryCandidateCount', 'exitCandidateCount', 'protectedUntil',
+    'structureConfidence', 'structureSource',
+  ];
+  assert.deepEqual(Object.keys(result.from.structureMap).sort(), structureKeys.slice().sort());
+  assert.deepEqual(Object.keys(result.to.structureMap).sort(), structureKeys.slice().sort());
+  const serialized = JSON.stringify(result);
+  ['private lyric', 'cueProfile', 'sections', 'exitCandidates', 'entryCandidates', 'rawLrc', '"text":', '"bars":', '"phrases":']
+    .forEach((sentinel) => assert.equal(serialized.includes(sentinel), false, sentinel));
 });
 
-test('runtime wrapper uses cueProfile BPM and beat-only fallback never claims hook entry', () => {
+test('runtime wrapper exposes compact BPM diagnostics and beat-only fallback never claims hook entry', () => {
   const cache = {
     'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
     'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(96) },
@@ -180,8 +186,8 @@ test('runtime wrapper uses cueProfile BPM and beat-only fallback never claims ho
     readBeatMapCache: (key) => cache[key] || null,
   });
 
-  assert.equal(result.from.cueProfile.bpm, 120);
-  assert.equal(result.to.cueProfile.bpm, 120);
+  assert.equal(result.diagnostics.bpmA, 120);
+  assert.equal(result.diagnostics.bpmB, 120);
   assert.equal(['start', 'intro', 'drop'].includes(result.diagnostics.entryType), true);
   assert.equal(Number.isFinite(result.chosen.energyContinuity), true);
   assert.equal(Number.isFinite(result.chosen.grooveContinuity), true);
@@ -198,11 +204,9 @@ test('uses a real zero-second fallback when paired lyrics are unavailable', () =
     toKey: 'song:b',
     readBeatMapCache: (key) => cache[key] || null,
   });
-  const fallback = result.to.structureMap.entryCandidates.find((item) => item.source === 'fallback');
-
   assert.equal(result.diagnostics.structureSource, 'beat-only');
-  assert.equal(fallback.time, 0);
-  assert.equal(result.to.structureMap.entryCandidates.some((item) => item.source === 'fallback' && item.time >= 12 && item.time <= 16), false);
+  assert.equal(result.chosen.entry.source, 'fallback');
+  assert.equal(result.chosen.entry.time, 0);
 });
 
 test('normalizes empty bridge diagnostic metadata to finite values or null', () => {
@@ -230,6 +234,13 @@ test('normalizes empty bridge diagnostic metadata to finite values or null', () 
   assert.equal(diagnostics.hookConfidence, null);
   assert.equal(diagnostics.entrySource, 'fallback');
   assert.deepEqual(diagnostics.windowRejectionReasons, ['no valid complete transition window']);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'TERMINAL_RESCUE_INVALID_DURATION');
+  assert.equal(result.chosen.technicalFailure, true);
+  assert.equal(result.chosen.errorCode, 'TERMINAL_RESCUE_INVALID_DURATION');
+  assert.equal(diagnostics.technicalFailure, true);
+  assert.equal(diagnostics.errorCode, 'TERMINAL_RESCUE_INVALID_DURATION');
+  assert.deepEqual(Object.keys(result.from).sort(), ['structureMap', 'track']);
 });
 
 test('preserves a lyric-backed B hook when A is beat-only', () => {
@@ -262,7 +273,6 @@ test('does not expose a Hook landing from one repeated B lyric line', () => {
     readBeatMapCache: (key) => cache[key] || null,
   });
 
-  assert.equal(result.to.structureMap.sections.some((section) => section.type === 'hook-candidate'), true);
   assert.notEqual(result.diagnostics.entryType, 'hook');
   assert.equal(result.candidates.some((candidate) => candidate.entry.landingType === 'hook'), false);
   assert.equal(result.rejected.some((candidate) => candidate.entry.landingType === 'hook'), false);

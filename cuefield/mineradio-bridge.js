@@ -88,6 +88,56 @@ function finiteOrNull(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function compactString(value, maxLength) {
+  const text = String(value == null ? '' : value).trim();
+  return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+function compactCount(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(24, Math.round(number))) : 0;
+}
+
+function compactTrack(track = {}) {
+  return {
+    id: compactString(track.id, 120),
+    title: compactString(track.title, 160),
+    artist: compactString(track.artist, 160),
+    duration: finiteOrNull(track.duration),
+  };
+}
+
+function compactStructureMap(structureMap = {}) {
+  return {
+    structureSource: compactString(structureMap.structureSource, 24),
+    structureConfidence: finiteOrNull(structureMap.structureConfidence),
+    protectedUntil: finiteOrNull(structureMap.protectedUntil),
+    exitCandidateCount: compactCount((structureMap.exitCandidates || []).length),
+    entryCandidateCount: compactCount((structureMap.entryCandidates || []).length),
+  };
+}
+
+function compactAnalysisSummary(analysis = {}) {
+  return {
+    track: compactTrack(analysis.track),
+    structureMap: compactStructureMap(analysis.structureMap),
+  };
+}
+
+function compactTransitionPoint(point) {
+  if (!point) return null;
+  return {
+    type: compactString(point.type, 32),
+    role: compactString(point.role, 16),
+    source: compactString(point.source, 24),
+    time: finiteOrNull(point.time),
+    confidence: finiteOrNull(point.confidence),
+    playFrom: finiteOrNull(point.playFrom),
+    landingAt: finiteOrNull(point.landingAt),
+    landingType: compactString(point.landingType, 32),
+  };
+}
+
 function minimumFiniteOrNull(...values) {
   const numbers = values.map(finiteOrNull).filter((value) => value !== null);
   return numbers.length ? Math.min(...numbers) : null;
@@ -133,6 +183,8 @@ function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
     energyContinuity: finiteOrNull(chosen.energyContinuity),
     grooveContinuity: finiteOrNull(chosen.grooveContinuity),
     tempoCompatibility: finiteOrNull(chosen.tempoCompatibility),
+    bpmA: finiteOrNull(from.cueProfile && from.cueProfile.bpm),
+    bpmB: finiteOrNull(to.cueProfile && to.cueProfile.bpm),
     windowRejectionReasons: Array.isArray(chosen.rejectionReasons) ? chosen.rejectionReasons.slice() : [],
     route: String(policy.route || ''),
     compatibilityClass: String(policy.compatibilityClass || ''),
@@ -140,6 +192,8 @@ function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
     preferredExitRange: Array.isArray(policy.preferredExitRange) ? policy.preferredExitRange.slice(0, 2) : [],
     routeReasons: Array.isArray(policy.reasons) ? policy.reasons.slice(0, 4) : [],
     routeFallbackUsed: chosen.routeFallbackUsed === true,
+    technicalFailure: chosen.technicalFailure === true,
+    errorCode: compactString(chosen.errorCode, 80),
     sourceExitCount: finiteOrNull(recipeDiagnostics.sourceExitCount),
     sourceLandingCount: finiteOrNull(recipeDiagnostics.sourceLandingCount),
     consideredExitCount: finiteOrNull(recipeDiagnostics.consideredExitCount),
@@ -175,8 +229,8 @@ function planCuefieldTransitionFromCache(opts = {}) {
       tier: 'weak',
       risks: selected.rejectionReasons || [],
     },
-    exit: selected.exit,
-    entry: selected.entry,
+    exit: compactTransitionPoint(selected.exit),
+    entry: compactTransitionPoint(selected.entry),
     protectedUntil: from.structureMap.protectedUntil,
     transitionRecipe: recipeCandidate.recipe,
     timeline: selected.timeline,
@@ -197,16 +251,20 @@ function planCuefieldTransitionFromCache(opts = {}) {
       metrics: { ...(policy.metrics || {}) },
     },
     routeFallbackUsed: selected.routeFallbackUsed === true,
+    technicalFailure: selected.technicalFailure === true,
+    errorCode: compactString(selected.errorCode, 80),
   };
   const structureSource = from.structureMap.structureSource === 'lyric+beat'
     && to.structureMap.structureSource === 'lyric+beat'
     ? 'lyric+beat'
     : 'beat-only';
 
+  const technicalFailure = chosen.technicalFailure === true;
   return {
-    ok: true,
-    from,
-    to,
+    ok: !technicalFailure,
+    ...(technicalFailure ? { error: chosen.errorCode || 'CUEFIELD_TECHNICAL_FAILURE' } : {}),
+    from: compactAnalysisSummary(from),
+    to: compactAnalysisSummary(to),
     chosen,
     candidates: windowPlan.candidates,
     rejected: windowPlan.rejected,

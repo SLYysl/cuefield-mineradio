@@ -451,21 +451,56 @@ test('executes honest start fallback only with safety opt-in and preserves its t
   assert.equal(fallback.status, 'fallback');
 });
 
-test('executes terminal rescue only with safety opt-in and a nonempty timeline', async () => {
+function validTerminalPlan(overrides = {}) {
+  const timeline = overrides.timeline || [
+    { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
+    { t: 0, deck: 'B', op: 'volume', value: 1, duration: 3400 },
+    { t: 0, deck: 'A', op: 'volume', value: 0, duration: 3400 },
+    { t: 3.4, deck: 'B', op: 'handoff' },
+  ];
+  return {
+    ok: true,
+    chosen: {
+      transitionRecipe: 'terminal-rescue',
+      exit: { time: 48 },
+      entry: { time: 0 },
+      mixStart: 48,
+      handoffAt: 51.4,
+      evaluation: { score: 0.1, tier: 'weak', risks: ['missing-structure'] },
+      ...overrides,
+      timeline,
+    },
+  };
+}
+
+function automixForTerminalPlan(plan, allowSafetyFallback = true) {
+  return createCuefieldAutoMix({
+    allowSafetyFallback,
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => plan,
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+}
+
+async function prepareTerminalPlan(automix, token) {
+  automix.setEnabled(true);
+  return automix.prepare({
+    token,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+  });
+}
+
+test('executes terminal rescue only with safety opt-in and a valid explicit timeline', async () => {
+  const plan = validTerminalPlan();
   const makeAutomix = (allowSafetyFallback, timeline) => createCuefieldAutoMix({
     allowSafetyFallback,
     getKey: (song) => song.key,
     ensureBeatMap: async () => true,
-    planTransition: async () => ({
-      ok: true,
-      chosen: {
-        transitionRecipe: 'terminal-rescue',
-        exit: { time: 48 },
-        entry: { time: 0 },
-        evaluation: { score: 0.1, tier: 'weak', risks: ['missing-structure'] },
-        timeline,
-      },
-    }),
+    planTransition: async () => validTerminalPlan({ timeline }),
     prepareAudioUrl: async () => '/api/audio?url=b',
   });
   const prepare = async (automix, token) => {
@@ -478,10 +513,7 @@ test('executes terminal rescue only with safety opt-in and a nonempty timeline',
       nextSong: { key: 'b' },
     });
   };
-  const timeline = [
-    { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
-    { t: 3.4, deck: 'B', op: 'handoff' },
-  ];
+  const timeline = plan.chosen.timeline;
 
   const ready = await prepare(makeAutomix(true, timeline), 20);
   assert.equal(ready.status, 'ready');
@@ -521,6 +553,32 @@ test('keeps a technically failed terminal rescue plan non-executable', async () 
   });
 
   assert.equal(result.status, 'fallback');
+});
+
+test('rejects malformed ok terminal rescue plans before audio preparation', async (t) => {
+  const validTimeline = validTerminalPlan().chosen.timeline;
+  const cases = [
+    ['chosen technical failure', validTerminalPlan({ technicalFailure: true, errorCode: 'TERMINAL_RESCUE_INVALID_DURATION' })],
+    ['missing mix start', validTerminalPlan({ mixStart: undefined })],
+    ['null mix start', validTerminalPlan({ mixStart: null })],
+    ['non-finite handoff', validTerminalPlan({ handoffAt: Infinity })],
+    ['string handoff', validTerminalPlan({ handoffAt: '51.4' })],
+    ['reversed explicit window', validTerminalPlan({ handoffAt: 47 })],
+    ['missing B play', validTerminalPlan({ timeline: validTimeline.filter((action) => action.op !== 'play') })],
+    ['missing A volume ramp', validTerminalPlan({ timeline: validTimeline.filter((action) => !(action.deck === 'A' && action.op === 'volume')) })],
+    ['missing B volume ramp', validTerminalPlan({ timeline: validTimeline.filter((action) => !(action.deck === 'B' && action.op === 'volume')) })],
+    ['zero-duration volume ramp', validTerminalPlan({ timeline: validTimeline.map((action) => action.op === 'volume' ? { ...action, duration: 0 } : action) })],
+    ['string action timing', validTerminalPlan({ timeline: validTimeline.map((action) => ({ ...action, t: String(action.t) })) })],
+    ['missing handoff', validTerminalPlan({ timeline: validTimeline.filter((action) => action.op !== 'handoff') })],
+  ];
+
+  for (let index = 0; index < cases.length; index += 1) {
+    const [label, plan] = cases[index];
+    await t.test(label, async () => {
+      const result = await prepareTerminalPlan(automixForTerminalPlan(plan), 30 + index);
+      assert.equal(result.status, 'fallback');
+    });
+  }
 });
 
 test('never starts transition actions before the protected signature section ends', async () => {

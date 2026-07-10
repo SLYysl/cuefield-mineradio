@@ -10434,7 +10434,8 @@ function cuefieldAutoMixStatusText(status) {
     'preparing': '正在提前分析下一首',
     'waiting-beatmap': '等待节拍分析完成',
     'missing-audio': '下一首音频暂时不可用',
-    'fallback': '正在准备末尾保底过渡',
+    'terminal-rescue': '正在准备末尾保底过渡',
+    'fallback': '未找到可执行过渡',
     'ready': '过渡已准备好',
     'handoff': '正在切歌',
     'error': '准备失败'
@@ -10452,10 +10453,11 @@ function updateCuefieldAutoMixUi(status) {
   if (!btn) return;
   var snap = cuefieldAutoMix && cuefieldAutoMix.snapshot ? cuefieldAutoMix.snapshot() : null;
   var ready = !!(snap && snap.pending);
+  var statusKey = status || snap && snap.lastStatus || 'on';
   btn.classList.toggle('cuefield-automix-on', !!cuefieldAutoMixEnabled);
   btn.classList.toggle('cuefield-automix-ready', !!cuefieldAutoMixEnabled && ready);
   btn.title = cuefieldAutoMixEnabled
-    ? ('Cuefield AutoMix: ' + (ready ? 'ready' : cuefieldAutoMixStatusText(status || snap && snap.lastStatus || 'on')))
+    ? ('Cuefield AutoMix: ' + (ready && statusKey !== 'terminal-rescue' ? 'ready' : cuefieldAutoMixStatusText(statusKey)))
     : 'Cuefield AutoMix';
 }
 
@@ -10819,7 +10821,11 @@ async function runCuefieldAutoMixPrepare(token, currentIndex, nextIndex, attempt
     introBedLeadSec: 5.2,
   });
   if (token !== trackSwitchToken || currentIndex !== currentIdx) return;
-  updateCuefieldAutoMixUi(result.status);
+  var uiStatus = result.status === 'ready'
+    && result.pending && result.pending.executionMode === 'terminal-rescue'
+    ? 'terminal-rescue'
+    : result.status;
+  updateCuefieldAutoMixUi(uiStatus);
   if (result.status === 'ready') {
     var tier = result.pending && result.pending.plan && result.pending.plan.chosen && result.pending.plan.chosen.evaluation && result.pending.plan.chosen.evaluation.tier;
     prepareCuefieldPendingAudio(result.pending);
@@ -10831,7 +10837,9 @@ async function runCuefieldAutoMixPrepare(token, currentIndex, nextIndex, attempt
       exitTime: result.pending && result.pending.exitTime,
       entryTime: result.pending && result.pending.entryTime
     });
-    showToast('Cuefield ready · ' + cuefieldTierLabel(tier) + ' · ' + (result.pending && result.pending.executionMode || 'filtered-pickup'));
+    showToast(uiStatus === 'terminal-rescue'
+      ? 'Cuefield AutoMix: ' + cuefieldAutoMixStatusText(uiStatus)
+      : 'Cuefield ready · ' + cuefieldTierLabel(tier) + ' · ' + (result.pending && result.pending.executionMode || 'filtered-pickup'));
     return;
   }
   if ((result.status === 'waiting-beatmap' || result.status === 'missing-audio' || result.status === 'busy') && attempt < 4) {

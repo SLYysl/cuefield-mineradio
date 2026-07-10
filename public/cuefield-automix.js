@@ -36,15 +36,44 @@
     return false;
   }
 
+  function validTerminalRescue(chosen, deps) {
+    if (!deps.allowSafetyFallback || chosen.technicalFailure === true) return false;
+    var mixStart = chosen.mixStart;
+    var handoffAt = chosen.handoffAt;
+    if (!Number.isFinite(mixStart) || !Number.isFinite(handoffAt) || handoffAt <= mixStart) return false;
+    var timeline = Array.isArray(chosen.timeline) ? chosen.timeline : [];
+    var hasBPlay = timeline.some(function(action) {
+      return action && action.deck === 'B' && action.op === 'play'
+        && Number.isFinite(action.t) && Number.isFinite(action.at);
+    });
+    var hasVolumeRamp = function(deck) {
+      return timeline.some(function(action) {
+        return action && action.deck === deck && action.op === 'volume'
+          && Number.isFinite(action.t)
+          && Number.isFinite(action.value)
+          && Number.isFinite(action.duration)
+          && action.duration > 0;
+      });
+    };
+    var hasHandoff = timeline.some(function(action) {
+      return action && action.op === 'handoff' && Number.isFinite(action.t);
+    });
+    return hasBPlay
+      && hasVolumeRamp('A')
+      && hasVolumeRamp('B')
+      && hasHandoff;
+  }
+
   function isExecutablePlan(plan, deps) {
     var tier = tierOf(plan);
     var chosen = plan && plan.chosen || {};
     var recipe = chosen.transitionRecipe || chosen.recipeCandidate && chosen.recipeCandidate.recipe || '';
+    if (chosen.technicalFailure === true) return false;
     if (recipe === 'honest-start-fallback') {
       return !!deps.allowSafetyFallback && Array.isArray(chosen.timeline) && chosen.timeline.length > 0;
     }
     if (recipe === 'terminal-rescue') {
-      return !!deps.allowSafetyFallback && Array.isArray(chosen.timeline) && chosen.timeline.length > 0;
+      return validTerminalRescue(chosen, deps);
     }
     if (EXECUTABLE_TIERS[tier]) return true;
     if (recipe === 'safety-long-blend') return !!deps.allowSafetyFallback;
