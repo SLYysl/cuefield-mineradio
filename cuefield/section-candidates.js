@@ -92,6 +92,7 @@ function addLyricCandidates(candidates, lines, beats) {
       candidates.push({
         type,
         role: 'entry',
+        source: 'lyric',
         time: round(line.time),
         confidence: round(Math.min(0.95, 0.56 + group.length * 0.08 + Math.max(0, metrics.energyAfter - metrics.energyBefore) * 0.5)),
         text: line.text,
@@ -104,6 +105,7 @@ function addLyricCandidates(candidates, lines, beats) {
         candidates.push({
           type: 'pre-section',
           role: 'entry',
+          source: 'lyric',
           time: round(before.time),
           confidence: round(Math.min(0.9, 0.5 + group.length * 0.07)),
           text: before.text,
@@ -143,6 +145,35 @@ function addEnergyCandidates(candidates, beats, duration) {
     });
   }
   if (!windows.length) return;
+
+  const earlyWindows = windows.filter((window) => window.time <= Math.min(24, duration - 8));
+  const rise = earlyWindows.find((window, index) => {
+    if (index === 0) return false;
+    const prior = earlyWindows.slice(0, index).sort((a, b) => a.energy - b.energy)[0];
+    const stats = windowStats(beats, window.time, 8);
+    const next = earlyWindows[index + 1];
+    return prior
+      && window.energy - prior.energy >= 0.12
+      && stats.beatStability >= 0.35
+      && (!next || next.energy >= window.energy - 0.04);
+  });
+  if (rise) {
+    const lowWindow = earlyWindows
+      .filter((window) => window.time < rise.time)
+      .sort((a, b) => a.energy - b.energy || a.time - b.time)[0];
+    if (lowWindow) {
+      const contrast = rise.energy - lowWindow.energy;
+      candidates.push({
+        type: 'intro',
+        role: 'entry',
+        source: 'energy',
+        time: lowWindow.time,
+        confidence: round(Math.min(0.9, 0.58 + contrast * 0.4)),
+        resolvesTo: { type: 'strong-entry', time: round(rise.time + 4) },
+        ...candidateMetric(beats, lowWindow.time),
+      });
+    }
+  }
 
   const sorted = windows.slice().sort((a, b) => b.energy - a.energy);
   const peak = sorted[0];

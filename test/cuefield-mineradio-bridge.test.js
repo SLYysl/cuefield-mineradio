@@ -65,6 +65,8 @@ test('plans a Cuefield transition directly from Mineradio beatmap cache keys', (
   assert.equal(result.to.track.title, 'TAKE ME');
   assert.equal(result.chosen.exit.role, 'exit');
   assert.equal(result.chosen.entry.role, 'entry');
+  assert.equal(result.to.candidates.find((candidate) => candidate.role === 'entry').source, 'fallback');
+  assert.equal(result.chosen.entry.source, 'fallback');
   assert.equal(typeof result.chosen.recipe, 'string');
   assert.equal(typeof result.chosen.evaluation.tier, 'string');
   assert.equal(Array.isArray(result.candidates), true);

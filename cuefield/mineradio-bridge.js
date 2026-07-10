@@ -48,6 +48,7 @@ function addFallbackEntry(analysis) {
   analysis.candidates.push({
     type: 'intro',
     role: 'entry',
+    source: 'fallback',
     time,
     confidence: 0.52,
     text: '',

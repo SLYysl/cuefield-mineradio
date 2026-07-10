@@ -949,6 +949,43 @@ test('analyzes peak and release candidates without treating the peak as an exit'
   assert.equal(release.time > peak.time, true);
 });
 
+test('detects a trustworthy energy entry before an early sustained rise', () => {
+  const map = makeBeatMap({ duration: 96, gridStep: 0.5 });
+  map.beats = map.beats.map((beat) => {
+    const quiet = beat.time < 8;
+    return {
+      ...beat,
+      strength: quiet ? 0.18 : 0.72,
+      impact: quiet ? 0.16 : 0.68,
+      low: quiet ? 0.14 : 0.52,
+      body: quiet ? 0.16 : 0.58,
+      snap: quiet ? 0.12 : 0.46,
+    };
+  });
+
+  const result = analyzeSectionCandidates({
+    fixture: { track: { title: 'Rising Intro', duration: 96 }, map },
+    lrcLines: [],
+  });
+  const entry = result.candidates.find((candidate) => candidate.role === 'entry');
+
+  assert.ok(entry, JSON.stringify(result.candidates));
+  assert.equal(entry.source, 'energy');
+  assert.equal(entry.time <= 8, true);
+  assert.equal(entry.resolvesTo.time >= 8, true);
+  assert.equal(entry.confidence >= 0.6, true);
+});
+
+test('does not invent an energy entry for a flat opening', () => {
+  const map = makeBeatMap({ duration: 96, gridStep: 0.5 });
+  const result = analyzeSectionCandidates({
+    fixture: { track: { title: 'Flat Intro', duration: 96 }, map },
+    lrcLines: [],
+  });
+
+  assert.equal(result.candidates.some((candidate) => candidate.role === 'entry'), false);
+});
+
 test('chooses outro-to-chorus transition candidates from release and pre-section nodes', () => {
   const fromMap = makeBeatMap({
     duration: 128,
