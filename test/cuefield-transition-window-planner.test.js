@@ -95,6 +95,12 @@ function entry(type, time, extra = {}) {
   };
 }
 
+function setBarMetrics(analysis, time, metrics) {
+  const bar = analysis.bars.find((candidate) => candidate.start === time);
+  Object.assign(bar, metrics);
+  return analysis;
+}
+
 test('prefers usable early exit at .44 over similar .94 emergency exit', () => {
   const from = profile({
     duration: 200,
@@ -108,6 +114,43 @@ test('prefers usable early exit at .44 over similar .94 emergency exit', () => {
   const result = chooseTransitionWindow(from, to);
 
   assert.equal(result.chosen.exit.time, 88);
+});
+
+test('late contrast rise constrains exits to its late range and uses a short overlap', () => {
+  const from = setBarMetrics(profile({
+    duration: 200,
+    exits: [
+      exit(92, 0.99, { exitRatio: 0.46 }),
+      exit(160, 0.62, { exitRatio: 0.8 }),
+    ],
+  }), 92, { energy: 0.36, snapDensity: 0.16 });
+  const to = setBarMetrics(profile({
+    entries: [
+      entry('hook', 32, { playFrom: 32, landingAt: 32, landingType: 'hook' }),
+      entry('intro', 12, { playFrom: 0, landingAt: 12, landingType: 'intro' }),
+    ],
+  }), 12, { energy: 0.82, snapDensity: 0.58 });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.policy.route, 'late-contrast-rise');
+  assert.equal(result.chosen.policy.route, 'late-contrast-rise');
+  assert.equal(result.chosen.exitRatio >= 0.75 && result.chosen.exitRatio <= 0.9, true);
+  assert.equal(result.chosen.audibleOverlap <= 3.5, true);
+  assert.notEqual(result.chosen.entry.type, 'hook');
+});
+
+test('structure mix retains an early usable post-hook exit', () => {
+  const from = profile({
+    duration: 200,
+    exits: [exit(88, 0.9, { exitRatio: 0.44 }), exit(164, 0.5, { exitRatio: 0.82 })],
+  });
+  const to = profile({ entries: [entry('intro', 16)] });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.policy.route, 'structure-mix');
+  assert.equal(result.chosen.exitRatio < 0.75, true);
 });
 
 test('rejects recipe windows whose audible mix start precedes protectedUntil', () => {
@@ -162,28 +205,41 @@ test('uses audible overlap rather than silent B preroll as mixStart', () => {
   assert.equal(result.chosen.mixStart > result.chosen.exit.time - result.chosen.recipeCandidate.anchors.lead, true);
 });
 
-test('returns an honest start fallback when no anchored window is valid', () => {
+test('terminal rescue returns an executable late timeline when structural windows are unavailable', () => {
   const from = profile({
+    duration: 128,
     protectedUntil: 60,
-    exits: [
-      exit(80, 0.95, { exitRatio: 0.63, latePenalty: 0 }),
-      exit(64, 0.45, { exitRatio: 0.5, latePenalty: 0 }),
-    ],
   });
-  const to = profile({ entries: [entry('hook', 1, { playFrom: 1, landingAt: 1, landingType: 'hook' })] });
+  const to = profile();
 
   const result = chooseTransitionWindow(from, to);
 
+  assert.equal(result.policy.route, 'terminal-rescue');
+  assert.equal(result.chosen.policy.route, 'terminal-rescue');
   assert.equal(result.chosen.entry.landingType, 'start');
   assert.equal(result.chosen.entry.type, 'start');
-  assert.equal(result.chosen.entry.source, 'fallback');
-  assert.equal('landingAt' in result.chosen.entry, false);
-  assert.equal(result.chosen.exit.time, 64);
-  assert.equal(result.chosen.mixStart >= 60, true);
-  assert.equal(result.chosen.handoffAt, result.chosen.mixStart + 3.4);
-  assert.equal(result.chosen.audibleOverlap >= 3, true);
-  assert.equal(result.chosen.recipeCandidate.window.landingError, null);
-  assert.equal(result.chosen.rejectionReasons.includes('no valid complete transition window'), true);
+  assert.equal(result.chosen.recipeCandidate.recipe, 'terminal-rescue');
+  assert.equal(result.chosen.routeFallbackUsed, true);
+  assert.equal(result.chosen.exitRatio >= 0.88 && result.chosen.exitRatio <= 0.96, true);
+  assert.equal(result.chosen.mixStart < result.chosen.handoffAt, true);
+  assert.equal(result.chosen.handoffAt <= from.duration, true);
+  assert.equal(result.chosen.timeline.some((action) => action.op === 'handoff'), true);
+  assert.equal(result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
+});
+
+test('terminal rescue respects a very late protected section without negative timing or ending after A', () => {
+  const from = profile({ duration: 12, protectedUntil: 10.5 });
+  const to = profile({ duration: 24 });
+
+  const result = chooseTransitionWindow(from, to);
+  const timeline = result.chosen.timeline;
+
+  assert.equal(result.chosen.policy.route, 'terminal-rescue');
+  assert.equal(result.chosen.mixStart >= 10.5, true);
+  assert.equal(result.chosen.handoffAt <= 12, true);
+  assert.equal(result.chosen.mixStart < result.chosen.handoffAt, true);
+  assert.equal(timeline.every((action) => action.t >= 0), true);
+  assert.equal(timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
 });
 
 test('uses .35 conservative groove continuity without a trusted beat grid', () => {
@@ -249,7 +305,7 @@ test('keeps an early usable exit when late outro candidates exceed the top-eight
 
   const result = chooseTransitionWindow(from, to);
 
-  assert.equal(result.diagnostics.exitCount, 8);
+  assert.equal(result.diagnostics.exitCount, 1);
   assert.equal(result.chosen.exit.time, 72);
 });
 

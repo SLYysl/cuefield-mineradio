@@ -355,7 +355,7 @@ function makeQuickFade(anchors, scores) {
   );
 }
 
-function safetyAssessment(fromProfile, toProfile, sectionChoice = {}) {
+function safetyAssessment(fromProfile, toProfile, sectionChoice = {}, routePolicy = {}) {
   const entry = sectionChoice.entry || {};
   const entrySource = String(entry.source || 'fallback');
   const entryConfidence = clamp(entry.confidence);
@@ -381,6 +381,9 @@ function safetyAssessment(fromProfile, toProfile, sectionChoice = {}) {
   let overlapClass = 'short';
   if (entryTrusted && beatGridTrusted && relativeTempoDelta <= 0.08) overlapClass = 'long';
   else if (entryTrusted && relativeTempoDelta <= 0.15) overlapClass = 'medium';
+  const route = String(routePolicy.route || '');
+  if (route === 'late-contrast-rise' || route === 'terminal-rescue') overlapClass = 'short';
+  else if (route === 'late-contrast-release' && overlapClass === 'long') overlapClass = 'medium';
   const overlapDuration = overlapClass === 'long' ? 10.5 : (overlapClass === 'medium' ? 5.6 : 3.4);
   return {
     entrySource,
@@ -461,8 +464,8 @@ function buildSafetyTimelineForAnchors({ bLandingAt, overlapClass, overlapDurati
   };
 }
 
-function makeSafetyLongBlend(anchors, scores, sectionChoice = {}, fromProfile = {}, toProfile = {}) {
-  const assessment = safetyAssessment(fromProfile, toProfile, sectionChoice);
+function makeSafetyLongBlend(anchors, scores, sectionChoice = {}, fromProfile = {}, toProfile = {}, routePolicy = {}) {
+  const assessment = safetyAssessment(fromProfile, toProfile, sectionChoice, routePolicy);
   const execution = buildSafetyTimelineForAnchors({
     bLandingAt: anchors.bAnchor,
     overlapClass: assessment.overlapClass,
@@ -529,7 +532,9 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
     || sectionTier === 'reject'
     || sectionRisks.includes('directionality mismatch')
     || sectionRisks.includes('style bridge mismatch');
-  const safety = makeSafetyLongBlend(anchors, scores, opts.sectionChoice, fromProfile, toProfile);
+  const routePolicy = opts.routePolicy || {};
+  const route = String(routePolicy.route || '');
+  const safety = makeSafetyLongBlend(anchors, scores, opts.sectionChoice, fromProfile, toProfile, routePolicy);
   const candidates = [
     safety,
     makeLongBlend(anchors, scores),
@@ -538,7 +543,7 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
     makeQuickFade(anchors, scores),
   ].sort((a, b) => b.score - a.score || b.confidence - a.confidence);
   const validCandidates = candidates.filter((candidate) => candidate.window.runwayAvailable);
-  const requiresAdaptiveSafety = needsSafetyFallback || safety.anchors.overlapClass !== 'long';
+  const requiresAdaptiveSafety = needsSafetyFallback || safety.anchors.overlapClass !== 'long' || route !== '';
   const preferred = candidates.find((candidate) => !candidate.risks.includes('hard cut')) || candidates[0];
   const chosen = requiresAdaptiveSafety
     ? (safety.window.runwayAvailable ? safety : (validCandidates[0] || safety))

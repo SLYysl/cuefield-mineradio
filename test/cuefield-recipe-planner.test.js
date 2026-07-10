@@ -167,6 +167,27 @@ test('short safety keeps B bass reduced until the final handoff window', () => {
   assert.equal(aFullBass, undefined);
 });
 
+test('route policy forces late rises short and caps late releases at medium overlap', () => {
+  const fromProfile = makeProfile('A', 128, [{ type: 'outro', role: 'exit', time: 112, confidence: 0.82 }]);
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 0, confidence: 0.82, resolvesTo: { time: 12 } };
+  const toProfile = makeProfile('B', 120, [entry]);
+  const sectionChoice = { exit: { time: 112 }, entry, evaluation: { tier: 'usable', risks: [] } };
+
+  const rise = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice,
+    routePolicy: { route: 'late-contrast-rise', overlapClass: 'short' },
+  });
+  const release = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice,
+    routePolicy: { route: 'late-contrast-release', overlapClass: 'short-or-medium' },
+  });
+
+  assert.equal(rise.chosen.anchors.overlapClass, 'short');
+  assert.equal(rise.diagnostics.overlapClass, 'short');
+  assert.notEqual(release.chosen.anchors.overlapClass, 'long');
+  assert.equal(release.diagnostics.overlapClass === 'short' || release.diagnostics.overlapClass === 'medium', true);
+});
+
 test('plans multiple recipe candidates with timelines and chooses the safest high score', () => {
   const fromProfile = buildCueProfile({
     track: { title: 'A', duration: 128 },

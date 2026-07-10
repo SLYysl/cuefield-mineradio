@@ -1,6 +1,7 @@
 const { round, toNumber } = require('./cue-profile');
 const { planRecipeCandidates } = require('./recipe-planner');
 const { scoreCandidatePair } = require('./section-candidates');
+const { classifyTransitionRoute } = require('./transition-router');
 
 function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, toNumber(value)));
@@ -142,8 +143,20 @@ function scoreWindowExit(candidate) {
   return clamp(score - normalizePenalty(candidate && candidate.latePenalty));
 }
 
-function exitOptions(analysis, protectedUntil) {
-  return sourceExits(analysis, protectedUntil)
+function exitsForPolicy(exits, duration, policy) {
+  const range = Array.isArray(policy && policy.preferredExitRange) ? policy.preferredExitRange : [];
+  const minRatio = toNumber(range[0], NaN);
+  const maxRatio = toNumber(range[1], NaN);
+  if (!Number.isFinite(minRatio) || !Number.isFinite(maxRatio)) return exits;
+  const inRange = exits.filter((candidate) => {
+    const ratio = toNumber(candidate.time) / Math.max(1, toNumber(duration));
+    return ratio >= minRatio && ratio <= maxRatio;
+  });
+  return inRange.length ? inRange : exits;
+}
+
+function exitOptions(analysis, protectedUntil, policy) {
+  return exitsForPolicy(sourceExits(analysis, protectedUntil), profileOf(analysis).duration, policy)
     .slice()
     .sort((a, b) => scoreWindowExit(b) - scoreWindowExit(a) || toNumber(a.time) - toNumber(b.time))
     .slice(0, 8);
@@ -209,20 +222,37 @@ function rejectionReasons({ protectedUntil, exit, entry, recipeCandidate, diagno
   return reasons;
 }
 
-function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, fromProfile, toProfile }) {
+function rangeDistancePenalty(exitRatio, policy) {
+  const range = Array.isArray(policy && policy.preferredExitRange) ? policy.preferredExitRange : [];
+  const minRatio = toNumber(range[0], NaN);
+  const maxRatio = toNumber(range[1], NaN);
+  if (!Number.isFinite(minRatio) || !Number.isFinite(maxRatio) || minRatio > maxRatio) return 0;
+  const distance = exitRatio < minRatio ? minRatio - exitRatio : (exitRatio > maxRatio ? exitRatio - maxRatio : 0);
+  return clamp(distance / Math.max(0.04, maxRatio - minRatio));
+}
+
+function entryPolicyPenalty(entry, policy) {
+  if (!policy || policy.route !== 'late-contrast-rise') return 0;
+  const type = String(entry && entry.type || '').toLowerCase();
+  return landingKind(entry) === 'hook' && type !== 'pre-hook' ? 0.18 : 0;
+}
+
+function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, fromProfile, toProfile, policy }) {
   const energyContinuity = clamp(diagnostics.energyScore);
   const tempoCompatibility = clamp(diagnostics.bpmScore);
   const groove = grooveContinuity(fromProfile, toProfile, exit, entry, diagnostics);
   const continuity = clamp((energyContinuity + groove + tempoCompatibility + clamp(diagnostics.bassScore)) / 4);
   const suppliedExitRatio = clamp(exit.exitRatio);
   const exitRatio = suppliedExitRatio || clamp(toNumber(exit.time) / Math.max(1, toNumber(fromProfile.duration)));
-  const latePenalty = Math.max(normalizePenalty(exit.latePenalty), exitRatio > 0.78 ? 0.45 : 0);
+  const latePenalty = Math.max(normalizePenalty(exit.latePenalty), policy && policy.route === 'structure-mix' && exitRatio > 0.78 ? 0.45 : 0);
+  const routePenalty = rangeDistancePenalty(exitRatio, policy) + entryPolicyPenalty(entry, policy);
   const score = clamp(clamp(sectionChoice.score) * 0.34
     + clamp(recipeCandidate.score) * 0.2
     + ((clamp(exit.confidence) + clamp(entry.confidence)) / 2) * 0.16
     + overlapScore(recipeCandidate.window.audibleOverlap, toNumber(diagnostics.relativeTempoDelta)) * 0.12
     + continuity * 0.18
-    - latePenalty);
+    - latePenalty
+    - routePenalty);
   return {
     exit,
     entry,
@@ -264,31 +294,81 @@ function compactWindow(window) {
   };
 }
 
-function startFallback(fromProfile, exit, rejected) {
-  const entry = { type: 'start', role: 'entry', source: 'fallback', time: 0, playFrom: 0, landingType: 'start', confidence: 0.35 };
+function terminalRescuePolicy(policy, fromProfile, protectedUntil) {
+  const duration = Math.max(1, toNumber(fromProfile && fromProfile.duration));
+  const protectedRatio = clamp(toNumber(protectedUntil) / duration);
+  return {
+    ...policy,
+    route: 'terminal-rescue',
+    compatibilityClass: 'uncertain',
+    contrastDirection: 'unknown',
+    preferredExitRange: [Math.max(0.88, protectedRatio), Math.max(0.96, protectedRatio)],
+    entryPolicy: 'start-or-downbeat',
+    overlapClass: 'short',
+    recipe: 'terminal-rescue',
+    reasons: [...(policy && policy.reasons || []), 'no-valid-window'].slice(0, 4),
+  };
+}
+
+function terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, rejected) {
+  const duration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
+  const [minRatio, maxRatio] = policy.preferredExitRange;
+  const rangeExits = sourceExits(fromAnalysis, protectedUntil)
+    .filter((candidate) => {
+      const ratio = toNumber(candidate.time) / Math.max(1, duration);
+      return ratio >= minRatio && ratio <= maxRatio && toNumber(candidate.time) < duration;
+    })
+    .sort((a, b) => toNumber(b.time) - toNumber(a.time));
+  const minimumDuration = Math.min(3.4, Math.max(0.2, duration * 0.03));
+  const preferredStart = rangeExits[0]
+    ? toNumber(rangeExits[0].time)
+    : Math.max(toNumber(protectedUntil), Math.min(duration - 3.6, duration * 0.92));
+  const latestStart = Math.max(0, duration - minimumDuration);
+  const mixStart = round(Math.max(0, Math.min(preferredStart, latestStart)));
+  const overlapDuration = round(Math.max(0.01, duration - mixStart));
+  const fadeDuration = Math.max(1, Math.round(overlapDuration * 1000));
+  const bassRestoreAt = round(Math.max(0, overlapDuration - Math.min(1, overlapDuration * 0.3)));
+  const entry = {
+    type: 'start',
+    role: 'entry',
+    source: 'fallback',
+    time: 0,
+    playFrom: 0,
+    landingAt: round(Math.min(3.4, overlapDuration)),
+    landingType: 'start',
+    confidence: 0.35,
+  };
   const timeline = [
     { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
-    { t: 0, deck: 'B', op: 'volume', value: 1, duration: 3400, curve: 'equal-power-in' },
-    { t: 0, deck: 'A', op: 'volume', value: 0, duration: 3400, curve: 'equal-power-out' },
-    { t: 3.4, deck: 'B', op: 'handoff' },
+    { t: 0, deck: 'B', op: 'bass', value: 0.2, duration: 0 },
+    { t: 0, deck: 'B', op: 'volume', value: 1, duration: fadeDuration, curve: 'equal-power-in' },
+    { t: 0, deck: 'A', op: 'volume', value: 0, duration: fadeDuration, curve: 'equal-power-out' },
+    { t: bassRestoreAt, deck: 'B', op: 'bass', value: 1, duration: Math.min(800, fadeDuration) },
+    { t: overlapDuration, deck: 'B', op: 'handoff' },
   ];
+  const exit = rangeExits[0] || {
+    type: 'terminal-boundary',
+    role: 'exit',
+    source: 'fallback',
+    time: mixStart,
+  };
   return {
-    exit: exit || null,
+    exit,
     entry,
     sectionChoice: null,
-    recipeCandidate: { recipe: 'honest-start-fallback', score: 0, timeline, window: { audibleStart: 0, audibleEnd: 3.4, audibleOverlap: 3.4, preRollDuration: 0, handoffOffset: 3.4, runwayAvailable: null, landingError: null } },
+    recipeCandidate: { recipe: 'terminal-rescue', score: 0, timeline, window: { audibleStart: 0, audibleEnd: overlapDuration, audibleOverlap: overlapDuration, preRollDuration: 0, handoffOffset: overlapDuration, runwayAvailable: true, landingError: 0 } },
     timeline,
-    mixStart: round(toNumber(exit && exit.time)),
-    handoffAt: round(toNumber(exit && exit.time) + 3.4),
-    audibleOverlap: 3.4,
+    mixStart,
+    handoffAt: round(mixStart + overlapDuration),
+    audibleOverlap: overlapDuration,
     preRollDuration: 0,
-    exitRatio: round(toNumber(exit && exit.time) / Math.max(1, toNumber(fromProfile && fromProfile.duration))),
+    exitRatio: round(mixStart / Math.max(1, duration)),
     energyContinuity: 0.35,
     grooveContinuity: 0.35,
     tempoCompatibility: 0,
     score: 0,
-    rejectionReasons: ['no valid complete transition window'],
-    rejected,
+    rejectionReasons: ['no valid complete transition window', ...(rejected.length ? ['structural windows rejected'] : [])],
+    routeFallbackUsed: true,
   };
 }
 
@@ -296,8 +376,16 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
   const fromProfile = profileOf(fromAnalysis);
   const toProfile = profileOf(toAnalysis);
   const protectedUntil = toNumber(fromAnalysis.structureMap && fromAnalysis.structureMap.protectedUntil);
-  const exits = exitOptions(fromAnalysis, protectedUntil);
+  const sourceExitOptions = sourceExits(fromAnalysis, protectedUntil);
   const entries = landingOptions(toAnalysis);
+  const policy = classifyTransitionRoute({
+    fromProfile,
+    toProfile,
+    protectedUntil,
+    exits: sourceExitOptions,
+    entries,
+  });
+  const exits = exitOptions(fromAnalysis, protectedUntil, policy);
   const candidateWindows = [];
   const rejected = [];
   const diagnostics = {
@@ -317,27 +405,29 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
       const sectionChoice = { ...scoredSectionChoice, score: clamp(scoredSectionChoice.score) };
       const recipePlan = planRecipeCandidates(fromProfile, toProfile, {
         sectionChoice: { ...sectionChoice, entry: recipeSectionEntry(entry) },
+        routePolicy: policy,
       });
       (recipePlan.candidates || []).forEach((candidate) => {
         const recipeCandidate = { ...candidate, score: clamp(candidate.score) };
         diagnostics.recipeCandidatesConsidered += 1;
         const reasons = rejectionReasons({ protectedUntil, exit, entry, recipeCandidate, diagnostics: recipePlan.diagnostics || {} });
-        const window = rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics: recipePlan.diagnostics || {}, fromProfile, toProfile });
+        const window = rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics: recipePlan.diagnostics || {}, fromProfile, toProfile, policy });
         if (reasons.length) rejected.push({ ...window, rejectionReasons: reasons });
         else candidateWindows.push(window);
       });
     });
   });
   candidateWindows.sort((a, b) => b.score - a.score || a.exit.time - b.exit.time || a.entry.landingAt - b.entry.landingAt);
-  const earliestExit = sourceExits(fromAnalysis, protectedUntil)
-    .slice()
-    .sort((a, b) => toNumber(a.time) - toNumber(b.time))[0] || exits[0];
-  const chosen = candidateWindows[0] || startFallback(fromProfile, earliestExit, rejected);
+  const selectedPolicy = candidateWindows.length ? policy : terminalRescuePolicy(policy, fromProfile, protectedUntil);
+  const chosen = candidateWindows[0] || terminalRescue(fromAnalysis, fromProfile, protectedUntil, selectedPolicy, rejected);
+  chosen.policy = selectedPolicy;
+  if (!chosen.routeFallbackUsed) chosen.routeFallbackUsed = false;
   return {
     chosen,
     candidates: candidateWindows.slice(1).map(compactWindow),
     rejected: rejected.map(compactWindow),
     diagnostics,
+    policy: selectedPolicy,
   };
 }
 
