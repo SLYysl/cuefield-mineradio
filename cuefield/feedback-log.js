@@ -102,6 +102,19 @@ function compactDiagnostics(diagnostics = {}) {
   };
 }
 
+function compactBridge(transition = {}) {
+  return {
+    selected: transition.bridgeSelected === true,
+    template: compactString(transition.bridgeTemplate, 32),
+    bars: [4, 8, 16].includes(Number(transition.bridgeBars)) ? Number(transition.bridgeBars) : null,
+    climaxType: compactString(transition.bridgeClimaxType, 16),
+    climaxTime: roundNumber(transition.bridgeClimaxTime),
+    climaxConfidence: roundNumber(transition.bridgeClimaxConfidence),
+    lyricLinkScore: roundNumber(transition.lyricLinkScore),
+    lyricLinkReasons: compactList(transition.lyricLinkReasons, 4),
+  };
+}
+
 function compactStructure(transition = {}) {
   return {
     source: compactString(transition.structureSource || transition.source, 24),
@@ -136,6 +149,8 @@ function compactTransition(transition = {}) {
     relativeTempoDelta: roundNumber(transition.relativeTempoDelta),
     beatGridTrusted: transition.beatGridTrusted === true,
     runtimeDowngrade: compactString(transition.runtimeDowngrade, 40),
+    setMode: ['sequential', 'smart'].includes(transition.setMode) ? transition.setMode : '',
+    bridge: compactBridge(transition),
     route: compactString(transition.route, 40),
     compatibilityClass: compactString(transition.compatibilityClass, 40),
     contrastDirection: compactString(transition.contrastDirection, 40),

@@ -41,6 +41,15 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
       relativeTempoDelta: 0.36491,
       beatGridTrusted: true,
       runtimeDowngrade: 'volume-only',
+      setMode: 'smart',
+      bridgeSelected: true,
+      bridgeTemplate: 'drum-build',
+      bridgeBars: 8,
+      bridgeClimaxType: 'hook',
+      bridgeClimaxTime: 64.1234,
+      bridgeClimaxConfidence: 0.8765,
+      lyricLinkScore: 0.7123,
+      lyricLinkReasons: ['call-response', 'token-overlap'],
       structureSource: 'lyric+beat',
       structureConfidence: 0.7842,
       protectedUntil: 64,
@@ -100,6 +109,17 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
   assert.equal(record.transition.relativeTempoDelta, 0.365);
   assert.equal(record.transition.beatGridTrusted, true);
   assert.equal(record.transition.runtimeDowngrade, 'volume-only');
+  assert.equal(record.transition.setMode, 'smart');
+  assert.deepEqual(record.transition.bridge, {
+    selected: true,
+    template: 'drum-build',
+    bars: 8,
+    climaxType: 'hook',
+    climaxTime: 64.123,
+    climaxConfidence: 0.877,
+    lyricLinkScore: 0.712,
+    lyricLinkReasons: ['call-response', 'token-overlap'],
+  });
   assert.deepEqual(record.transition.diagnostics, {
     outroCompleteness: 0.723,
     bIntroAggression: 0.529,
