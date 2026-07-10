@@ -126,6 +126,7 @@
           ? bridge.stageDurations.slice(0, 3).map(function(value){ return round(Math.max(0, toNumber(value, 0))); })
           : [],
       };
+      normalized.fallbackTimeline = Array.isArray(action.fallbackTimeline) ? action.fallbackTimeline.slice() : [];
     }
     return normalized;
   }

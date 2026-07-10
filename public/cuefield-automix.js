@@ -231,6 +231,7 @@
           fromKey: fromKey,
           toKey: toKey,
           plan: plan,
+          bridgePlan: chosen.bridgePlan || null,
           timeline: timeline,
           audioUrl: audioUrl,
           executionMode: executionMode,

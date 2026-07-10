@@ -65,6 +65,25 @@ test('Cuefield deck graphs keep an echo tail outside the dry gain lifecycle', ()
   assert.match(cuefieldRuntime, /rampCuefieldGraphEcho\(/);
 });
 
+test('Cuefield bridge runtime starts on the shared context and stops on every reset', () => {
+  const html = readIndexHtml();
+  assert.match(html, /<script src="cuefield-bridge-engine\.js"><\/script>/);
+  assert.match(html, /var cuefieldBridgeEngine = null;/);
+  const initStart = html.indexOf('function initCuefieldBridgeEngine');
+  const applyEnd = html.indexOf('function cuefieldVolumeOnlyExecution', initStart);
+  const runtime = html.slice(initStart, applyEnd);
+  const resetStart = html.indexOf('function resetCuefieldAutoMix');
+  const resetEnd = html.indexOf('function cuefieldPlanFacts', resetStart);
+  const reset = html.slice(resetStart, resetEnd);
+
+  assert.match(runtime, /createCuefieldBridgeEngine/);
+  assert.match(runtime, /audioContext: audioCtx/);
+  assert.match(runtime, /action\.op === 'bridge'/);
+  assert.match(runtime, /bridge-direct-fallback/);
+  assert.match(runtime, /fallbackTimeline/);
+  assert.match(reset, /stopCuefieldBridge/);
+});
+
 test('Cuefield graph lifecycle and handoff timer remain owned by the active transition', () => {
   const html = readIndexHtml();
   const pauseStart = html.indexOf('function pauseCurrentAudioForTrackSwitch');

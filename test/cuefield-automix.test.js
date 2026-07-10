@@ -805,3 +805,44 @@ test('does not reuse a prepared transition after queue token or index changes', 
   assert.equal(automix.shouldTrigger({ token: 4, currentIndex: 1, currentTime: 20 }), false);
   assert.equal(automix.shouldTrigger({ token: 4, currentIndex: 2, currentTime: 20 }), true);
 });
+
+test('preserves a selected bridge plan in pending runtime state', async () => {
+  const bridgePlan = { template: 'drum-build', bars: 8, climax: { time: 64, type: 'hook', confidence: 0.88 } };
+  const plan = {
+    ok: true,
+    chosen: {
+      recipe: 'synthetic-bridge',
+      score: 0.82,
+      exit: { time: 48 },
+      entry: { time: 64 },
+      evaluation: { tier: 'usable', score: 0.82, risks: [] },
+    },
+  };
+  plan.chosen.transitionRecipe = 'synthetic-bridge';
+  plan.chosen.bridgePlan = bridgePlan;
+  plan.chosen.timeline = [
+    { t: 0, deck: 'A', op: 'bridge', duration: 16000, bridge: { template: 'drum-build', bars: 8, bpmFrom: 120, bpmTo: 126 } },
+    { t: 16, deck: 'B', op: 'handoff' },
+  ];
+  plan.chosen.mixStart = 48;
+  plan.chosen.handoffAt = 64;
+  const automix = createCuefieldAutoMix({
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => plan,
+    prepareAudioUrl: async () => '/audio/b',
+  });
+  automix.setEnabled(true);
+
+  const result = await automix.prepare({
+    token: 1,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.pending.bridgePlan, bridgePlan);
+  assert.equal(result.pending.executionMode, 'synthetic-bridge');
+});

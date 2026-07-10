@@ -2738,6 +2738,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 <script src="cuefield-timeline-executor.js"></script>
 <script src="cuefield-lyric-source.js"></script>
 <script src="cuefield-set-planner.js"></script>
+<script src="cuefield-bridge-engine.js"></script>
 <script src="cuefield-automix.js"></script>
 <script>
 'use strict';
@@ -2825,6 +2826,7 @@ var cuefieldAutoMix = null;
 var cuefieldAutoMixPrepareTimer = null;
 var cuefieldAutoMixExecuting = false;
 var cuefieldAutoMixPreparedAudio = null;
+var cuefieldBridgeEngine = null;
 var cuefieldManualNextKey = '';
 var cuefieldPairPlanCache = new Map();
 var customCoverMap = readCustomCoverMap();
@@ -10796,6 +10798,7 @@ function resetCuefieldAutoMix(reason, opts) {
   opts = opts || {};
   clearCuefieldAutoMixPrepareTimer();
   clearCuefieldTimelineTimers();
+  stopCuefieldBridge(reason || 'reset');
   cuefieldAutoMixExecuting = false;
   if (!opts.preservePreparedAudio) stopCuefieldPreparedAudio();
   if (!opts.preservePreparedAudio) resetCuefieldToneControls(180);
@@ -11337,9 +11340,43 @@ function rampCuefieldGraphEcho(graph, action) {
   return true;
 }
 
+function initCuefieldBridgeEngine() {
+  if (cuefieldBridgeEngine) return cuefieldBridgeEngine;
+  if (!window.CuefieldBridgeEngine || !window.CuefieldBridgeEngine.createCuefieldBridgeEngine) return null;
+  cuefieldBridgeEngine = window.CuefieldBridgeEngine.createCuefieldBridgeEngine();
+  return cuefieldBridgeEngine;
+}
+
+function stopCuefieldBridge(reason) {
+  if (!cuefieldBridgeEngine || !cuefieldBridgeEngine.stop) return false;
+  return cuefieldBridgeEngine.stop(reason || 'stop');
+}
+
+function startCuefieldBridge(action, pending) {
+  var engine = initCuefieldBridgeEngine();
+  if (!engine || !action || !action.bridge || !audioCtx) return false;
+  var started = engine.start(action.bridge, { audioContext: audioCtx });
+  if (started && pending) pending.bridgeStarted = true;
+  return started;
+}
+
+function cuefieldBridgeFallbackExecution(action, pending) {
+  if (!action || !Array.isArray(action.fallbackTimeline) || !action.fallbackTimeline.length) return null;
+  if (!window.CuefieldTimelineExecutor || !window.CuefieldTimelineExecutor.buildCuefieldTimelineExecution) return null;
+  return window.CuefieldTimelineExecutor.buildCuefieldTimelineExecution({
+    entryTime: pending && pending.entryTime,
+    timeline: action.fallbackTimeline,
+    targetVolume: targetVolume,
+  });
+}
+
 function applyCuefieldTimelineAction(action, pending, nextMedia) {
   if (!action || !pending || pending.token !== trackSwitchToken || pending.currentIndex !== currentIdx) return;
   if (action.op === 'handoff') return;
+  if (action.op === 'bridge') {
+    if (!pending.bridgeStarted && !startCuefieldBridge(action, pending)) pending.runtimeDowngrade = 'bridge-direct-fallback';
+    return;
+  }
   if (action.deck === 'B') {
     var bGraph = nextMedia && nextMedia._cuefieldDeckGraph || null;
     if (action.op === 'play') {
@@ -11401,6 +11438,14 @@ function runCuefieldVolumeCurve(pending, nextMedia) {
   var execution = cuefieldTimelineExecutionForPending(pending);
   if (!execution) return cuefieldCrossfadeMsForPending(pending);
   clearCuefieldTimelineTimers();
+  if (execution.requiresBridge) {
+    var bridgeAction = execution.actions.find(function(action){ return action.op === 'bridge'; });
+    if (!startCuefieldBridge(bridgeAction, pending)) {
+      pending.runtimeDowngrade = 'bridge-direct-fallback';
+      execution = cuefieldBridgeFallbackExecution(bridgeAction, pending)
+        || cuefieldVolumeOnlyExecution(execution, pending);
+    }
+  }
   var bGraph = execution.requiresBGraph ? ensureCuefieldBDeckGraph(nextMedia) : null;
   if (bGraph) primeCuefieldBDeckGain(bGraph, nextMedia);
   else if (execution.requiresBGraph) {
