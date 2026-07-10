@@ -32,34 +32,43 @@ function normalizeEntry(candidate) {
   };
 }
 
-function landingOptions(analysis) {
+function sourceLandings(analysis) {
   const structure = analysis && analysis.structureMap || {};
-  const candidates = [...(structure.entryCandidates || []), ...(analysis && analysis.candidates || [])]
-    .filter((candidate) => candidate && candidate.role === 'entry')
+  return [...(structure.entryCandidates || []), ...(analysis && analysis.candidates || [])]
+    .filter((candidate) => candidate && candidate.role === 'entry');
+}
+
+function landingOptions(analysis) {
+  const candidates = sourceLandings(analysis)
     .map(normalizeEntry)
     .sort((a, b) => toNumber(b.confidence) - toNumber(a.confidence) || a.time - b.time);
   const unique = [];
   candidates.forEach((candidate) => {
-    if (!unique.some((item) => item.landingType === candidate.landingType && Math.abs(item.landingAt - candidate.landingAt) < 0.08)) {
+    if (!unique.some((item) => item.landingType === candidate.landingType && Math.abs(item.landingAt - candidate.landingAt) < 1.5)) {
       unique.push(candidate);
     }
   });
   return unique.slice(0, 6);
 }
 
-function sourceExits(analysis, protectedUntil) {
+function exitSourceCandidates(analysis) {
   const structure = analysis && analysis.structureMap || {};
   const source = structure.exitCandidates && structure.exitCandidates.length
     ? structure.exitCandidates
     : (analysis && analysis.candidates || []).filter((candidate) => candidate && candidate.role === 'exit');
-  return source.filter((candidate) => candidate && candidate.role === 'exit' && toNumber(candidate.time) >= protectedUntil);
+  return source.filter((candidate) => candidate && candidate.role === 'exit');
+}
+
+function sourceExits(analysis, protectedUntil) {
+  return exitSourceCandidates(analysis)
+    .filter((candidate) => toNumber(candidate.time) >= protectedUntil);
 }
 
 function scoreWindowExit(candidate) {
   let score = clamp(candidate && candidate.confidence);
   if (candidate && candidate.type === 'release') score += 0.18;
   if (toNumber(candidate && candidate.energyAfter) < toNumber(candidate && candidate.energyBefore)) score += 0.08;
-  return score - toNumber(candidate && candidate.latePenalty);
+  return clamp(score - clamp(candidate && candidate.latePenalty));
 }
 
 function exitOptions(analysis, protectedUntil) {
@@ -107,6 +116,12 @@ function recipeSectionEntry(entry) {
   };
 }
 
+function isAnchoredLandingDiagnosticValid(entry, window) {
+  if (!['hook', 'intro', 'drop'].includes(landingKind(entry))) return true;
+  const landingError = window && window.landingError;
+  return Number.isFinite(landingError) && Math.abs(landingError) <= 0.08;
+}
+
 function rejectionReasons({ protectedUntil, exit, entry, recipeCandidate, diagnostics }) {
   const reasons = [];
   const window = recipeCandidate.window || {};
@@ -114,7 +129,8 @@ function rejectionReasons({ protectedUntil, exit, entry, recipeCandidate, diagno
   const anchored = ['hook', 'intro', 'drop'].includes(landingKind(entry));
   if (mixStart < protectedUntil) reasons.push('mix start precedes protected section');
   if (anchored && window.runwayAvailable === false) reasons.push('landing has no runway');
-  if (anchored && Math.abs(toNumber(window.landingError, Number.MAX_SAFE_INTEGER)) > 0.08) reasons.push('landing error exceeds .08');
+  if (anchored && !Number.isFinite(window.landingError)) reasons.push('landing diagnostic unavailable');
+  else if (anchored && !isAnchoredLandingDiagnosticValid(entry, window)) reasons.push('landing error exceeds .08');
   if (landingKind(entry) === 'hook' && entry.playFrom === entry.landingAt && toNumber(diagnostics.relativeTempoDelta) > 0.15) {
     reasons.push('direct hook has no compatible runway');
   }
@@ -126,15 +142,16 @@ function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, 
   const energyContinuity = clamp(diagnostics.energyScore);
   const tempoCompatibility = clamp(diagnostics.bpmScore);
   const groove = grooveContinuity(fromProfile, toProfile, exit, entry, diagnostics);
-  const continuity = (energyContinuity + groove + tempoCompatibility + clamp(diagnostics.bassScore)) / 4;
-  const exitRatio = toNumber(exit.exitRatio, toNumber(exit.time) / Math.max(1, toNumber(fromProfile.duration)));
-  const latePenalty = Math.max(toNumber(exit.latePenalty), exitRatio > 0.78 ? 0.45 : 0);
-  const score = sectionChoice.score * 0.34
-    + toNumber(recipeCandidate.score) * 0.2
+  const continuity = clamp((energyContinuity + groove + tempoCompatibility + clamp(diagnostics.bassScore)) / 4);
+  const suppliedExitRatio = clamp(exit.exitRatio);
+  const exitRatio = suppliedExitRatio || clamp(toNumber(exit.time) / Math.max(1, toNumber(fromProfile.duration)));
+  const latePenalty = clamp(Math.max(clamp(exit.latePenalty), exitRatio > 0.78 ? 0.45 : 0));
+  const score = clamp(clamp(sectionChoice.score) * 0.34
+    + clamp(recipeCandidate.score) * 0.2
     + ((clamp(exit.confidence) + clamp(entry.confidence)) / 2) * 0.16
     + overlapScore(recipeCandidate.window.audibleOverlap, toNumber(diagnostics.relativeTempoDelta)) * 0.12
     + continuity * 0.18
-    - latePenalty;
+    - latePenalty);
   return {
     exit,
     entry,
@@ -145,12 +162,34 @@ function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, 
     handoffAt: round(toNumber(exit.time) + toNumber(recipeCandidate.window.handoffOffset)),
     audibleOverlap: toNumber(recipeCandidate.window.audibleOverlap),
     preRollDuration: toNumber(recipeCandidate.window.preRollDuration),
-    exitRatio: round(exitRatio),
+    exitRatio: round(clamp(exitRatio)),
     energyContinuity: round(energyContinuity),
     grooveContinuity: groove,
     tempoCompatibility: round(tempoCompatibility),
     score: round(score),
     rejectionReasons: [],
+  };
+}
+
+function compactWindow(window) {
+  return {
+    exit: {
+      type: window.exit && window.exit.type,
+      time: window.exit && window.exit.time,
+      exitRatio: window.exitRatio,
+    },
+    entry: {
+      type: window.entry && window.entry.type,
+      source: window.entry && window.entry.source,
+      landingType: window.entry && window.entry.landingType,
+      landingAt: window.entry && window.entry.landingAt,
+    },
+    recipe: window.recipeCandidate && window.recipeCandidate.recipe,
+    score: clamp(window.score),
+    audibleOverlap: toNumber(window.audibleOverlap),
+    mixStart: window.mixStart,
+    handoffAt: window.handoffAt,
+    rejectionReasons: Array.isArray(window.rejectionReasons) ? window.rejectionReasons.slice() : [],
   };
 }
 
@@ -188,31 +227,47 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
   const protectedUntil = toNumber(fromAnalysis.structureMap && fromAnalysis.structureMap.protectedUntil);
   const exits = exitOptions(fromAnalysis, protectedUntil);
   const entries = landingOptions(toAnalysis);
-  const candidates = [];
+  const candidateWindows = [];
   const rejected = [];
-  const diagnostics = { protectedUntil, exitCount: exits.length, landingCount: entries.length, recipeCandidatesConsidered: 0 };
+  const diagnostics = {
+    protectedUntil,
+    sourceExitCount: exitSourceCandidates(fromAnalysis).length,
+    sourceLandingCount: sourceLandings(toAnalysis).length,
+    consideredExitCount: exits.length,
+    consideredLandingCount: entries.length,
+    exitCount: exits.length,
+    landingCount: entries.length,
+    recipeCandidatesConsidered: 0,
+  };
 
   exits.forEach((exit) => {
     entries.forEach((entry) => {
-      const sectionChoice = scoreCandidatePair(exit, entry, fromAnalysis, toAnalysis, scoreWindowExit, exits);
+      const scoredSectionChoice = scoreCandidatePair(exit, entry, fromAnalysis, toAnalysis, scoreWindowExit, exits);
+      const sectionChoice = { ...scoredSectionChoice, score: clamp(scoredSectionChoice.score) };
       const recipePlan = planRecipeCandidates(fromProfile, toProfile, {
         sectionChoice: { ...sectionChoice, entry: recipeSectionEntry(entry) },
       });
-      (recipePlan.candidates || []).forEach((recipeCandidate) => {
+      (recipePlan.candidates || []).forEach((candidate) => {
+        const recipeCandidate = { ...candidate, score: clamp(candidate.score) };
         diagnostics.recipeCandidatesConsidered += 1;
         const reasons = rejectionReasons({ protectedUntil, exit, entry, recipeCandidate, diagnostics: recipePlan.diagnostics || {} });
         const window = rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics: recipePlan.diagnostics || {}, fromProfile, toProfile });
         if (reasons.length) rejected.push({ ...window, rejectionReasons: reasons });
-        else candidates.push(window);
+        else candidateWindows.push(window);
       });
     });
   });
-  candidates.sort((a, b) => b.score - a.score || a.exit.time - b.exit.time || a.entry.landingAt - b.entry.landingAt);
+  candidateWindows.sort((a, b) => b.score - a.score || a.exit.time - b.exit.time || a.entry.landingAt - b.entry.landingAt);
   const earliestExit = sourceExits(fromAnalysis, protectedUntil)
     .slice()
     .sort((a, b) => toNumber(a.time) - toNumber(b.time))[0] || exits[0];
-  const chosen = candidates[0] || startFallback(fromProfile, earliestExit, rejected);
-  return { chosen, candidates, rejected, diagnostics };
+  const chosen = candidateWindows[0] || startFallback(fromProfile, earliestExit, rejected);
+  return {
+    chosen,
+    candidates: candidateWindows.slice(1).map(compactWindow),
+    rejected: rejected.map(compactWindow),
+    diagnostics,
+  };
 }
 
-module.exports = { chooseTransitionWindow };
+module.exports = { chooseTransitionWindow, isAnchoredLandingDiagnosticValid };

@@ -217,3 +217,56 @@ test('keeps an early usable exit when late outro candidates exceed the top-eight
   assert.equal(result.diagnostics.exitCount, 8);
   assert.equal(result.chosen.exit.time, 72);
 });
+
+test('deduplicates same-type landings within 1.5 seconds before the six-option cap', () => {
+  const from = profile({ exits: [exit(80)] });
+  const to = profile({ entries: [
+    entry('intro', 16, { landingAt: 16, landingType: 'intro', confidence: 0.9 }),
+    entry('intro', 17.2, { landingAt: 17.2, landingType: 'intro', confidence: 0.8 }),
+    entry('hook', 32, { landingAt: 32, landingType: 'hook' }),
+  ] });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.diagnostics.sourceLandingCount, 3);
+  assert.equal(result.diagnostics.consideredLandingCount, 2);
+});
+
+test('returns only compact alternatives and rejected windows', () => {
+  const sentinel = 'PRIVATE-LYRIC-SENTINEL';
+  const from = profile({ exits: [exit(80), exit(96)] });
+  const to = profile({
+    entries: [
+      entry('intro', 16, { text: sentinel, resolvesTo: { text: sentinel } }),
+      entry('hook', 32, { playFrom: 32, landingAt: 32, landingType: 'hook', text: sentinel }),
+    ],
+  });
+
+  const result = chooseTransitionWindow(from, to);
+  const alternativeJson = JSON.stringify(result.candidates);
+  const rejectedJson = JSON.stringify(result.rejected);
+
+  assert.equal(result.candidates.every((candidate) => !('sectionChoice' in candidate) && !('recipeCandidate' in candidate) && !('timeline' in candidate)), true);
+  assert.equal(result.rejected.every((candidate) => !('sectionChoice' in candidate) && !('recipeCandidate' in candidate) && !('timeline' in candidate)), true);
+  assert.equal(alternativeJson.includes(sentinel), false);
+  assert.equal(rejectedJson.includes(sentinel), false);
+  assert.equal(result.candidates.every((candidate) => candidate.score >= 0 && candidate.score <= 1), true);
+});
+
+test('sanitizes malformed scores and penalties to finite ranking values', () => {
+  const from = profile({ exits: [exit(80, Infinity, { latePenalty: Infinity, exitRatio: NaN, energyBefore: NaN, energyAfter: Infinity })] });
+  const to = profile({ entries: [entry('intro', 16, { confidence: Infinity })] });
+
+  const result = chooseTransitionWindow(from, to);
+  const ranked = [result.chosen, ...result.candidates, ...result.rejected];
+
+  assert.equal(ranked.every((candidate) => Number.isFinite(candidate.score) && candidate.score >= 0 && candidate.score <= 1), true);
+});
+
+test('rejects anchored windows without a finite landing diagnostic', () => {
+  const { isAnchoredLandingDiagnosticValid } = require('../cuefield/transition-window-planner');
+
+  assert.equal(isAnchoredLandingDiagnosticValid(entry('hook', 32, { landingType: 'hook' }), { landingError: null }), false);
+  assert.equal(isAnchoredLandingDiagnosticValid(entry('intro', 16, { landingType: 'intro' }), { landingError: undefined }), false);
+  assert.equal(isAnchoredLandingDiagnosticValid(entry('drop', 24, { landingType: 'drop' }), { landingError: NaN }), false);
+});
