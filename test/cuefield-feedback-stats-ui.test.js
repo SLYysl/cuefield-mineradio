@@ -56,6 +56,12 @@ test('Cuefield feedback captures adaptive planner and runtime diagnostics', () =
   assert.match(contextBlock, /plannerDiagnostics\.exitType/);
   assert.match(contextBlock, /plannerDiagnostics\.entryType/);
   assert.match(contextBlock, /plannerDiagnostics\.exitCandidateCount/);
+  [
+    'firstHookStart', 'firstHookEnd', 'hookConfidence', 'hookEvidence',
+    'exitRatio', 'mixStart', 'handoffAt', 'landingAt',
+    'audibleOverlap', 'preRollDuration', 'energyContinuity',
+    'grooveContinuity', 'tempoCompatibility', 'windowRejectionReasons',
+  ].forEach((field) => assert.match(contextBlock, new RegExp('plannerDiagnostics\\.' + field)));
   assert.match(contextBlock, /pending\.runtimeDowngrade/);
   assert.equal(executeBlock.indexOf('runCuefieldVolumeCurve') < executeBlock.indexOf('cuefieldFeedbackContextFromPending'), true);
 });

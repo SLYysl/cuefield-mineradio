@@ -19,6 +19,46 @@ function compactList(value, maxItems = 8) {
     : [];
 }
 
+function normalizeHookCount(value) {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
+}
+
+function normalizeSustainedEnergy(value) {
+  if (typeof value === 'boolean') return value;
+  return typeof value === 'number' ? roundNumber(value) : null;
+}
+
+function compactRejectionReasons(value) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((reason) => compactString(reason, 96)).filter(Boolean))).slice(0, 8);
+}
+
+function compactWindow(window = {}) {
+  return {
+    firstHookStart: roundNumber(window.firstHookStart),
+    firstHookEnd: roundNumber(window.firstHookEnd),
+    hookConfidence: roundNumber(window.hookConfidence),
+    hookEvidence: {
+      repeatedLineCount: normalizeHookCount(window.hookEvidence && window.hookEvidence.repeatedLineCount),
+      repeatedBlockCount: normalizeHookCount(window.hookEvidence && window.hookEvidence.repeatedBlockCount),
+      energyLift: roundNumber(window.hookEvidence && window.hookEvidence.energyLift),
+      sustainedEnergy: normalizeSustainedEnergy(window.hookEvidence && window.hookEvidence.sustainedEnergy),
+    },
+    exitRatio: roundNumber(window.exitRatio),
+    mixStart: roundNumber(window.mixStart),
+    handoffAt: roundNumber(window.handoffAt),
+    landingAt: roundNumber(window.landingAt),
+    audibleOverlap: roundNumber(window.audibleOverlap),
+    preRollDuration: roundNumber(window.preRollDuration),
+    energyContinuity: roundNumber(window.energyContinuity),
+    grooveContinuity: roundNumber(window.grooveContinuity),
+    tempoCompatibility: roundNumber(window.tempoCompatibility),
+    rejectionReasons: compactRejectionReasons(window.rejectionReasons),
+  };
+}
+
 function normalizeRating(value) {
   const rating = Number(value);
   if (rating !== 1 && rating !== 2 && rating !== 3) {
@@ -50,8 +90,8 @@ function compactDiagnostics(diagnostics = {}) {
 
 function compactStructure(transition = {}) {
   return {
-    source: compactString(transition.structureSource, 24),
-    confidence: roundNumber(transition.structureConfidence),
+    source: compactString(transition.structureSource || transition.source, 24),
+    confidence: roundNumber(transition.structureConfidence == null ? transition.confidence : transition.structureConfidence),
     protectedUntil: roundNumber(transition.protectedUntil),
     exitType: compactString(transition.exitType, 32),
     exitConfidence: roundNumber(transition.exitConfidence),
@@ -63,6 +103,7 @@ function compactStructure(transition = {}) {
 }
 
 function compactTransition(transition = {}) {
+  const structure = transition.structure || transition;
   return {
     recipe: compactString(transition.recipe, 80),
     transitionRecipe: compactString(transition.transitionRecipe, 80),
@@ -82,8 +123,9 @@ function compactTransition(transition = {}) {
     beatGridTrusted: transition.beatGridTrusted === true,
     runtimeDowngrade: compactString(transition.runtimeDowngrade, 40),
     diagnostics: compactDiagnostics(transition.diagnostics),
-    structure: compactStructure(transition),
+    structure: compactStructure(structure),
     risks: compactList(transition.risks),
+    window: compactWindow(transition.window || transition),
   };
 }
 
@@ -194,4 +236,5 @@ module.exports = {
   appendCuefieldFeedback,
   buildCuefieldFeedbackRecord,
   readCuefieldFeedbackStats,
+  compactTransition,
 };

@@ -3,6 +3,8 @@ function toPositiveInt(value, fallback) {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : fallback;
 }
 
+const { compactTransition } = require('./feedback-log');
+
 function remoteFeedbackConfig(env = process.env) {
   const url = String(env.CUEFIELD_FEEDBACK_REMOTE_URL || '').trim();
   if (!url) return null;
@@ -17,7 +19,7 @@ function remoteFeedbackConfig(env = process.env) {
 
 function buildRemoteFeedbackPayload(record, opts = {}) {
   const pair = record && record.pair || {};
-  const transition = record && record.transition || {};
+  const transition = compactTransition(record && record.transition || {});
   return {
     source: opts.source || 'mineradio-cuefield-mvp',
     schema: 'cuefield-feedback-v1',
@@ -34,42 +36,7 @@ function buildRemoteFeedbackPayload(record, opts = {}) {
         toTitle: pair.toTitle || '',
         toArtist: pair.toArtist || '',
       },
-      transition: {
-        recipe: transition.recipe || '',
-        transitionRecipe: transition.transitionRecipe || '',
-        executionMode: transition.executionMode || '',
-        tier: transition.tier || '',
-        score: transition.score,
-        evalScore: transition.evalScore,
-        exitTime: transition.exitTime,
-        entryTime: transition.entryTime,
-        overlapClass: transition.overlapClass || '',
-        overlapDuration: transition.overlapDuration,
-        entrySource: transition.entrySource || '',
-        entryConfidence: transition.entryConfidence,
-        bpmA: transition.bpmA,
-        bpmB: transition.bpmB,
-        relativeTempoDelta: transition.relativeTempoDelta,
-        beatGridTrusted: transition.beatGridTrusted === true,
-        runtimeDowngrade: transition.runtimeDowngrade || '',
-        diagnostics: {
-          outroCompleteness: transition.diagnostics && transition.diagnostics.outroCompleteness,
-          bIntroAggression: transition.diagnostics && transition.diagnostics.bIntroAggression,
-          styleTextureDistance: transition.diagnostics && transition.diagnostics.styleTextureDistance,
-        },
-        structure: {
-          source: transition.structure && transition.structure.source || '',
-          confidence: transition.structure && transition.structure.confidence,
-          protectedUntil: transition.structure && transition.structure.protectedUntil,
-          exitType: transition.structure && transition.structure.exitType || '',
-          exitConfidence: transition.structure && transition.structure.exitConfidence,
-          entryType: transition.structure && transition.structure.entryType || '',
-          entryConfidence: transition.structure && transition.structure.entryConfidence,
-          exitCandidateCount: transition.structure && transition.structure.exitCandidateCount,
-          entryCandidateCount: transition.structure && transition.structure.entryCandidateCount,
-        },
-        risks: Array.isArray(transition.risks) ? transition.risks.slice(0, 8) : [],
-      },
+      transition,
     },
   };
 }

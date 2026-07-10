@@ -56,6 +56,25 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
         styleTextureDistance: 0.1654,
       },
       audioUrl: 'https://example.com/audio.mp3',
+      firstHookStart: 12.34567,
+      firstHookEnd: 40.98765,
+      hookConfidence: 0.87654,
+      hookEvidence: {
+        repeatedLineCount: 2.8,
+        repeatedBlockCount: 1.2,
+        energyLift: 0.65432,
+        sustainedEnergy: true,
+      },
+      exitRatio: 0.71234,
+      mixStart: 48.25678,
+      handoffAt: 51.25999,
+      landingAt: 32.12345,
+      audibleOverlap: 3.87654,
+      preRollDuration: 1.23456,
+      energyContinuity: 0.76543,
+      grooveContinuity: 0.65432,
+      tempoCompatibility: 0.54321,
+      rejectionReasons: ['too late', 'too late', 'x'.repeat(120)],
     },
   }, new Date('2026-07-09T02:00:00.000Z'));
 
@@ -94,6 +113,78 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
   assert.deepEqual(record.transition.risks, ['directionality mismatch']);
   assert.equal(Object.prototype.hasOwnProperty.call(record.transition, 'audioUrl'), false);
   assert.equal(JSON.stringify(record).includes('must not persist'), false);
+  assert.deepEqual(record.transition.window, {
+    firstHookStart: 12.346,
+    firstHookEnd: 40.988,
+    hookConfidence: 0.877,
+    hookEvidence: {
+      repeatedLineCount: 3,
+      repeatedBlockCount: 1,
+      energyLift: 0.654,
+      sustainedEnergy: true,
+    },
+    exitRatio: 0.712,
+    mixStart: 48.257,
+    handoffAt: 51.26,
+    landingAt: 32.123,
+    audibleOverlap: 3.877,
+    preRollDuration: 1.235,
+    energyContinuity: 0.765,
+    grooveContinuity: 0.654,
+    tempoCompatibility: 0.543,
+    rejectionReasons: ['too late', 'x'.repeat(96)],
+  });
+});
+
+test('normalizes malformed transition window values and keeps reasons bounded', () => {
+  const record = buildCuefieldFeedbackRecord({
+    rating: 2,
+    transition: {
+      firstHookStart: Infinity,
+      firstHookEnd: NaN,
+      hookConfidence: 'bad',
+      hookEvidence: {
+        repeatedLineCount: -4,
+        repeatedBlockCount: Infinity,
+        energyLift: NaN,
+        sustainedEnergy: 0.12345,
+      },
+      exitRatio: Infinity,
+      mixStart: NaN,
+      handoffAt: undefined,
+      landingAt: 1.23456,
+      audibleOverlap: 2.34567,
+      preRollDuration: 3.45678,
+      energyContinuity: 4.56789,
+      grooveContinuity: -Infinity,
+      tempoCompatibility: 5.6789,
+      rejectionReasons: ['same', 'same', '', null, ...Array.from({ length: 10 }, (_, i) => 'reason ' + i)],
+    },
+  });
+
+  assert.deepEqual(record.transition.window, {
+    firstHookStart: null,
+    firstHookEnd: null,
+    hookConfidence: null,
+    hookEvidence: {
+      repeatedLineCount: 0,
+      repeatedBlockCount: null,
+      energyLift: null,
+      sustainedEnergy: 0.123,
+    },
+    exitRatio: null,
+    mixStart: null,
+    handoffAt: null,
+    landingAt: 1.235,
+    audibleOverlap: 2.346,
+    preRollDuration: 3.457,
+    energyContinuity: 4.568,
+    grooveContinuity: null,
+    tempoCompatibility: 5.679,
+    rejectionReasons: ['same', 'reason 0', 'reason 1', 'reason 2', 'reason 3', 'reason 4', 'reason 5', 'reason 6'],
+  });
+  assert.equal(JSON.stringify(record).includes('Infinity'), false);
+  assert.equal(JSON.stringify(record).includes('NaN'), false);
 });
 
 test('rejects ratings outside the 1 to 3 scoring scale', () => {
@@ -127,6 +218,27 @@ test('keeps older feedback records readable without adaptive diagnostics', () =>
   assert.equal(record.transition.overlapClass, '');
   assert.equal(record.transition.overlapDuration, null);
   assert.equal(record.transition.beatGridTrusted, false);
+  assert.deepEqual(record.transition.window, {
+    firstHookStart: null,
+    firstHookEnd: null,
+    hookConfidence: null,
+    hookEvidence: {
+      repeatedLineCount: null,
+      repeatedBlockCount: null,
+      energyLift: null,
+      sustainedEnergy: null,
+    },
+    exitRatio: null,
+    mixStart: null,
+    handoffAt: null,
+    landingAt: null,
+    audibleOverlap: null,
+    preRollDuration: null,
+    energyContinuity: null,
+    grooveContinuity: null,
+    tempoCompatibility: null,
+    rejectionReasons: [],
+  });
 });
 
 test('summarizes Cuefield feedback by recipe, tier, risk, and failed samples', () => {

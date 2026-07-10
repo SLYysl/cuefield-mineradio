@@ -46,6 +46,20 @@ test('builds a compact remote feedback payload without audio URLs', () => {
         styleTextureDistance: 0.17,
       },
       audioUrl: 'https://example.com/song.mp3',
+      firstHookStart: 12.3456,
+      firstHookEnd: 40.9876,
+      hookConfidence: 0.8765,
+      hookEvidence: { repeatedLineCount: 2, repeatedBlockCount: 1, energyLift: 0.6543, sustainedEnergy: true },
+      exitRatio: 0.7123,
+      mixStart: 48.2567,
+      handoffAt: 51.2599,
+      landingAt: 32.1234,
+      audibleOverlap: 3.8765,
+      preRollDuration: 1.2345,
+      energyContinuity: 0.7654,
+      grooveContinuity: 0.6543,
+      tempoCompatibility: 0.5432,
+      rejectionReasons: ['late', 'late'],
     },
   }, { source: 'tester-a' });
 
@@ -74,6 +88,50 @@ test('builds a compact remote feedback payload without audio URLs', () => {
     entryCandidateCount: 3,
   });
   assert.equal(Object.prototype.hasOwnProperty.call(payload.record.transition, 'audioUrl'), false);
+  assert.deepEqual(payload.record.transition.window, {
+    firstHookStart: 12.346,
+    firstHookEnd: 40.988,
+    hookConfidence: 0.877,
+    hookEvidence: { repeatedLineCount: 2, repeatedBlockCount: 1, energyLift: 0.654, sustainedEnergy: true },
+    exitRatio: 0.712,
+    mixStart: 48.257,
+    handoffAt: 51.26,
+    landingAt: 32.123,
+    audibleOverlap: 3.877,
+    preRollDuration: 1.235,
+    energyContinuity: 0.765,
+    grooveContinuity: 0.654,
+    tempoCompatibility: 0.543,
+    rejectionReasons: ['late'],
+  });
+});
+
+test('remote transition window uses the same sanitized semantics as local feedback', () => {
+  const payload = buildRemoteFeedbackPayload({
+    transition: {
+      firstHookStart: Infinity,
+      hookEvidence: { repeatedLineCount: NaN, sustainedEnergy: 0.12345 },
+      mixStart: 10.98765,
+      rejectionReasons: ['x'.repeat(120), 'x'.repeat(120)],
+    },
+  });
+  assert.deepEqual(payload.record.transition.window, {
+    firstHookStart: null,
+    firstHookEnd: null,
+    hookConfidence: null,
+    hookEvidence: { repeatedLineCount: null, repeatedBlockCount: null, energyLift: null, sustainedEnergy: 0.123 },
+    exitRatio: null,
+    mixStart: 10.988,
+    handoffAt: null,
+    landingAt: null,
+    audibleOverlap: null,
+    preRollDuration: null,
+    energyContinuity: null,
+    grooveContinuity: null,
+    tempoCompatibility: null,
+    rejectionReasons: ['x'.repeat(96)],
+  });
+  assert.equal(JSON.stringify(payload).includes('Infinity'), false);
 });
 
 test('forwards Cuefield feedback with bearer auth when configured', async () => {
