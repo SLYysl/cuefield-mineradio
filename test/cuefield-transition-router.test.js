@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 
 const { classifyTransitionRoute } = require('../cuefield/transition-router');
 
-function profile(duration, tempo = 120, bars = []) {
+function profile(duration, bpm = 120, bars = []) {
   return {
     duration,
-    tempo,
+    bpm,
     bars,
   };
 }
@@ -35,6 +35,8 @@ test('does not route late from directionality mismatch alone', () => {
   });
 
   assert.equal(policy.route, 'structure-mix');
+  assert.equal(policy.metrics.directionalityMismatch, 1);
+  assert.ok(policy.reasons.includes('directionality-mismatch'));
 });
 
 test('routes a large snap release into a late energy release', () => {
@@ -62,6 +64,20 @@ test('routes missing structural evidence into terminal rescue', () => {
   assert.deepEqual(policy.preferredExitRange, [0.88, 0.96]);
 });
 
+test('protects the structure mix exit from the supplied boundary', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 100, [{ start: 80, snapDensity: 0.3, energy: 0.5 }]),
+    toProfile: profile(212, 104, [{ start: 20, snapDensity: 0.31, energy: 0.5 }]),
+    protectedUntil: 80,
+    exits: [{ time: 80, type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 20, landingType: 'intro', confidence: 0.8 }],
+    risks: [],
+  });
+
+  assert.equal(policy.route, 'structure-mix');
+  assert.deepEqual(policy.preferredExitRange, [0.4, 0.78]);
+});
+
 test('returns a compact policy with finite metrics', () => {
   const policy = classifyTransitionRoute({
     fromProfile: profile(200, 100, [{ start: 70, snapDensity: 0.27, energy: 0.72 }]),
@@ -82,7 +98,7 @@ test('returns a compact policy with finite metrics', () => {
     'recipe',
     'route',
   ]);
-  assert.ok(Object.keys(policy.metrics).length <= 6);
+  assert.ok(Object.keys(policy.metrics).length <= 7);
   for (const value of Object.values(policy.metrics)) assert.equal(Number.isFinite(value), true);
   assert.ok(policy.reasons.length <= 4);
 });
