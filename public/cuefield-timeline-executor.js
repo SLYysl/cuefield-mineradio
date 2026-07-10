@@ -34,6 +34,30 @@
     return values;
   }
 
+  function buildVolumeOnlyCuefieldExecution(opts) {
+    opts = opts || {};
+    var leadSec = 2.2;
+    var anchorTime = Math.max(0, toNumber(opts.anchorTime, 0));
+    var targetVolume = clamp(opts.targetVolume == null ? 1 : opts.targetVolume, 0, 1);
+    var bStart = round(Math.max(0, anchorTime - leadSec));
+    return {
+      leadSec: leadSec,
+      bStart: bStart,
+      handoffDelayMs: 2200,
+      requiresBGraph: false,
+      actions: [
+        { delayMs: 0, durationMs: 0, deck: 'B', op: 'play', type: '', curve: '', value: 1, at: bStart },
+        { delayMs: 0, durationMs: 2200, deck: 'B', op: 'volume', type: '', curve: '', value: 1, target: targetVolume, at: 0 },
+        { delayMs: 0, durationMs: 2200, deck: 'A', op: 'volume', type: '', curve: '', value: 0, target: 0, at: 0 },
+      ],
+    };
+  }
+
+  function shouldReleaseCuefieldDeckGraph(opts) {
+    opts = opts || {};
+    return !!opts.hasGraph && !opts.isPrepared && !opts.isActiveGraph;
+  }
+
   function normalizeAction(action, leadSec, targetVolume) {
     action = action || {};
     var value = clamp(action.value == null ? 1 : action.value, 0, 1);
@@ -138,5 +162,7 @@
   return {
     buildCuefieldTimelineExecution: buildCuefieldTimelineExecution,
     buildEqualPowerCurve: buildEqualPowerCurve,
+    buildVolumeOnlyCuefieldExecution: buildVolumeOnlyCuefieldExecution,
+    shouldReleaseCuefieldDeckGraph: shouldReleaseCuefieldDeckGraph,
   };
 });

@@ -11101,19 +11101,17 @@ function applyCuefieldTimelineAction(action, pending, nextMedia) {
   }
 }
 
-function cuefieldVolumeOnlyExecution(execution) {
-  var play = execution.actions.find(function(action) { return action.deck === 'B' && action.op === 'play'; });
-  return {
-    leadSec: 2.2,
-    bStart: execution.bStart,
-    handoffDelayMs: 2200,
-    requiresBGraph: false,
-    actions: [
-      play ? Object.assign({}, play, { delayMs: 0 }) : null,
-      { delayMs: 0, durationMs: 2200, deck: 'B', op: 'volume', value: 1, target: targetVolume, curve: '' },
-      { delayMs: 0, durationMs: 2200, deck: 'A', op: 'volume', value: 0, target: 0, curve: '' },
-    ].filter(Boolean),
-  };
+function cuefieldVolumeOnlyExecution(execution, pending) {
+  var anchors = pending && pending.plan && pending.plan.chosen && pending.plan.chosen.recipeCandidate && pending.plan.chosen.recipeCandidate.anchors || {};
+  var anchorTime = Number(anchors.bAnchor);
+  if (!isFinite(anchorTime)) anchorTime = Number(pending && pending.entryTime) || 0;
+  if (window.CuefieldTimelineExecutor && window.CuefieldTimelineExecutor.buildVolumeOnlyCuefieldExecution) {
+    return window.CuefieldTimelineExecutor.buildVolumeOnlyCuefieldExecution({
+      anchorTime: anchorTime,
+      targetVolume: targetVolume,
+    });
+  }
+  return execution;
 }
 
 function runCuefieldVolumeCurve(pending, nextMedia) {
@@ -11124,7 +11122,7 @@ function runCuefieldVolumeCurve(pending, nextMedia) {
   if (bGraph) primeCuefieldBDeckGain(bGraph, nextMedia);
   else if (execution.requiresBGraph) {
     pending.runtimeDowngrade = 'volume-only';
-    execution = cuefieldVolumeOnlyExecution(execution);
+    execution = cuefieldVolumeOnlyExecution(execution, pending);
   }
   pending.timelineExecution = execution;
   for (var i = 0; i < execution.actions.length; i++) {
@@ -11216,11 +11214,9 @@ async function executeCuefieldSoftHandoff(pending) {
   }
   var handoffDelayMs = runCuefieldVolumeCurve(pending, nextMedia);
   var feedbackContext = cuefieldFeedbackContextFromPending(pending);
-  setTimeout(function(){
+  cuefieldScheduleTimeline(handoffDelayMs, function(){
     if (pending.token !== trackSwitchToken || pending.currentIndex !== currentIdx) {
-      cuefieldAutoMixExecuting = false;
-      restorePlaybackGain();
-      stopCuefieldPreparedAudio(nextMedia);
+      if (nextMedia !== audio) stopCuefieldPreparedAudio(nextMedia);
       return;
     }
     playToggleBusy = false;
@@ -11235,7 +11231,7 @@ async function executeCuefieldSoftHandoff(pending) {
       updateCuefieldAutoMixUi('handoff-complete');
       showCuefieldFeedbackPrompt(feedbackContext);
     });
-  }, Math.max(520, handoffDelayMs));
+  });
 }
 
 function scheduleQueueBeatPrefetch(fromIdx, delayMs, state) {
@@ -18933,11 +18929,12 @@ function fadeOutAndPauseAudio() {
 }
 
 function applyVolumeToAudio() {
+  var graphOwnsAudio = !!(gainNode && audioCtx && audioGraphElement === audio);
   if (audio) {
     audio.muted = false;
-    audio.volume = gainNode ? 1 : targetVolume;
+    audio.volume = graphOwnsAudio ? 1 : targetVolume;
   }
-  if (gainNode && audioCtx) {
+  if (graphOwnsAudio) {
     var now = audioCtx.currentTime || 0;
     gainNode.gain.cancelScheduledValues(now);
     gainNode.gain.setTargetAtTime(targetVolume, now, 0.025);
@@ -19358,7 +19355,14 @@ function pauseCurrentAudioForTrackSwitch() {
     clearAudioFadeTimers();
     audio.onended = null;
     audio.pause();
-    if (audio._cuefieldDeckGraph && audio !== cuefieldAutoMixPreparedAudio) releaseCuefieldBDeckGraph(audio);
+    var shouldReleaseGraph = window.CuefieldTimelineExecutor && window.CuefieldTimelineExecutor.shouldReleaseCuefieldDeckGraph
+      ? window.CuefieldTimelineExecutor.shouldReleaseCuefieldDeckGraph({
+        hasGraph: !!audio._cuefieldDeckGraph,
+        isPrepared: audio === cuefieldAutoMixPreparedAudio,
+        isActiveGraph: audioGraphElement === audio,
+      })
+      : !!audio._cuefieldDeckGraph && audio !== cuefieldAutoMixPreparedAudio && audioGraphElement !== audio;
+    if (shouldReleaseGraph) releaseCuefieldBDeckGraph(audio);
   } catch (e) {}
   playing = false;
   setPlayIcon(false);

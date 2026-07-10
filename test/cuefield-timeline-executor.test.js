@@ -4,6 +4,8 @@ const test = require('node:test');
 const {
   buildCuefieldTimelineExecution,
   buildEqualPowerCurve,
+  buildVolumeOnlyCuefieldExecution,
+  shouldReleaseCuefieldDeckGraph,
 } = require('../public/cuefield-timeline-executor');
 
 test('builds complementary equal-power curves', () => {
@@ -81,4 +83,24 @@ test('requires a B deck graph for equal-power volume curves', () => {
   });
 
   assert.equal(execution.requiresBGraph, true);
+});
+
+test('realigns volume-only downgrade to the strong B anchor', () => {
+  assert.equal(typeof buildVolumeOnlyCuefieldExecution, 'function');
+  const execution = buildVolumeOnlyCuefieldExecution({
+    anchorTime: 12,
+    targetVolume: 0.7,
+  });
+  const play = execution.actions.find((action) => action.op === 'play');
+
+  assert.equal(execution.handoffDelayMs, 2200);
+  assert.equal(play.at, 9.8);
+  assert.equal(play.at + execution.leadSec, 12);
+  assert.equal(execution.actions.some((action) => action.op === 'filter' || action.op === 'bass'), false);
+});
+
+test('keeps an adopted active Cuefield graph connected across normal source changes', () => {
+  assert.equal(typeof shouldReleaseCuefieldDeckGraph, 'function');
+  assert.equal(shouldReleaseCuefieldDeckGraph({ hasGraph: true, isPrepared: false, isActiveGraph: true }), false);
+  assert.equal(shouldReleaseCuefieldDeckGraph({ hasGraph: true, isPrepared: false, isActiveGraph: false }), true);
 });

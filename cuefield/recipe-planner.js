@@ -233,12 +233,20 @@ function safetyAssessment(fromProfile, toProfile, sectionChoice = {}) {
   const bpmA = Math.max(0, toNumber(fromProfile && fromProfile.bpm));
   const bpmB = Math.max(0, toNumber(toProfile && toProfile.bpm));
   const relativeTempoDelta = bpmA > 0 && bpmB > 0 ? Math.abs(bpmA - bpmB) / Math.max(bpmA, bpmB) : 1;
+  const fromDownbeatConfidence = average((fromProfile && fromProfile.downbeats || []).map((beat) => toNumber(beat.confidence, NaN)));
+  const toDownbeatConfidence = average((toProfile && toProfile.downbeats || []).map((beat) => toNumber(beat.confidence, NaN)));
+  const fromBarStability = average((fromProfile && fromProfile.bars || []).map((bar) => toNumber(bar.beatStability, NaN)));
+  const toBarStability = average((toProfile && toProfile.bars || []).map((bar) => toNumber(bar.beatStability, NaN)));
   const beatGridTrusted = !!(
     fromProfile && toProfile
     && toNumber(fromProfile.gridStep) > 0
     && toNumber(toProfile.gridStep) > 0
     && (fromProfile.downbeats || []).length >= 4
     && (toProfile.downbeats || []).length >= 4
+    && fromDownbeatConfidence >= 0.65
+    && toDownbeatConfidence >= 0.65
+    && fromBarStability >= 0.35
+    && toBarStability >= 0.35
   );
   let overlapClass = 'short';
   if (entryTrusted && beatGridTrusted && relativeTempoDelta <= 0.08) overlapClass = 'long';
@@ -269,7 +277,7 @@ function safetyTimeline(anchors, assessment) {
       timeline: [
         { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
         { t: -lead, deck: 'B', op: 'bass', value: 0.15, duration: 0 },
-        { t: -lead, deck: 'B', op: 'volume', value: 0.18, duration: 1400 },
+        { t: -lead, deck: 'B', op: 'volume', value: 0, duration: 1400 },
         { t: -1.6, deck: 'A', op: 'bass', value: 0.5, duration: 700 },
         { t: -1.4, deck: 'B', op: 'volume', value: 1, duration: 1400, curve: 'equal-power-in' },
         { t: -1.4, deck: 'A', op: 'volume', value: 0, duration: 1400, curve: 'equal-power-out' },
@@ -287,7 +295,7 @@ function safetyTimeline(anchors, assessment) {
         { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
         { t: -lead, deck: 'B', op: 'bass', value: 0.12, duration: 0 },
         { t: -lead, deck: 'B', op: 'filter', type: 'highpass', value: 850, duration: 0 },
-        { t: -lead, deck: 'B', op: 'volume', value: 0.55, duration: 2800 },
+        { t: -lead, deck: 'B', op: 'volume', value: 0, duration: 2800 },
         { t: -1.8, deck: 'B', op: 'volume', value: 1, duration: 1800, curve: 'equal-power-in' },
         { t: -1.8, deck: 'A', op: 'bass', value: 0.3, duration: 1000 },
         { t: -1.2, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 1000 },
@@ -304,8 +312,8 @@ function safetyTimeline(anchors, assessment) {
       { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
       { t: -lead, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
       { t: -lead, deck: 'B', op: 'filter', type: 'highpass', value: 1100, duration: 0 },
-      { t: -lead, deck: 'B', op: 'volume', value: 0.35, duration: 3600 },
-      { t: -5.4, deck: 'B', op: 'volume', value: 0.62, duration: 3000 },
+      { t: -lead, deck: 'B', op: 'volume', value: 0, duration: 3600 },
+      { t: -5.4, deck: 'B', op: 'volume', value: 0, duration: 3000 },
       { t: -2, deck: 'A', op: 'filter', type: 'highpass', value: 160, duration: 1600 },
       { t: -1.8, deck: 'A', op: 'bass', value: 0.24, duration: 1200 },
       { t: -2, deck: 'B', op: 'volume', value: 1, duration: 2000, curve: 'equal-power-in' },
@@ -366,7 +374,8 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
     makeBassHandoff(anchors, scores),
     makeQuickFade(anchors, scores),
   ].sort((a, b) => b.score - a.score || b.confidence - a.confidence);
-  const chosen = needsSafetyFallback
+  const requiresAdaptiveSafety = needsSafetyFallback || safety.anchors.overlapClass !== 'long';
+  const chosen = requiresAdaptiveSafety
     ? safety
     : (candidates.find((candidate) => !candidate.risks.includes('hard cut')) || candidates[0]);
 

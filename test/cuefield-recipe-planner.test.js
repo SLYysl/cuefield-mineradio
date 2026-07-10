@@ -80,7 +80,8 @@ test('plans multiple recipe candidates with timelines and chooses the safest hig
   assert.equal(recipes.includes('bass-eq-handoff'), true);
   assert.equal(recipes.includes('quick-safe-fade'), true);
   assert.equal(plan.candidates.every((candidate) => candidate.timeline.length > 0), true);
-  assert.equal(plan.chosen.score, Math.max(...plan.candidates.map((candidate) => candidate.score)));
+  assert.equal(plan.chosen.recipe, 'safety-long-blend');
+  assert.equal(plan.chosen.anchors.overlapClass, 'short');
   assert.equal(plan.chosen.risks.includes('hard cut'), false);
 });
 
@@ -187,6 +188,52 @@ test('uses long overlap only for a trusted entry with compatible tempo', () => {
   assert.equal(plan.chosen.anchors.overlapClass, 'long');
   assert.equal(plan.chosen.anchors.overlapDuration >= 8, true);
   assert.equal(plan.chosen.anchors.overlapDuration <= 12, true);
+  assert.equal(plan.chosen.timeline.filter((action) => action.deck === 'B' && action.op === 'volume' && !action.curve).every((action) => action.value === 0), true);
+});
+
+test('does not let an executable tier bypass the fallback compatibility gate', () => {
+  const fromProfile = buildCueProfile({
+    track: { title: 'A', duration: 128 },
+    map: makeBeatMap(128, 0.5),
+    candidates: [{ type: 'outro', role: 'exit', time: 112, confidence: 0.82 }],
+  });
+  const entry = { type: 'intro', role: 'entry', source: 'fallback', time: 16, confidence: 0.52 };
+  const toProfile = buildCueProfile({
+    track: { title: 'B', duration: 120 },
+    map: makeBeatMap(120, 0.75),
+    candidates: [entry],
+  });
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { time: 112 }, entry, evaluation: { tier: 'usable', risks: [] } },
+  });
+
+  assert.equal(plan.chosen.recipe, 'safety-long-blend');
+  assert.equal(plan.chosen.anchors.overlapClass, 'short');
+  assert.equal(plan.chosen.anchors.overlapDuration <= 3.2, true);
+});
+
+test('does not trust a low-confidence beat grid for long overlap', () => {
+  const fromMap = makeBeatMap(128, 0.5);
+  const toMap = makeBeatMap(120, 0.52);
+  fromMap.beats.forEach((beat) => { beat.confidence = 0.2; });
+  toMap.beats.forEach((beat) => { beat.confidence = 0.2; });
+  const fromProfile = buildCueProfile({
+    track: { title: 'A', duration: 128 },
+    map: fromMap,
+    candidates: [{ type: 'outro', role: 'exit', time: 112, confidence: 0.82 }],
+  });
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 0, confidence: 0.8, resolvesTo: { time: 12 } };
+  const toProfile = buildCueProfile({
+    track: { title: 'B', duration: 120 },
+    map: toMap,
+    candidates: [entry],
+  });
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { time: 112 }, entry, evaluation: { tier: 'weak', risks: [] } },
+  });
+
+  assert.equal(plan.diagnostics.beatGridTrusted, false);
+  assert.notEqual(plan.chosen.anchors.overlapClass, 'long');
 });
 
 test('reports planner features for outro completeness, intro aggression, and texture distance', () => {

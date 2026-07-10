@@ -38,3 +38,21 @@ test('Cuefield transition keeps prepared B volume in its WebAudio graph', () => 
   assert.match(cuefieldRuntime, /pending\.runtimeDowngrade = 'volume-only'/);
   assert.match(html, /preparedAudio && preparedAudio\._cuefieldDeckGraph/);
 });
+
+test('Cuefield graph lifecycle and handoff timer remain owned by the active transition', () => {
+  const html = readIndexHtml();
+  const pauseStart = html.indexOf('function pauseCurrentAudioForTrackSwitch');
+  const pauseEnd = html.indexOf('function syncPlaybackStateFromAudioEvent', pauseStart);
+  const pauseBlock = html.slice(pauseStart, pauseEnd);
+  const volumeStart = html.indexOf('function applyVolumeToAudio');
+  const volumeEnd = html.indexOf('function updateVolumeUi', volumeStart);
+  const volumeBlock = html.slice(volumeStart, volumeEnd);
+  const executeStart = html.indexOf('async function executeCuefieldSoftHandoff');
+  const executeEnd = html.indexOf('function scheduleQueueBeatPrefetch', executeStart);
+  const executeBlock = html.slice(executeStart, executeEnd);
+
+  assert.match(pauseBlock, /shouldReleaseCuefieldDeckGraph/);
+  assert.match(volumeBlock, /audioGraphElement === audio/);
+  assert.match(executeBlock, /cuefieldScheduleTimeline\(handoffDelayMs/);
+  assert.doesNotMatch(executeBlock, /setTimeout\(function/);
+});
