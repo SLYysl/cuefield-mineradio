@@ -654,16 +654,23 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
     candidate,
     eligibility: recipeEligibility(candidate, { assessment, route, scores, severeOverlapRisk }),
   }));
-  const eligible = evaluated
-    .filter((item) => item.eligibility.eligible)
+  const candidatesWithEligibility = evaluated.map((item) => ({
+    ...item.candidate,
+    eligible: item.eligibility.eligible,
+    eligibilityReason: item.eligibility.reason,
+    selectionScore: round(item.candidate.score + item.eligibility.preference),
+  }));
+  const eligible = candidatesWithEligibility
+    .filter((candidate) => candidate.eligible)
     .sort((a, b) => (
-      (b.candidate.score + b.eligibility.preference) - (a.candidate.score + a.eligibility.preference)
-      || b.candidate.confidence - a.candidate.confidence
+      b.selectionScore - a.selectionScore
+      || b.confidence - a.confidence
     ));
+  const safetyCandidate = candidatesWithEligibility.find((candidate) => candidate.recipe === 'safety-long-blend') || safety;
   const preserveUnroutedSafety = route === '' && (needsSafetyFallback || !assessment.entryTrusted);
   const chosen = preserveUnroutedSafety
-    ? safety
-    : (eligible[0] && eligible[0].candidate || safety);
+    ? safetyCandidate
+    : (eligible[0] || safetyCandidate);
   const chosenOverlap = chosenOverlapDiagnostics(chosen, {
     overlapClass: safety.anchors.overlapClass,
     overlapDuration: safety.anchors.overlapDuration,
@@ -671,7 +678,7 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
 
   return {
     chosen,
-    candidates,
+    candidates: candidatesWithEligibility,
     diagnostics: {
       aEnergy: round(scores.aEnergy),
       bEnergy: round(scores.bEnergy),
@@ -695,10 +702,10 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
       overlapDuration: chosenOverlap.overlapDuration,
       runwayAvailable: chosen.window.runwayAvailable,
       landingError: chosen.window.landingError,
-      eligibleRecipes: eligible.map((item) => item.candidate.recipe),
-      rejectedRecipes: evaluated
-        .filter((item) => !item.eligibility.eligible)
-        .map((item) => ({ recipe: item.candidate.recipe, reason: item.eligibility.reason })),
+      eligibleRecipes: eligible.map((candidate) => candidate.recipe),
+      rejectedRecipes: candidatesWithEligibility
+        .filter((candidate) => !candidate.eligible)
+        .map((candidate) => ({ recipe: candidate.recipe, reason: candidate.eligibilityReason })),
     },
   };
 }

@@ -426,6 +426,7 @@ test('uses .35 conservative groove continuity without a trusted beat grid', () =
   const result = chooseTransitionWindow(from, to);
 
   assert.equal(result.chosen.grooveContinuity, 0.35);
+  assert.equal(['intro-outro-long-blend', 'bass-eq-handoff'].includes(result.chosen.recipeCandidate.recipe), false);
 });
 
 test('latePenalty changes selection between otherwise similar windows', () => {

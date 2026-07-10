@@ -244,6 +244,7 @@ function entryPolicyPenalty(entry, policy) {
 }
 
 function recipeCandidateAllowedByRoute(candidate, policy) {
+  if (candidate && candidate.eligible === false) return false;
   const route = policy && policy.route;
   const overlap = toNumber(candidate && candidate.window && candidate.window.audibleOverlap);
   if (route === 'late-contrast-rise') {
@@ -268,7 +269,7 @@ function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, 
   const latePenalty = Math.max(normalizePenalty(exit.latePenalty), policy && policy.route === 'structure-mix' && exitRatio > 0.78 ? 0.45 : 0);
   const routePenalty = rangeDistancePenalty(exitRatio, policy) + entryPolicyPenalty(entry, policy);
   const score = clamp(clamp(sectionChoice.score) * 0.34
-    + clamp(recipeCandidate.score) * 0.2
+    + clamp(recipeCandidate.selectionScore == null ? recipeCandidate.score : recipeCandidate.selectionScore) * 0.2
     + ((clamp(exit.confidence) + clamp(entry.confidence)) / 2) * 0.16
     + overlapScore(recipeCandidate.window.audibleOverlap, toNumber(diagnostics.relativeTempoDelta)) * 0.12
     + continuity * 0.18

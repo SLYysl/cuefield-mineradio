@@ -597,5 +597,6 @@ test('reports why unsafe long recipes were rejected', () => {
   assert.equal(plan.diagnostics.rejectedRecipes.some((item) => (
     item.recipe === 'intro-outro-long-blend' && typeof item.reason === 'string'
   )), true);
+  assert.equal(plan.candidates.find((candidate) => candidate.recipe === 'intro-outro-long-blend').eligible, false);
   assert.equal(plan.chosen.recipe === 'quick-safe-fade' || plan.chosen.recipe === 'safety-long-blend', true);
 });
