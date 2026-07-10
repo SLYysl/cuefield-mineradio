@@ -289,20 +289,14 @@ test('terminal rescue caps a valid late exit to a short executable overlap', () 
   assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= result.chosen.audibleOverlap), true);
 });
 
-test('terminal rescue respects a very late protected section without negative timing or ending after A', () => {
+test('rejects terminal rescue when protection leaves less than 2.2 seconds', () => {
   const from = profile({ duration: 12, protectedUntil: 11.9 });
   const to = profile({ duration: 24 });
 
-  const result = chooseTransitionWindow(from, to);
-  const timeline = result.chosen.timeline;
-
-  assert.equal(result.chosen.policy.route, 'terminal-rescue');
-  assert.equal(result.chosen.mixStart >= 11.9, true);
-  assert.equal(result.chosen.handoffAt <= 12, true);
-  assert.equal(result.chosen.mixStart < result.chosen.handoffAt, true);
-  assert.equal(timeline.every((action) => action.t >= 0), true);
-  assert.equal(timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= result.chosen.audibleOverlap), true);
-  assert.equal(timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
+  assert.throws(
+    () => chooseTransitionWindow(from, to),
+    (error) => error && error.code === 'TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY',
+  );
 });
 
 test('rejects terminal rescue when protection leaves no post-protection runway', () => {
@@ -311,20 +305,21 @@ test('rejects terminal rescue when protection leaves no post-protection runway',
 
   assert.throws(
     () => chooseTransitionWindow(from, to),
-    (error) => error && error.code === 'TERMINAL_RESCUE_NO_POST_PROTECTION_RUNWAY',
+    (error) => error && error.code === 'TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY',
   );
 });
 
-test('terminal rescue keeps a tiny positive post-protection runway internally bounded', () => {
-  const from = profile({ duration: 12, protectedUntil: 11.999 });
+test('terminal rescue executes an exact 2.2-second post-protection runway', () => {
+  const from = profile({ duration: 12, protectedUntil: 9.8 });
   const to = profile({ duration: 24 });
 
   const result = chooseTransitionWindow(from, to);
 
-  assert.equal(result.chosen.mixStart, 11.999);
+  assert.equal(result.chosen.mixStart, 9.8);
   assert.equal(result.chosen.mixStart < result.chosen.handoffAt, true);
   assert.equal(result.chosen.handoffAt <= 12, true);
-  assert.equal(result.chosen.audibleOverlap > 0, true);
+  assert.equal(result.chosen.audibleOverlap >= 2.2, true);
+  assert.equal(result.chosen.audibleOverlap <= 3.4, true);
   assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= result.chosen.audibleOverlap), true);
 });
 

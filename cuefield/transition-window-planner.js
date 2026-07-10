@@ -3,6 +3,8 @@ const { planRecipeCandidates } = require('./recipe-planner');
 const { scoreCandidatePair } = require('./section-candidates');
 const { classifyTransitionRoute } = require('./transition-router');
 
+const MINIMUM_TERMINAL_OVERLAP = 2.2;
+
 function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, toNumber(value)));
 }
@@ -323,9 +325,10 @@ function terminalRescuePolicy(policy, fromProfile, protectedUntil) {
 
 function terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, rejected) {
   const duration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
-  if (!(duration > toNumber(protectedUntil))) {
-    const error = new Error('TERMINAL_RESCUE_NO_POST_PROTECTION_RUNWAY');
-    error.code = 'TERMINAL_RESCUE_NO_POST_PROTECTION_RUNWAY';
+  const protectedBoundary = toNumber(protectedUntil);
+  if (duration - protectedBoundary < MINIMUM_TERMINAL_OVERLAP - 0.000001) {
+    const error = new Error('TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY');
+    error.code = 'TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY';
     throw error;
   }
   const [minRatio, maxRatio] = policy.preferredExitRange;
@@ -338,7 +341,10 @@ function terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, rejec
   const preferredStart = rangeExits[0]
     ? toNumber(rangeExits[0].time)
     : Math.max(toNumber(protectedUntil), Math.min(duration - 3.6, duration * 0.92));
-  const mixStart = round(Math.max(toNumber(protectedUntil), Math.min(duration, preferredStart)));
+  const mixStart = round(Math.max(
+    protectedBoundary,
+    Math.min(duration - MINIMUM_TERMINAL_OVERLAP, preferredStart),
+  ));
   const overlapDuration = round(Math.max(0, Math.min(3.4, duration - mixStart)));
   const fadeDuration = Math.max(1, Math.round(overlapDuration * 1000));
   const bassRestoreDuration = Math.min(800, fadeDuration);
