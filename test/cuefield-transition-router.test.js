@@ -78,6 +78,19 @@ test('protects the structure mix exit from the supplied boundary', () => {
   assert.deepEqual(policy.preferredExitRange, [0.4, 0.78]);
 });
 
+test('does not lower a structure mix range below a late protected boundary', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 100, [{ start: 180, snapDensity: 0.3, energy: 0.5 }]),
+    toProfile: profile(212, 104, [{ start: 20, snapDensity: 0.31, energy: 0.5 }]),
+    protectedUntil: 180,
+    exits: [{ time: 180, type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 20, landingType: 'intro', confidence: 0.8 }],
+    risks: [],
+  });
+
+  assert.deepEqual(policy.preferredExitRange, [0.9, 0.9]);
+});
+
 test('returns a compact policy with finite metrics', () => {
   const policy = classifyTransitionRoute({
     fromProfile: profile(200, 100, [{ start: 70, snapDensity: 0.27, energy: 0.72 }]),

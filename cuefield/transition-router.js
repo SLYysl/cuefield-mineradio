@@ -61,7 +61,7 @@ function classifyTransitionRoute(opts = {}) {
   const protectedRatio = clamp(
     finiteNumber(opts.protectedUntil) / Math.max(1, finiteNumber(fromProfile.duration)),
     0,
-    0.78,
+    1,
   );
   const urgentRise = toSnap >= 0.42 && snapDelta >= 0.18;
   const urgentRelease = fromSnap >= 0.42 && snapDelta <= -0.18;
@@ -98,7 +98,7 @@ function classifyTransitionRoute(opts = {}) {
     route: 'structure-mix',
     compatibilityClass: 'compatible',
     contrastDirection: 'balanced',
-    preferredExitRange: [protectedRatio, 0.78],
+    preferredExitRange: [protectedRatio, Math.max(0.78, protectedRatio)],
     entryPolicy: 'best-supported',
     overlapClass: 'adaptive',
     recipe: 'structure-window',
