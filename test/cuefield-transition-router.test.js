@@ -25,6 +25,20 @@ test('routes a large snap rise into a late controlled build', () => {
   assert.equal(policy.overlapClass, 'short');
 });
 
+test('keeps a late rise range at or after a ninety-five percent protection boundary', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 100, [{ start: 70, snapDensity: 0.27, energy: 0.72 }]),
+    toProfile: profile(220, 88, [{ start: 106, snapDensity: 0.53, energy: 0.58 }]),
+    protectedUntil: 190,
+    exits: [{ time: 70, type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 106, landingType: 'hook', confidence: 0.88 }],
+    risks: [],
+  });
+
+  assert.equal(policy.route, 'late-contrast-rise');
+  assert.deepEqual(policy.preferredExitRange, [0.95, 0.95]);
+});
+
 test('does not route late from directionality mismatch alone', () => {
   const policy = classifyTransitionRoute({
     fromProfile: profile(200, 115, [{ start: 73, snapDensity: 0.38, energy: 0.61 }]),
@@ -62,6 +76,112 @@ test('routes missing structural evidence into terminal rescue', () => {
 
   assert.equal(policy.route, 'terminal-rescue');
   assert.deepEqual(policy.preferredExitRange, [0.88, 0.96]);
+});
+
+test('routes unusable bars into terminal rescue instead of treating metrics as zero', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(180, 100, [{ start: 'bad', snapDensity: 0.2, energy: 0.2 }]),
+    toProfile: profile(210, 104, [{ start: 20, snapDensity: 0.7, energy: 0.7 }]),
+    exits: [{ time: 10, type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 20, landingType: 'intro', confidence: 0.8 }],
+  });
+
+  assert.equal(policy.route, 'terminal-rescue');
+});
+
+test('routes non-positive durations into terminal rescue', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(0, 100, [{ start: 10, snapDensity: 0.2, energy: 0.2 }]),
+    toProfile: profile(210, 104, [{ start: 20, snapDensity: 0.7, energy: 0.7 }]),
+    exits: [{ time: 10, type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 20, landingType: 'intro', confidence: 0.8 }],
+  });
+
+  assert.equal(policy.route, 'terminal-rescue');
+});
+
+test('selects supported release and non-fallback entry from unordered candidates', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 100, [
+      { start: 10, snapDensity: 0.3, energy: 0.5 },
+      { start: 150, snapDensity: 0.27, energy: 0.5 },
+    ]),
+    toProfile: profile(220, 88, [
+      { start: 5, snapDensity: 0.3, energy: 0.5 },
+      { start: 100, snapDensity: 0.53, energy: 0.5 },
+    ]),
+    exits: [
+      { time: 10, type: 'fallback', confidence: 0.99 },
+      { time: 150, type: 'release', confidence: 0.7, latePenalty: 0.1 },
+    ],
+    entries: [
+      { landingAt: Number.NaN, landingType: 'fallback', confidence: 1 },
+      { landingAt: 100, landingType: 'intro', confidence: 0.8 },
+    ],
+    risks: [],
+  });
+
+  assert.equal(policy.route, 'late-contrast-rise');
+});
+
+test('uses energy and tempo as secondary rise evidence', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 100, [{ start: 70, snapDensity: 0.3, energy: 0.2 }]),
+    toProfile: profile(220, 112, [{ start: 106, snapDensity: 0.34, energy: 0.5 }]),
+    exits: [{ time: 70, type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 106, landingType: 'intro', confidence: 0.8 }],
+    risks: ['directionality mismatch'],
+  });
+
+  assert.equal(policy.route, 'late-contrast-rise');
+});
+
+test('uses energy and tempo as secondary release evidence', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 112, [{ start: 150, snapDensity: 0.3, energy: 0.8 }]),
+    toProfile: profile(220, 100, [{ start: 18, snapDensity: 0.26, energy: 0.5 }]),
+    exits: [{ time: 150, type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 18, landingType: 'intro', confidence: 0.8 }],
+    risks: [],
+  });
+
+  assert.equal(policy.route, 'late-contrast-release');
+});
+
+test('routes style bridge mismatch with severe tempo contrast to terminal rescue', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 100, [{ start: 70, snapDensity: 0.3, energy: 0.2 }]),
+    toProfile: profile(220, 140, [{ start: 106, snapDensity: 0.34, energy: 0.5 }]),
+    exits: [{ time: 70, type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 106, landingType: 'intro', confidence: 0.8 }],
+    risks: ['style bridge mismatch'],
+  });
+
+  assert.equal(policy.route, 'terminal-rescue');
+});
+
+test('routes invalid bpm to terminal rescue with a finite common metrics shape', () => {
+  const policy = classifyTransitionRoute({
+    fromProfile: profile(200, 0, [{ start: 70, snapDensity: 0.27, energy: 0.72 }]),
+    toProfile: profile(220, 88, [{ start: 106, snapDensity: 0.53, energy: 0.58 }]),
+    exits: [{ time: 70, type: 'release', confidence: 0.7 }],
+    entries: [{ landingAt: 106, landingType: 'hook', confidence: 0.88 }],
+    risks: [],
+  });
+
+  assert.equal(policy.route, 'terminal-rescue');
+  assert.deepEqual(Object.keys(policy.metrics).sort(), [
+    'directionalityMismatch',
+    'energyDelta',
+    'fromSnap',
+    'snapDelta',
+    'tempoDelta',
+    'tempoKnown',
+    'toSnap',
+  ]);
+  assert.equal(policy.metrics.tempoKnown, 0);
+  assert.equal(policy.metrics.tempoDelta, 1);
+  for (const value of Object.values(policy.metrics)) assert.equal(Number.isFinite(value), true);
 });
 
 test('protects the structure mix exit from the supplied boundary', () => {
@@ -111,7 +231,15 @@ test('returns a compact policy with finite metrics', () => {
     'recipe',
     'route',
   ]);
-  assert.ok(Object.keys(policy.metrics).length <= 7);
+  assert.deepEqual(Object.keys(policy.metrics).sort(), [
+    'directionalityMismatch',
+    'energyDelta',
+    'fromSnap',
+    'snapDelta',
+    'tempoDelta',
+    'tempoKnown',
+    'toSnap',
+  ]);
   for (const value of Object.values(policy.metrics)) assert.equal(Number.isFinite(value), true);
   assert.ok(policy.reasons.length <= 4);
 });
