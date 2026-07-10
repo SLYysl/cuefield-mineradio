@@ -36,6 +36,19 @@ function compactRejectionReasons(value) {
   return Array.from(new Set(value.map((reason) => compactString(reason, 96)).filter(Boolean))).slice(0, 8);
 }
 
+function compactRouteReasons(value) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map((reason) => compactString(reason, 96)).filter(Boolean))).slice(0, 4);
+}
+
+function compactPreferredExitRange(value) {
+  if (!Array.isArray(value) || value.length !== 2) return [];
+  const range = value.map(Number);
+  if (!range.every(Number.isFinite)) return [];
+  const bounded = range.map((number) => roundNumber(Math.max(0, Math.min(1, number))));
+  return [Math.min(...bounded), Math.max(...bounded)];
+}
+
 function compactWindow(window = {}) {
   return {
     firstHookStart: roundNumber(window.firstHookStart),
@@ -123,6 +136,12 @@ function compactTransition(transition = {}) {
     relativeTempoDelta: roundNumber(transition.relativeTempoDelta),
     beatGridTrusted: transition.beatGridTrusted === true,
     runtimeDowngrade: compactString(transition.runtimeDowngrade, 40),
+    route: compactString(transition.route, 40),
+    compatibilityClass: compactString(transition.compatibilityClass, 40),
+    contrastDirection: compactString(transition.contrastDirection, 40),
+    preferredExitRange: compactPreferredExitRange(transition.preferredExitRange),
+    routeReasons: compactRouteReasons(transition.routeReasons),
+    routeFallbackUsed: transition.routeFallbackUsed === true,
     diagnostics: compactDiagnostics(transition.diagnostics),
     structure: compactStructure(structure),
     risks: compactList(transition.risks),

@@ -141,6 +141,34 @@ test('exposes the validated transition window and sanitized diagnostics', () => 
   assert.equal(JSON.stringify({ diagnostics, candidates: result.candidates, rejected: result.rejected }).includes('we own the night'), false);
 });
 
+test('propagates compact route policy without profiles or raw lyrics', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
+    'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(96) },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    fromLrc: '[00:18.00]private lyric a\n[01:06.00]private lyric a',
+    toLrc: '[00:18.00]private lyric b\n[01:06.00]private lyric b',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+
+  assert.equal(typeof result.chosen.policy, 'object');
+  assert.equal(result.chosen.policy.route, result.diagnostics.route);
+  assert.equal(result.chosen.policy.compatibilityClass, result.diagnostics.compatibilityClass);
+  assert.equal(result.chosen.policy.contrastDirection, result.diagnostics.contrastDirection);
+  assert.deepEqual(result.chosen.policy.preferredExitRange, result.diagnostics.preferredExitRange);
+  assert.deepEqual(result.chosen.policy.reasons, result.diagnostics.routeReasons);
+  assert.equal(typeof result.chosen.routeFallbackUsed, 'boolean');
+  assert.equal(result.chosen.routeFallbackUsed, result.diagnostics.routeFallbackUsed);
+  const routePayload = JSON.stringify({ policy: result.chosen.policy, diagnostics: result.diagnostics });
+  assert.equal(routePayload.includes('private lyric'), false);
+  assert.equal(routePayload.includes('fromProfile'), false);
+  assert.equal(routePayload.includes('toProfile'), false);
+  assert.equal(routePayload.includes('rawLrc'), false);
+});
+
 test('runtime wrapper uses cueProfile BPM and beat-only fallback never claims hook entry', () => {
   const cache = {
     'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },

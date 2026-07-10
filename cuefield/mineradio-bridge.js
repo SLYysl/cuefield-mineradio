@@ -98,6 +98,7 @@ function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
   const toStructure = to.structureMap || {};
   const fromHook = credibleFirstHook(fromStructure);
   const recipeDiagnostics = windowPlan.diagnostics || {};
+  const policy = chosen.policy || windowPlan.policy || {};
   const entry = chosen.entry || {};
   const rawLandingType = String(entry.landingType || entry.type || 'start').toLowerCase();
   const landingType = toStructure.structureSource !== 'lyric+beat' && rawLandingType === 'hook'
@@ -133,6 +134,12 @@ function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
     grooveContinuity: finiteOrNull(chosen.grooveContinuity),
     tempoCompatibility: finiteOrNull(chosen.tempoCompatibility),
     windowRejectionReasons: Array.isArray(chosen.rejectionReasons) ? chosen.rejectionReasons.slice() : [],
+    route: String(policy.route || ''),
+    compatibilityClass: String(policy.compatibilityClass || ''),
+    contrastDirection: String(policy.contrastDirection || ''),
+    preferredExitRange: Array.isArray(policy.preferredExitRange) ? policy.preferredExitRange.slice(0, 2) : [],
+    routeReasons: Array.isArray(policy.reasons) ? policy.reasons.slice(0, 4) : [],
+    routeFallbackUsed: chosen.routeFallbackUsed === true,
     sourceExitCount: finiteOrNull(recipeDiagnostics.sourceExitCount),
     sourceLandingCount: finiteOrNull(recipeDiagnostics.sourceLandingCount),
     consideredExitCount: finiteOrNull(recipeDiagnostics.consideredExitCount),
@@ -157,6 +164,7 @@ function planCuefieldTransitionFromCache(opts = {}) {
   const selected = windowPlan.chosen || {};
   const sectionChoice = selected.sectionChoice || {};
   const recipeCandidate = selected.recipeCandidate || {};
+  const policy = windowPlan.policy || selected.policy || {};
   const chosenScore = sectionChoice.score ?? selected.score ?? recipeCandidate.score ?? 0;
   const chosen = {
     ...sectionChoice,
@@ -182,6 +190,13 @@ function planCuefieldTransitionFromCache(opts = {}) {
     grooveContinuity: selected.grooveContinuity,
     tempoCompatibility: selected.tempoCompatibility,
     rejectionReasons: selected.rejectionReasons || [],
+    policy: {
+      ...policy,
+      preferredExitRange: Array.isArray(policy.preferredExitRange) ? policy.preferredExitRange.slice(0, 2) : [],
+      reasons: Array.isArray(policy.reasons) ? policy.reasons.slice(0, 4) : [],
+      metrics: { ...(policy.metrics || {}) },
+    },
+    routeFallbackUsed: selected.routeFallbackUsed === true,
   };
   const structureSource = from.structureMap.structureSource === 'lyric+beat'
     && to.structureMap.structureSource === 'lyric+beat'

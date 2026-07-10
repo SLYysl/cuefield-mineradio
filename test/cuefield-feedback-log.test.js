@@ -75,6 +75,12 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
       grooveContinuity: 0.65432,
       tempoCompatibility: 0.54321,
       windowRejectionReasons: ['too late', 'too late', 'x'.repeat(120)],
+      route: 'late-contrast-rise',
+      compatibilityClass: 'contrast',
+      contrastDirection: 'rising',
+      preferredExitRange: [0.75, 0.9],
+      routeReasons: ['snap rise'],
+      routeFallbackUsed: false,
     },
   }, new Date('2026-07-09T02:00:00.000Z'));
 
@@ -111,6 +117,12 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
     entryCandidateCount: 3,
   });
   assert.deepEqual(record.transition.risks, ['directionality mismatch']);
+  assert.equal(record.transition.route, 'late-contrast-rise');
+  assert.equal(record.transition.compatibilityClass, 'contrast');
+  assert.equal(record.transition.contrastDirection, 'rising');
+  assert.deepEqual(record.transition.preferredExitRange, [0.75, 0.9]);
+  assert.deepEqual(record.transition.routeReasons, ['snap rise']);
+  assert.equal(record.transition.routeFallbackUsed, false);
   assert.equal(Object.prototype.hasOwnProperty.call(record.transition, 'audioUrl'), false);
   assert.equal(JSON.stringify(record).includes('must not persist'), false);
   assert.deepEqual(record.transition.window, {
@@ -198,6 +210,38 @@ test('accepts rejection reasons from an already-sanitized nested transition wind
   });
 
   assert.deepEqual(record.transition.window.rejectionReasons, ['nested reason']);
+});
+
+test('sanitizes route diagnostics to compact bounded values', () => {
+  const record = buildCuefieldFeedbackRecord({
+    rating: 2,
+    transition: {
+      route: 'r'.repeat(120),
+      compatibilityClass: 'c'.repeat(120),
+      contrastDirection: 'd'.repeat(120),
+      preferredExitRange: [1.4, -0.2],
+      routeReasons: ['same', 'same', 'x'.repeat(120), 'reason 2', 'reason 3', 'reason 4'],
+      routeFallbackUsed: true,
+    },
+  });
+
+  assert.equal(typeof record.transition.route, 'string');
+  assert.equal(record.transition.route.length <= 40, true);
+  assert.equal(record.transition.compatibilityClass.length <= 40, true);
+  assert.equal(record.transition.contrastDirection.length <= 40, true);
+  assert.deepEqual(record.transition.preferredExitRange, [0, 1]);
+  assert.deepEqual(record.transition.routeReasons, ['same', 'x'.repeat(96), 'reason 2', 'reason 3']);
+  assert.equal(record.transition.routeFallbackUsed, true);
+
+  const malformed = buildCuefieldFeedbackRecord({
+    rating: 3,
+    transition: {
+      preferredExitRange: [0.75, Infinity],
+      routeFallbackUsed: 'true',
+    },
+  });
+  assert.deepEqual(malformed.transition.preferredExitRange, []);
+  assert.equal(malformed.transition.routeFallbackUsed, false);
 });
 
 test('rejects ratings outside the 1 to 3 scoring scale', () => {

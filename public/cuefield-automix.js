@@ -43,6 +43,9 @@
     if (recipe === 'honest-start-fallback') {
       return !!deps.allowSafetyFallback && Array.isArray(chosen.timeline) && chosen.timeline.length > 0;
     }
+    if (recipe === 'terminal-rescue') {
+      return !!deps.allowSafetyFallback && Array.isArray(chosen.timeline) && chosen.timeline.length > 0;
+    }
     if (EXECUTABLE_TIERS[tier]) return true;
     if (recipe === 'safety-long-blend') return !!deps.allowSafetyFallback;
     if (tier !== 'weak' || !deps.allowWeak) return false;

@@ -64,12 +64,27 @@ test('Cuefield feedback captures adaptive planner and runtime diagnostics', () =
     'exitRatio', 'mixStart', 'handoffAt', 'landingAt',
     'audibleOverlap', 'preRollDuration', 'energyContinuity',
     'grooveContinuity', 'tempoCompatibility', 'windowRejectionReasons',
+    'route', 'compatibilityClass', 'contrastDirection', 'preferredExitRange',
+    'routeReasons', 'routeFallbackUsed',
   ].forEach((field) => assert.match(contextBlock, new RegExp('plannerDiagnostics\\.' + field)));
   assert.match(contextBlock, /pending\.runtimeDowngrade/);
   assert.match(contextBlock, /pending\.actualHandoffAt/);
   assert.match(contextBlock, /pending\.actualAudibleOverlap/);
   assert.match(contextBlock, /pending\.actualPreRollDuration/);
   assert.equal(executeBlock.indexOf('runCuefieldVolumeCurve') < executeBlock.indexOf('cuefieldFeedbackContextFromPending'), true);
+});
+
+test('Cuefield uses musical rescue copy without changing technical statuses', () => {
+  const html = readIndexHtml();
+  const statusStart = html.indexOf('function cuefieldAutoMixStatusText');
+  const statusEnd = html.indexOf('function logCuefieldAutoMix', statusStart);
+  const statusBlock = html.slice(statusStart, statusEnd);
+
+  assert.match(statusBlock, /'fallback': '正在准备末尾保底过渡'/);
+  assert.doesNotMatch(statusBlock, /这两首暂不适合自动切/);
+  assert.match(statusBlock, /'waiting-beatmap': '等待节拍分析完成'/);
+  assert.match(statusBlock, /'missing-audio': '下一首音频暂时不可用'/);
+  assert.match(statusBlock, /'error': '准备失败'/);
 });
 
 test('Cuefield runtime records the executed window after a volume-only downgrade', () => {

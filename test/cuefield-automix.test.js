@@ -451,6 +451,78 @@ test('executes honest start fallback only with safety opt-in and preserves its t
   assert.equal(fallback.status, 'fallback');
 });
 
+test('executes terminal rescue only with safety opt-in and a nonempty timeline', async () => {
+  const makeAutomix = (allowSafetyFallback, timeline) => createCuefieldAutoMix({
+    allowSafetyFallback,
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => ({
+      ok: true,
+      chosen: {
+        transitionRecipe: 'terminal-rescue',
+        exit: { time: 48 },
+        entry: { time: 0 },
+        evaluation: { score: 0.1, tier: 'weak', risks: ['missing-structure'] },
+        timeline,
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+  const prepare = async (automix, token) => {
+    automix.setEnabled(true);
+    return automix.prepare({
+      token,
+      currentIndex: 0,
+      nextIndex: 1,
+      currentSong: { key: 'a' },
+      nextSong: { key: 'b' },
+    });
+  };
+  const timeline = [
+    { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
+    { t: 3.4, deck: 'B', op: 'handoff' },
+  ];
+
+  const ready = await prepare(makeAutomix(true, timeline), 20);
+  assert.equal(ready.status, 'ready');
+  assert.equal(ready.pending.executionMode, 'terminal-rescue');
+  assert.deepEqual(ready.pending.timeline, timeline);
+
+  const disabled = await prepare(makeAutomix(false, timeline), 21);
+  assert.equal(disabled.status, 'fallback');
+
+  const empty = await prepare(makeAutomix(true, []), 22);
+  assert.equal(empty.status, 'fallback');
+});
+
+test('keeps a technically failed terminal rescue plan non-executable', async () => {
+  const automix = createCuefieldAutoMix({
+    allowSafetyFallback: true,
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => ({
+      ok: false,
+      chosen: {
+        transitionRecipe: 'terminal-rescue',
+        evaluation: { score: 0.1, tier: 'weak', risks: [] },
+        timeline: [{ t: 3.4, deck: 'B', op: 'handoff' }],
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+
+  automix.setEnabled(true);
+  const result = await automix.prepare({
+    token: 23,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+  });
+
+  assert.equal(result.status, 'fallback');
+});
+
 test('never starts transition actions before the protected signature section ends', async () => {
   const automix = createCuefieldAutoMix({
     getKey: (song) => song.key,
