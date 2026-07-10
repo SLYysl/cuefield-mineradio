@@ -52,6 +52,7 @@ test('uses a real zero-second fallback instead of a synthetic intro', () => {
   const fallback = map.entryCandidates.find((item) => item.source === 'fallback');
 
   assert.equal(fallback.time, 0);
+  assert.equal(map.entryCandidates.length, 1);
   assert.equal(map.entryCandidates.some((item) => item.time >= 12 && item.time <= 16 && item.source === 'fallback'), false);
 });
 

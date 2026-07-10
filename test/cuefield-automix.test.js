@@ -197,6 +197,41 @@ test('uses recipe planner timeline for execution mode, trigger lead, and B start
   assert.equal(result.pending.timeline.length, 2);
 });
 
+test('never starts transition actions before the protected signature section ends', async () => {
+  const automix = createCuefieldAutoMix({
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => ({
+      ok: true,
+      chosen: {
+        recipe: 'section-jump',
+        transitionRecipe: 'intro-outro-long-blend',
+        exit: { time: 42 },
+        entry: { time: 16, source: 'lyric+beat' },
+        protectedUntil: 40,
+        evaluation: { score: 0.86, tier: 'usable', risks: [] },
+        timeline: [
+          { t: -8, deck: 'B', op: 'play', at: 8, volume: 0 },
+          { t: 0, deck: 'B', op: 'handoff' },
+        ],
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+
+  automix.setEnabled(true);
+  const result = await automix.prepare({
+    token: 11,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+  });
+
+  assert.equal(result.pending.triggerAt, 40);
+  assert.equal(automix.shouldTrigger({ token: 11, currentIndex: 0, currentTime: 39.9 }), false);
+});
+
 test('does not execute weak transition plans with hard outgoing phrase risk', async () => {
   const automix = createCuefieldAutoMix({
     allowWeak: true,

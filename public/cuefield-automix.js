@@ -156,7 +156,8 @@
           ? toNumber(ctx.introBedLeadSec, toNumber(ctx.leadSec, 1))
           : toNumber(ctx.leadSec, 1);
         var leadSec = timelineLeadSec(timeline, fallbackLeadSec);
-        var triggerAt = isFinite(exitTime) ? Math.max(0, exitTime - leadSec) : 0;
+        var protectedUntil = Math.max(0, toNumber(chosen.protectedUntil, 0));
+        var triggerAt = isFinite(exitTime) ? Math.max(protectedUntil, exitTime - leadSec) : protectedUntil;
         var entryTime = timelineBStart(timeline, Math.max(0, toNumber(chosen.entry && chosen.entry.time, 0)));
         state.pending = {
           token: ctx.token,
@@ -170,6 +171,7 @@
           executionMode: executionMode,
           entryTime: entryTime,
           exitTime: exitTime,
+          protectedUntil: protectedUntil,
           triggerAt: triggerAt,
           createdAt: Date.now(),
         };

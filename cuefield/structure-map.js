@@ -108,8 +108,9 @@ function buildStructureMap(opts = {}) {
     lowDensity: 0,
     beatStability: 0,
   };
-  const signatureEntry = signature.phrase ? {
-    type: signature.source === 'lyric+beat' ? 'hook' : 'drop',
+  const signatureType = signature.source === 'lyric+beat' ? 'hook' : 'drop';
+  const signatureEntry = signature.phrase && signature.confidence >= 0.6 ? {
+    type: signatureType,
     role: 'entry',
     source: signature.source,
     time: round(signature.phrase.start),
@@ -136,7 +137,7 @@ function buildStructureMap(opts = {}) {
     beatStability: 0,
   } : null;
   const sections = [];
-  if (priorPhrase) sections.push({
+  if (priorPhrase && preHookEntry) sections.push({
     ...priorPhrase,
     type: 'pre-hook',
     confidence: preHookEntry.confidence,
@@ -144,7 +145,7 @@ function buildStructureMap(opts = {}) {
   });
   if (signature.phrase) sections.push({
     ...signature.phrase,
-    type: signatureEntry.type,
+    type: signatureType,
     confidence: signature.confidence,
     source: signature.source,
   });
