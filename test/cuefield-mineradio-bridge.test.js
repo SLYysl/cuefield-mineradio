@@ -296,3 +296,45 @@ test('does not expose a Hook landing from one repeated B lyric line', () => {
   assert.equal(result.candidates.some((candidate) => candidate.entry.landingType === 'hook'), false);
   assert.equal(result.rejected.some((candidate) => candidate.entry.landingType === 'hook'), false);
 });
+
+test('selects a compact synthetic bridge for a strongly linked trusted Hook', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
+    'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(112) },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    fromLrc: '[00:18.00]we keep moving\n[00:34.00]I see you tonight\n[01:06.00]we keep moving\n[01:22.00]I see you tonight',
+    toLrc: '[00:18.00]You see me tonight\n[00:34.00]we keep moving\n[01:06.00]You see me tonight\n[01:22.00]we keep moving',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+
+  assert.equal(result.chosen.transitionRecipe, 'synthetic-bridge');
+  assert.equal(result.chosen.bridgePlan.climax.type, 'hook');
+  assert.equal(result.chosen.bridgePlan.climax.confidence >= 0.72, true);
+  assert.equal([4, 8, 16].includes(result.chosen.bridgePlan.bars), true);
+  assert.equal(result.chosen.timeline.some((action) => action.op === 'bridge'), true);
+  assert.equal(result.diagnostics.bridgeSelected, true);
+  assert.equal(result.diagnostics.lyricLinkScore >= 0.65, true);
+  assert.equal(JSON.stringify(result).includes('I see you tonight'), false);
+  assert.equal(JSON.stringify(result).includes('You see me tonight'), false);
+});
+
+test('keeps the direct transition when B has no trusted climax', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
+    'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(96) },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    fromLrc: '[00:20.00]I call you',
+    toLrc: '[00:30.00]you call me',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+
+  assert.notEqual(result.chosen.transitionRecipe, 'synthetic-bridge');
+  assert.equal(result.chosen.bridgePlan, undefined);
+  assert.equal(result.diagnostics.bridgeSelected, false);
+});

@@ -4,6 +4,8 @@ const { buildCueProfile } = require('./cue-profile');
 const { parseLrc } = require('./lrc-anchors');
 const { buildStructureMap } = require('./structure-map');
 const { chooseTransitionWindow } = require('./transition-window-planner');
+const { scoreLyricLink } = require('./lyric-link');
+const { planBridge, trustedClimax } = require('./bridge-planner');
 
 function toTrack(entry, fallbackKey) {
   const meta = entry && entry.meta || {};
@@ -138,6 +140,27 @@ function compactTransitionPoint(point) {
   };
 }
 
+function compactBridgePlan(plan) {
+  if (!plan) return null;
+  return {
+    template: compactString(plan.template, 32),
+    bars: finiteOrNull(plan.bars),
+    bpmFrom: finiteOrNull(plan.bpmFrom),
+    bpmTo: finiteOrNull(plan.bpmTo),
+    climax: plan.climax ? {
+      time: finiteOrNull(plan.climax.time),
+      type: compactString(plan.climax.type, 16),
+      confidence: finiteOrNull(plan.climax.confidence),
+    } : null,
+    stageDurations: Array.isArray(plan.stageDurations) ? plan.stageDurations.slice(0, 3).map(finiteOrNull) : [],
+    totalDuration: finiteOrNull(plan.totalDuration),
+    predictedScore: finiteOrNull(plan.predictedScore),
+    improvement: finiteOrNull(plan.improvement),
+    lyricLinkScore: finiteOrNull(plan.lyricLinkScore),
+    reasons: Array.isArray(plan.reasons) ? plan.reasons.slice(0, 4).map((reason) => compactString(reason, 40)) : [],
+  };
+}
+
 function minimumFiniteOrNull(...values) {
   const numbers = values.map(finiteOrNull).filter((value) => value !== null);
   return numbers.length ? Math.min(...numbers) : null;
@@ -220,7 +243,7 @@ function planCuefieldTransitionFromCache(opts = {}) {
   const recipeCandidate = selected.recipeCandidate || {};
   const policy = windowPlan.policy || selected.policy || {};
   const chosenScore = sectionChoice.score ?? selected.score ?? recipeCandidate.score ?? 0;
-  const chosen = {
+  let chosen = {
     ...sectionChoice,
     recipe: sectionChoice.recipe || recipeCandidate.recipe || 'honest-start-fallback',
     score: chosenScore,
@@ -254,12 +277,81 @@ function planCuefieldTransitionFromCache(opts = {}) {
     technicalFailure: selected.technicalFailure === true,
     errorCode: compactString(selected.errorCode, 80),
   };
+  const fromLrcLines = parseMaybeLrc(opts.fromLrc);
+  const toLrcLines = parseMaybeLrc(opts.toLrc);
+  const climax = trustedClimax(to);
+  const lyricLink = scoreLyricLink({
+    fromLines: fromLrcLines,
+    toLines: toLrcLines,
+    exitTime: chosen.exit && chosen.exit.time,
+    climaxTime: climax && (climax.start ?? climax.time),
+    vocalOverlapSec: 0,
+  });
+  const bridge = chosen.technicalFailure === true ? null : planBridge({
+    fromAnalysis: from,
+    toAnalysis: to,
+    directPlan: chosen,
+    lyricLink,
+  });
+  if (bridge) {
+    const directChosen = chosen;
+    const stage3 = bridge.stageDurations[2];
+    const entryTime = bridge.climax.time;
+    chosen = {
+      ...directChosen,
+      recipe: 'synthetic-bridge',
+      transitionRecipe: 'synthetic-bridge',
+      recipeCandidate: {
+        recipe: 'synthetic-bridge',
+        fallbackTimeline: bridge.fallbackTimeline,
+      },
+      score: bridge.predictedScore,
+      evaluation: {
+        score: bridge.predictedScore,
+        tier: bridge.predictedScore >= 0.84 ? 'magic' : 'usable',
+        risks: [],
+      },
+      exit: {
+        ...(directChosen.exit || {}),
+        role: 'exit',
+        source: 'structure',
+        time: bridge.mixStart,
+      },
+      entry: {
+        type: bridge.climax.type,
+        role: 'entry',
+        source: 'bridge',
+        time: entryTime,
+        confidence: bridge.climax.confidence,
+        playFrom: Math.max(0, entryTime - stage3),
+        landingAt: entryTime,
+        landingType: bridge.climax.type,
+      },
+      timeline: bridge.timeline,
+      mixStart: bridge.mixStart,
+      handoffAt: bridge.handoffAt,
+      audibleOverlap: 0,
+      preRollDuration: stage3,
+      exitRatio: from.cueProfile.duration > 0 ? bridge.mixStart / from.cueProfile.duration : 0,
+      bridgePlan: compactBridgePlan(bridge),
+      directTransition: {
+        recipe: directChosen.transitionRecipe || directChosen.recipe,
+        score: finiteOrNull((directChosen.evaluation && directChosen.evaluation.score) ?? directChosen.score),
+      },
+    };
+  }
   const structureSource = from.structureMap.structureSource === 'lyric+beat'
     && to.structureMap.structureSource === 'lyric+beat'
     ? 'lyric+beat'
     : 'beat-only';
 
   const technicalFailure = chosen.technicalFailure === true;
+  const diagnostics = transitionDiagnostics(from, to, windowPlan, chosen, structureSource);
+  diagnostics.lyricLinkScore = finiteOrNull(lyricLink.score);
+  diagnostics.lyricLinkReasons = Array.isArray(lyricLink.reasons) ? lyricLink.reasons.slice(0, 4) : [];
+  diagnostics.bridgeSelected = !!bridge;
+  diagnostics.bridgeTemplate = bridge ? bridge.template : '';
+  diagnostics.bridgeBars = bridge ? bridge.bars : null;
   return {
     ok: !technicalFailure,
     ...(technicalFailure ? { error: chosen.errorCode || 'CUEFIELD_TECHNICAL_FAILURE' } : {}),
@@ -268,7 +360,7 @@ function planCuefieldTransitionFromCache(opts = {}) {
     chosen,
     candidates: windowPlan.candidates,
     rejected: windowPlan.rejected,
-    diagnostics: transitionDiagnostics(from, to, windowPlan, chosen, structureSource),
+    diagnostics,
   };
 }
 
