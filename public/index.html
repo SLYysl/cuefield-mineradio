@@ -2736,6 +2736,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 </div>
 
 <script src="cuefield-timeline-executor.js"></script>
+<script src="cuefield-lyric-source.js"></script>
 <script src="cuefield-automix.js"></script>
 <script>
 'use strict';
@@ -10466,11 +10467,25 @@ function initCuefieldAutoMix() {
     minWeakScore: 0.55,
     getKey: function(song) { return beatMapSongKey(song); },
     ensureBeatMap: ensureCuefieldAutoMixBeatMap,
-    planTransition: function(fromKey, toKey) {
+    planTransition: async function(fromKey, toKey, ctx) {
+      ctx = ctx || {};
+      var lyricSource = window.CuefieldLyricSource;
+      var fromSong = ctx.currentSong || {};
+      var toSong = ctx.nextSong || {};
+      var lyrics = lyricSource ? await Promise.all([
+        lyricSource.fetchRawLrc(fromSong, songProviderKey(fromSong), apiJson),
+        lyricSource.fetchRawLrc(toSong, songProviderKey(toSong), apiJson),
+      ]) : ['', ''];
       return apiJson('/api/cuefield/transition', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fromKey: fromKey, toKey: toKey, exitBias: 'late' })
+        body: JSON.stringify({
+          fromKey: fromKey,
+          toKey: toKey,
+          fromLrc: lyrics[0],
+          toLrc: lyrics[1],
+          exitBias: 'late',
+        })
       });
     },
     prepareAudioUrl: function(song) { return fetchBeatPrefetchAudioUrl(song); },

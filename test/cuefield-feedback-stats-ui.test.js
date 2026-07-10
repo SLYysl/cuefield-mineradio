@@ -25,6 +25,21 @@ test('Cuefield AutoMix treats the active in-memory beatmap as ready before disk 
   assert.match(html, /return true;\s*\}\s*var diskMap = await readBeatDiskCache\(key\);/);
 });
 
+test('Cuefield AutoMix fetches paired raw lyrics for transition planning', () => {
+  const html = readIndexHtml();
+  const initStart = html.indexOf('function initCuefieldAutoMix');
+  const initEnd = html.indexOf('function cuefieldFeedbackSongMeta', initStart);
+  const initBlock = html.slice(initStart, initEnd);
+
+  assert.match(html, /<script src="cuefield-lyric-source\.js"><\/script>/);
+  assert.match(initBlock, /CuefieldLyricSource/);
+  assert.match(initBlock, /fetchRawLrc\(fromSong/);
+  assert.match(initBlock, /fetchRawLrc\(toSong/);
+  assert.match(initBlock, /fromLrc:/);
+  assert.match(initBlock, /toLrc:/);
+  assert.doesNotMatch(initBlock, /setOriginalLyricsState|applyPreferredLyricsForCurrent/);
+});
+
 test('Cuefield feedback captures adaptive planner and runtime diagnostics', () => {
   const html = readIndexHtml();
   const contextStart = html.indexOf('function cuefieldFeedbackContextFromPending');
