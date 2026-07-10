@@ -85,6 +85,7 @@ test('Cuefield separates terminal fallback from musical rescue status', () => {
   assert.doesNotMatch(statusBlock, /这两首暂不适合自动切/);
   assert.match(statusBlock, /'waiting-beatmap': '等待节拍分析完成'/);
   assert.match(statusBlock, /'missing-audio': '下一首音频暂时不可用'/);
+  assert.match(statusBlock, /'technical-error': '分析数据暂时不可用'/);
   assert.match(statusBlock, /'error': '准备失败'/);
 
   const context = {};
@@ -92,12 +93,14 @@ test('Cuefield separates terminal fallback from musical rescue status', () => {
   vm.runInContext(statusBlock, context);
   assert.equal(context.cuefieldAutoMixStatusText('terminal-rescue'), '正在准备末尾保底过渡');
   assert.equal(context.cuefieldAutoMixStatusText('fallback'), '未找到可执行过渡');
+  assert.equal(context.cuefieldAutoMixStatusText('technical-error'), '分析数据暂时不可用');
 
   const prepareStart = html.indexOf('async function runCuefieldAutoMixPrepare');
   const prepareEnd = html.indexOf('function stopCuefieldPreparedAudio', prepareStart);
   const prepareBlock = html.slice(prepareStart, prepareEnd);
   assert.match(prepareBlock, /pending\.executionMode === 'terminal-rescue'/);
   assert.match(prepareBlock, /updateCuefieldAutoMixUi\(uiStatus\)/);
+  assert.match(prepareBlock, /result\.status === 'technical-error'/);
 });
 
 test('Cuefield runtime records the executed window after a volume-only downgrade', () => {

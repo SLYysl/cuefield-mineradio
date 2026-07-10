@@ -10434,6 +10434,7 @@ function cuefieldAutoMixStatusText(status) {
     'preparing': '正在提前分析下一首',
     'waiting-beatmap': '等待节拍分析完成',
     'missing-audio': '下一首音频暂时不可用',
+    'technical-error': '分析数据暂时不可用',
     'terminal-rescue': '正在准备末尾保底过渡',
     'fallback': '未找到可执行过渡',
     'ready': '过渡已准备好',
@@ -10842,7 +10843,7 @@ async function runCuefieldAutoMixPrepare(token, currentIndex, nextIndex, attempt
       : 'Cuefield ready · ' + cuefieldTierLabel(tier) + ' · ' + (result.pending && result.pending.executionMode || 'filtered-pickup'));
     return;
   }
-  if ((result.status === 'waiting-beatmap' || result.status === 'missing-audio' || result.status === 'busy') && attempt < 4) {
+  if ((result.status === 'waiting-beatmap' || result.status === 'missing-audio' || result.status === 'technical-error' || result.status === 'busy') && attempt < 4) {
     logCuefieldAutoMix(result.status, { attempt: attempt + 1, current: currentSong && currentSong.name, next: nextSong && nextSong.name });
     if (attempt === 0) showToast('Cuefield AutoMix: ' + cuefieldAutoMixStatusText(result.status));
     scheduleCuefieldAutoMixPrepare(token, currentIndex, 2800, attempt + 1);

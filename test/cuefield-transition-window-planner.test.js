@@ -360,6 +360,16 @@ test('returns a non-executable technical result for an invalid source duration',
   assert.equal(result.chosen.handoffAt, null);
 });
 
+test('returns a non-executable technical result for an invalid target duration', () => {
+  const result = chooseTransitionWindow(profile({ duration: 128 }), profile({ duration: 0 }));
+
+  assert.equal(result.policy.route, 'terminal-rescue');
+  assert.equal(result.chosen.technicalFailure, true);
+  assert.equal(result.chosen.errorCode, 'TERMINAL_RESCUE_INVALID_TARGET_DURATION');
+  assert.deepEqual(result.chosen.timeline, []);
+  assert.equal(result.chosen.handoffAt, null);
+});
+
 test('terminal rescue executes an exact 2.2-second post-protection runway', () => {
   const from = profile({ duration: 12, protectedUntil: 9.8 });
   const to = profile({ duration: 24 });

@@ -372,10 +372,12 @@ function technicalFailure(errorCode, rejected = []) {
   };
 }
 
-function terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, rejected) {
+function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, policy, rejected) {
   const duration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
+  const targetDuration = Math.max(0, toNumber(toProfile && toProfile.duration));
   const protectedBoundary = toNumber(protectedUntil);
   if (!(duration > 0)) return technicalFailure('TERMINAL_RESCUE_INVALID_DURATION', rejected);
+  if (!(targetDuration > 0)) return technicalFailure('TERMINAL_RESCUE_INVALID_TARGET_DURATION', rejected);
   if (duration - protectedBoundary < MINIMUM_TERMINAL_OVERLAP - 0.000001) {
     return technicalFailure('TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY', rejected);
   }
@@ -490,7 +492,7 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
   };
 
   if (policy.route === 'terminal-rescue') {
-    const chosen = terminalRescue(fromAnalysis, fromProfile, protectedUntil, policy, []);
+    const chosen = terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, policy, []);
     chosen.policy = policy;
     return {
       chosen,
@@ -531,7 +533,7 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
   });
   candidateWindows.sort((a, b) => b.score - a.score || a.exit.time - b.exit.time || a.entry.landingAt - b.entry.landingAt);
   const selectedPolicy = candidateWindows.length ? policy : terminalRescuePolicy(policy, fromProfile, protectedUntil);
-  const chosen = candidateWindows[0] || terminalRescue(fromAnalysis, fromProfile, protectedUntil, selectedPolicy, rejected);
+  const chosen = candidateWindows[0] || terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, selectedPolicy, rejected);
   chosen.policy = selectedPolicy;
   if (!chosen.routeFallbackUsed) chosen.routeFallbackUsed = false;
   return {

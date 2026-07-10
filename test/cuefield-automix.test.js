@@ -558,15 +558,18 @@ test('executes the genuine planner terminal rescue timeline', async () => {
   assert.deepEqual(result.pending.timeline, windowPlan.chosen.timeline);
 });
 
-test('keeps a technically failed terminal rescue plan non-executable', async () => {
+test('returns a retryable technical status for a failed terminal rescue plan', async () => {
   const automix = createCuefieldAutoMix({
     allowSafetyFallback: true,
     getKey: (song) => song.key,
     ensureBeatMap: async () => true,
     planTransition: async () => ({
       ok: false,
+      error: 'TERMINAL_RESCUE_INVALID_DURATION',
       chosen: {
         transitionRecipe: 'terminal-rescue',
+        technicalFailure: true,
+        errorCode: 'TERMINAL_RESCUE_INVALID_DURATION',
         evaluation: { score: 0.1, tier: 'weak', risks: [] },
         timeline: [{ t: 3.4, deck: 'B', op: 'handoff' }],
       },
@@ -583,7 +586,8 @@ test('keeps a technically failed terminal rescue plan non-executable', async () 
     nextSong: { key: 'b' },
   });
 
-  assert.equal(result.status, 'fallback');
+  assert.equal(result.status, 'technical-error');
+  assert.equal(result.error, 'TERMINAL_RESCUE_INVALID_DURATION');
 });
 
 test('rejects malformed ok terminal rescue plans before audio preparation', async (t) => {

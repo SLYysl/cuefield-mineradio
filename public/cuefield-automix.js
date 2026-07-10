@@ -190,6 +190,11 @@
         if (serial !== state.serial) return { status: 'stale' };
         var chosen = plan && plan.chosen;
         var tier = tierOf(plan);
+        if (plan && plan.ok === false && chosen && chosen.technicalFailure === true) {
+          var technicalError = plan.error || chosen.errorCode || 'CUEFIELD_TECHNICAL_FAILURE';
+          reset('technical-error');
+          return { status: 'technical-error', error: technicalError, plan: plan };
+        }
         if (!plan || !plan.ok || !chosen || !isExecutablePlan(plan, deps)) {
           reset('fallback');
           return { status: 'fallback', plan: plan || null };

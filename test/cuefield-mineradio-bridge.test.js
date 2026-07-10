@@ -245,6 +245,23 @@ test('normalizes empty bridge diagnostic metadata to finite values or null', () 
   assert.deepEqual(Object.keys(result.from).sort(), ['structureMap', 'track']);
 });
 
+test('reports an invalid target duration as an explicit technical failure', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
+    'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(0) },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'TERMINAL_RESCUE_INVALID_TARGET_DURATION');
+  assert.equal(result.chosen.technicalFailure, true);
+  assert.deepEqual(result.chosen.timeline, []);
+});
+
 test('preserves a lyric-backed B hook when A is beat-only', () => {
   const cache = {
     'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
