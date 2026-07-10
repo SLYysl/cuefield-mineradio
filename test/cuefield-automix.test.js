@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+const { chooseTransitionWindow } = require('../cuefield/transition-window-planner');
 const { createCuefieldAutoMix } = require('../public/cuefield-automix');
 
 test('prepares a transition for the current and next queue items before playback reaches the exit', async () => {
@@ -527,6 +528,36 @@ test('executes terminal rescue only with safety opt-in and a valid explicit time
   assert.equal(empty.status, 'fallback');
 });
 
+test('executes the genuine planner terminal rescue timeline', async () => {
+  const analysis = (duration, protectedUntil = 0) => ({
+    duration,
+    bpm: 120,
+    bars: [],
+    structureMap: {
+      structureSource: 'beat-only',
+      protectedUntil,
+      exitCandidates: [],
+      entryCandidates: [],
+      sections: [],
+    },
+    candidates: [],
+  });
+  const windowPlan = chooseTransitionWindow(analysis(128, 60), analysis(96));
+  const plan = {
+    ok: true,
+    chosen: {
+      ...windowPlan.chosen,
+      transitionRecipe: windowPlan.chosen.recipeCandidate.recipe,
+      evaluation: { score: 0.1, tier: 'weak', risks: ['missing-structure'] },
+    },
+  };
+
+  assert.equal(plan.chosen.transitionRecipe, 'terminal-rescue');
+  const result = await prepareTerminalPlan(automixForTerminalPlan(plan), 24);
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.pending.timeline, windowPlan.chosen.timeline);
+});
+
 test('keeps a technically failed terminal rescue plan non-executable', async () => {
   const automix = createCuefieldAutoMix({
     allowSafetyFallback: true,
@@ -557,6 +588,9 @@ test('keeps a technically failed terminal rescue plan non-executable', async () 
 
 test('rejects malformed ok terminal rescue plans before audio preparation', async (t) => {
   const validTimeline = validTerminalPlan().chosen.timeline;
+  const at = (timeline, predicate, updates) => timeline.map((action) => (
+    predicate(action) ? { ...action, ...updates } : action
+  ));
   const cases = [
     ['chosen technical failure', validTerminalPlan({ technicalFailure: true, errorCode: 'TERMINAL_RESCUE_INVALID_DURATION' })],
     ['missing mix start', validTerminalPlan({ mixStart: undefined })],
@@ -570,6 +604,21 @@ test('rejects malformed ok terminal rescue plans before audio preparation', asyn
     ['zero-duration volume ramp', validTerminalPlan({ timeline: validTimeline.map((action) => action.op === 'volume' ? { ...action, duration: 0 } : action) })],
     ['string action timing', validTerminalPlan({ timeline: validTimeline.map((action) => ({ ...action, t: String(action.t) })) })],
     ['missing handoff', validTerminalPlan({ timeline: validTimeline.filter((action) => action.op !== 'handoff') })],
+    ['play and fades after an early handoff', validTerminalPlan({
+      timeline: validTimeline.map((action) => action.op === 'handoff' ? { ...action, t: 0 } : { ...action, t: 5 }),
+    })],
+    ['negative action ordering', validTerminalPlan({
+      timeline: [...validTimeline, { t: -0.01, deck: 'B', op: 'bass', value: 0.2, duration: 0 }],
+    })],
+    ['operation after handoff', validTerminalPlan({
+      timeline: [...validTimeline, { t: 3.41, deck: 'B', op: 'bass', value: 1, duration: 0 }],
+    })],
+    ['mismatched handoff offset', validTerminalPlan({
+      timeline: at(validTimeline, (action) => action.op === 'handoff', { t: 3.2 }),
+    })],
+    ['action duration overruns handoff', validTerminalPlan({
+      timeline: at(validTimeline, (action) => action.op === 'volume', { duration: 3415 }),
+    })],
   ];
 
   for (let index = 0; index < cases.length; index += 1) {

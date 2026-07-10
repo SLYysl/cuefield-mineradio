@@ -38,30 +38,41 @@
 
   function validTerminalRescue(chosen, deps) {
     if (!deps.allowSafetyFallback || chosen.technicalFailure === true) return false;
+    var tolerance = 0.01;
     var mixStart = chosen.mixStart;
     var handoffAt = chosen.handoffAt;
     if (!Number.isFinite(mixStart) || !Number.isFinite(handoffAt) || handoffAt <= mixStart) return false;
+    var span = handoffAt - mixStart;
     var timeline = Array.isArray(chosen.timeline) ? chosen.timeline : [];
+    var handoffs = timeline.filter(function(action) {
+      return action && action.op === 'handoff' && Number.isFinite(action.t);
+    });
+    if (handoffs.length !== 1 || Math.abs(handoffs[0].t - span) > tolerance) return false;
+    var handoffT = handoffs[0].t;
+    var timelineAligned = timeline.every(function(action) {
+      if (!action || !Number.isFinite(action.t) || action.t < 0 || action.t > handoffT) return false;
+      var duration = action.duration == null ? 0 : action.duration;
+      return Number.isFinite(duration)
+        && duration >= 0
+        && action.t + duration / 1000 <= span + tolerance;
+    });
+    if (!timelineAligned) return false;
     var hasBPlay = timeline.some(function(action) {
       return action && action.deck === 'B' && action.op === 'play'
-        && Number.isFinite(action.t) && Number.isFinite(action.at);
+        && Math.abs(action.t) <= tolerance && Number.isFinite(action.at);
     });
     var hasVolumeRamp = function(deck) {
       return timeline.some(function(action) {
         return action && action.deck === deck && action.op === 'volume'
-          && Number.isFinite(action.t)
+          && Math.abs(action.t) <= tolerance
           && Number.isFinite(action.value)
           && Number.isFinite(action.duration)
           && action.duration > 0;
       });
     };
-    var hasHandoff = timeline.some(function(action) {
-      return action && action.op === 'handoff' && Number.isFinite(action.t);
-    });
     return hasBPlay
       && hasVolumeRamp('A')
-      && hasVolumeRamp('B')
-      && hasHandoff;
+      && hasVolumeRamp('B');
   }
 
   function isExecutablePlan(plan, deps) {
