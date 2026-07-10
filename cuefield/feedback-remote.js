@@ -3,7 +3,12 @@ function toPositiveInt(value, fallback) {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : fallback;
 }
 
-const { compactTransition } = require('./feedback-log');
+const { compactPair, compactString, compactTransition } = require('./feedback-log');
+
+function normalizeRemoteRating(value) {
+  const rating = Number(value);
+  return rating === 1 || rating === 2 || rating === 3 ? rating : null;
+}
 
 function remoteFeedbackConfig(env = process.env) {
   const url = String(env.CUEFIELD_FEEDBACK_REMOTE_URL || '').trim();
@@ -18,24 +23,17 @@ function remoteFeedbackConfig(env = process.env) {
 }
 
 function buildRemoteFeedbackPayload(record, opts = {}) {
-  const pair = record && record.pair || {};
+  const pair = compactPair(record && record.pair || {});
   const transition = compactTransition(record && record.transition || {});
   return {
-    source: opts.source || 'mineradio-cuefield-mvp',
+    source: compactString(opts.source || 'mineradio-cuefield-mvp', 80),
     schema: 'cuefield-feedback-v1',
     sentAt: new Date().toISOString(),
     record: {
-      createdAt: record && record.createdAt,
-      rating: record && record.rating,
-      note: record && record.note || '',
-      pair: {
-        fromKey: pair.fromKey || '',
-        toKey: pair.toKey || '',
-        fromTitle: pair.fromTitle || '',
-        fromArtist: pair.fromArtist || '',
-        toTitle: pair.toTitle || '',
-        toArtist: pair.toArtist || '',
-      },
+      createdAt: compactString(record && record.createdAt, 40),
+      rating: normalizeRemoteRating(record && record.rating),
+      note: compactString(record && record.note, 240),
+      pair,
       transition,
     },
   };

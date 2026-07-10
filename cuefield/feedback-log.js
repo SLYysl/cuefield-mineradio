@@ -235,6 +235,8 @@ function readCuefieldFeedbackStats(filePath) {
 module.exports = {
   appendCuefieldFeedback,
   buildCuefieldFeedbackRecord,
+  compactPair,
+  compactString,
   readCuefieldFeedbackStats,
   compactTransition,
 };

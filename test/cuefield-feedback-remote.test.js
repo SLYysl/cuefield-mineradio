@@ -146,6 +146,45 @@ test('remote preserves rejection reasons from an already-sanitized nested window
   assert.deepEqual(payload.record.transition.window.rejectionReasons, ['nested remote reason']);
 });
 
+test('bounds the remote envelope before serialization', () => {
+  const huge = 'x'.repeat(1024 * 1024);
+  const payload = buildRemoteFeedbackPayload({
+    createdAt: huge,
+    rating: 99,
+    note: huge,
+    pair: {
+      fromKey: huge,
+      toKey: huge,
+      fromTitle: huge,
+      fromArtist: huge,
+      toTitle: huge,
+      toArtist: huge,
+    },
+    transition: {
+      audioUrl: 'https://example.com/raw-audio.mp3',
+      rawLrc: '[00:01.00] raw lyric sentinel',
+      windowRejectionReasons: ['privacy sentinel should not be here'],
+    },
+  }, { source: huge });
+
+  const json = JSON.stringify(payload);
+  assert.equal(payload.source.length, 80);
+  assert.equal(payload.record.createdAt.length, 40);
+  assert.equal(payload.record.note.length, 240);
+  assert.deepEqual(Object.fromEntries(Object.entries(payload.record.pair).map(([key, value]) => [key, value.length])), {
+    fromKey: 120,
+    toKey: 120,
+    fromTitle: 160,
+    fromArtist: 160,
+    toTitle: 160,
+    toArtist: 160,
+  });
+  assert.equal(payload.record.rating, null);
+  assert.equal(json.length < 10 * 1024, true);
+  assert.equal(json.includes('raw-audio.mp3'), false);
+  assert.equal(json.includes('raw lyric sentinel'), false);
+});
+
 test('forwards Cuefield feedback with bearer auth when configured', async () => {
   const calls = [];
   const result = await forwardCuefieldFeedback({ rating: 2 }, {
