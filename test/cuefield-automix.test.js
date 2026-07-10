@@ -297,7 +297,7 @@ test('treats null mixStart as legacy timing instead of a zero fallback', async (
   });
 
   assert.equal(result.pending.triggerAt, 48);
-  assert.equal(result.pending.mixStart, null);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.pending, 'mixStart'), false);
 });
 
 test('clamps an explicit mixStart below protectedUntil', async () => {
@@ -358,8 +358,56 @@ test('keeps the pending mixStart field absent when the plan omits it', async () 
   });
 
   assert.equal(result.pending.triggerAt, 48);
-  assert.equal(Object.prototype.hasOwnProperty.call(result.pending, 'mixStart'), true);
-  assert.equal(result.pending.mixStart, undefined);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.pending, 'mixStart'), false);
+});
+
+test('executes honest start fallback only with safety opt-in and preserves its timeline', async () => {
+  const makeAutomix = (allowSafetyFallback) => createCuefieldAutoMix({
+    allowSafetyFallback,
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => ({
+      ok: true,
+      chosen: {
+        transitionRecipe: 'honest-start-fallback',
+        exit: { time: 48 },
+        entry: { time: 0 },
+        evaluation: { tier: 'usable', risks: ['no valid complete transition window'] },
+        timeline: [
+          { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
+          { t: 0, deck: 'B', op: 'volume', value: 1, duration: 3400 },
+          { t: 0, deck: 'A', op: 'volume', value: 0, duration: 3400 },
+          { t: 3.4, deck: 'B', op: 'handoff' },
+        ],
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+
+  const enabled = makeAutomix(true);
+  enabled.setEnabled(true);
+  const ready = await enabled.prepare({
+    token: 18,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+  });
+  assert.equal(ready.status, 'ready');
+  assert.equal(ready.pending.executionMode, 'honest-start-fallback');
+  assert.equal(ready.pending.timeline.length, 4);
+  assert.equal(ready.pending.timeline[3].t, 3.4);
+
+  const disabled = makeAutomix(false);
+  disabled.setEnabled(true);
+  const fallback = await disabled.prepare({
+    token: 19,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+  });
+  assert.equal(fallback.status, 'fallback');
 });
 
 test('never starts transition actions before the protected signature section ends', async () => {

@@ -82,6 +82,17 @@ function credibleFirstHook(structureMap) {
   )) || null;
 }
 
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function minimumFiniteOrNull(...values) {
+  const numbers = values.map(finiteOrNull).filter((value) => value !== null);
+  return numbers.length ? Math.min(...numbers) : null;
+}
+
 function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
   const fromStructure = from.structureMap || {};
   const toStructure = to.structureMap || {};
@@ -95,35 +106,39 @@ function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
   return {
     ...recipeDiagnostics,
     structureSource,
-    structureConfidence: Math.min(fromStructure.structureConfidence, toStructure.structureConfidence),
-    protectedUntil: chosen.protectedUntil,
+    structureConfidence: minimumFiniteOrNull(fromStructure.structureConfidence, toStructure.structureConfidence),
+    protectedUntil: finiteOrNull(chosen.protectedUntil),
+    firstHookStart: null,
+    firstHookEnd: null,
+    hookConfidence: null,
+    hookEvidence: [],
     ...(fromHook ? {
-      firstHookStart: fromHook.start,
-      firstHookEnd: fromHook.end,
-      hookConfidence: fromHook.confidence,
+      firstHookStart: finiteOrNull(fromHook.start),
+      firstHookEnd: finiteOrNull(fromHook.end),
+      hookConfidence: finiteOrNull(fromHook.confidence),
       ...(fromHook.evidence ? { hookEvidence: fromHook.evidence } : {}),
     } : {}),
     exitType: chosen.exit && chosen.exit.type || '',
-    exitConfidence: chosen.exit && chosen.exit.confidence,
-    exitRatio: chosen.exitRatio,
+    exitConfidence: finiteOrNull(chosen.exit && chosen.exit.confidence),
+    exitRatio: finiteOrNull(chosen.exitRatio),
     entryType: landingType,
     entrySource: entry.source || '',
-    entryConfidence: entry.confidence,
-    landingAt: entry.landingAt,
-    mixStart: chosen.mixStart,
-    handoffAt: chosen.handoffAt,
-    audibleOverlap: chosen.audibleOverlap,
-    preRollDuration: chosen.preRollDuration,
-    energyContinuity: chosen.energyContinuity,
-    grooveContinuity: chosen.grooveContinuity,
-    tempoCompatibility: chosen.tempoCompatibility,
+    entryConfidence: finiteOrNull(entry.confidence),
+    landingAt: finiteOrNull(entry.landingAt),
+    mixStart: finiteOrNull(chosen.mixStart),
+    handoffAt: finiteOrNull(chosen.handoffAt),
+    audibleOverlap: finiteOrNull(chosen.audibleOverlap),
+    preRollDuration: finiteOrNull(chosen.preRollDuration),
+    energyContinuity: finiteOrNull(chosen.energyContinuity),
+    grooveContinuity: finiteOrNull(chosen.grooveContinuity),
+    tempoCompatibility: finiteOrNull(chosen.tempoCompatibility),
     windowRejectionReasons: Array.isArray(chosen.rejectionReasons) ? chosen.rejectionReasons.slice() : [],
-    sourceExitCount: recipeDiagnostics.sourceExitCount,
-    sourceLandingCount: recipeDiagnostics.sourceLandingCount,
-    consideredExitCount: recipeDiagnostics.consideredExitCount,
-    consideredLandingCount: recipeDiagnostics.consideredLandingCount,
-    exitCandidateCount: fromStructure.exitCandidates.length,
-    entryCandidateCount: toStructure.entryCandidates.length,
+    sourceExitCount: finiteOrNull(recipeDiagnostics.sourceExitCount),
+    sourceLandingCount: finiteOrNull(recipeDiagnostics.sourceLandingCount),
+    consideredExitCount: finiteOrNull(recipeDiagnostics.consideredExitCount),
+    consideredLandingCount: finiteOrNull(recipeDiagnostics.consideredLandingCount),
+    exitCandidateCount: finiteOrNull((fromStructure.exitCandidates || []).length),
+    entryCandidateCount: finiteOrNull((toStructure.entryCandidates || []).length),
   };
 }
 

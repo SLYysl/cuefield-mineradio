@@ -177,6 +177,33 @@ test('uses a real zero-second fallback when paired lyrics are unavailable', () =
   assert.equal(result.to.structureMap.entryCandidates.some((item) => item.source === 'fallback' && item.time >= 12 && item.time <= 16), false);
 });
 
+test('normalizes empty bridge diagnostic metadata to finite values or null', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: {}, map: makeCompressedMap(0) },
+    'song:b': { key: 'song:b', meta: {}, map: makeCompressedMap(0) },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+  const diagnostics = result.diagnostics;
+  const numericKeys = [
+    'structureConfidence', 'protectedUntil', 'firstHookStart', 'firstHookEnd',
+    'hookConfidence', 'exitConfidence', 'exitRatio', 'entryConfidence', 'landingAt',
+    'mixStart', 'handoffAt', 'audibleOverlap', 'preRollDuration',
+    'energyContinuity', 'grooveContinuity', 'tempoCompatibility',
+  ];
+  numericKeys.forEach((key) => {
+    assert.equal(Number.isNaN(diagnostics[key]), false, key);
+    assert.equal(diagnostics[key] === null || Number.isFinite(diagnostics[key]), true, key);
+  });
+  assert.equal(diagnostics.exitConfidence, null);
+  assert.equal(diagnostics.hookConfidence, null);
+  assert.equal(diagnostics.entrySource, 'fallback');
+  assert.deepEqual(diagnostics.windowRejectionReasons, ['no valid complete transition window']);
+});
+
 test('preserves a lyric-backed B hook when A is beat-only', () => {
   const cache = {
     'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },

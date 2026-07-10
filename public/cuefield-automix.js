@@ -40,6 +40,9 @@
     var tier = tierOf(plan);
     var chosen = plan && plan.chosen || {};
     var recipe = chosen.transitionRecipe || chosen.recipeCandidate && chosen.recipeCandidate.recipe || '';
+    if (recipe === 'honest-start-fallback') {
+      return !!deps.allowSafetyFallback && Array.isArray(chosen.timeline) && chosen.timeline.length > 0;
+    }
     if (EXECUTABLE_TIERS[tier]) return true;
     if (recipe === 'safety-long-blend') return !!deps.allowSafetyFallback;
     if (tier !== 'weak' || !deps.allowWeak) return false;
@@ -176,7 +179,6 @@
           entryTime: entryTime,
           exitTime: exitTime,
           protectedUntil: protectedUntil,
-          mixStart: chosen.mixStart,
           handoffAt: chosen.handoffAt,
           audibleOverlap: chosen.audibleOverlap,
           preRollDuration: chosen.preRollDuration,
@@ -184,6 +186,7 @@
           triggerAt: triggerAt,
           createdAt: Date.now(),
         };
+        if (hasExplicitMixStart) state.pending.mixStart = chosen.mixStart;
         state.lastStatus = 'ready';
         return { status: 'ready', pending: state.pending };
       } catch (err) {
