@@ -157,6 +157,23 @@ test('labels a falling post-hook phrase as a release', () => {
   assert.equal(map.exitCandidates.some((item) => item.type === 'release'), true);
 });
 
+test('builds compact vocal windows without retaining lyric text', () => {
+  const map = buildStructureMap({
+    profile: makeProfile([0.3, 0.8, 0.68, 0.42, 0.3]),
+    lrcLines: [
+      { time: 18, text: 'first private lyric', normalized: 'first private lyric' },
+      { time: 22, text: 'second private lyric', normalized: 'second private lyric' },
+      { time: 35, text: 'third private lyric', normalized: 'third private lyric' },
+    ],
+  });
+
+  assert.equal(map.vocalWindows.length, 3);
+  assert.deepEqual(Object.keys(map.vocalWindows[0]).sort(), ['end', 'start']);
+  assert.equal(map.vocalWindows[0].start, 18);
+  assert.equal(map.vocalWindows[0].end < 22, true);
+  assert.equal(JSON.stringify(map.vocalWindows).includes('private lyric'), false);
+});
+
 test('exposes pre-hook and hook as separate B entry choices', () => {
   const map = buildStructureMap({
     profile: makeProfile([0.32, 0.78, 0.74, 0.44, 0.72, 0.7]),

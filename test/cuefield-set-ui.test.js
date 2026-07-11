@@ -65,6 +65,18 @@ test('smart next resolves before AutoMix prepares the selected pair', () => {
   assert.match(resolver, /safeRenderQueuePanel/);
 });
 
+test('smart selection has a hard planning budget and falls back to sequential playback', () => {
+  assert.match(html, /CUEFIELD_SMART_PLAN_BUDGET_MS/);
+  const budget = block('function cuefieldEvaluateWithinBudget', 'async function resolveCuefieldNextIndex');
+  assert.match(budget, /Promise\.race/);
+  assert.match(budget, /clearTimeout/);
+
+  const resolver = block('async function resolveCuefieldNextIndex', 'function scheduleCuefieldAutoMixPrepare');
+  assert.match(resolver, /smartDeadline/);
+  assert.match(resolver, /cuefieldEvaluateWithinBudget/);
+  assert.match(resolver, /return sequentialIndex/);
+});
+
 test('pair planning is shared and cached with a bounded TTL', () => {
   assert.match(html, /CUEFIELD_PAIR_PLAN_TTL_MS = 5 \* 60 \* 1000/);
   assert.match(html, /var cuefieldPairPlanCache = new Map\(\)/);

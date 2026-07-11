@@ -219,12 +219,26 @@ function isAnchoredLandingDiagnosticValid(entry, window) {
   return Number.isFinite(landingError) && Math.abs(landingError) <= 0.08;
 }
 
-function rejectionReasons({ protectedUntil, sourceDuration, exit, entry, recipeCandidate, diagnostics }) {
+function rejectionReasons({ protectedUntil, sourceDuration, exit, entry, recipeCandidate, diagnostics, vocalWindows, musicalEvidence }) {
   const reasons = [];
   const window = recipeCandidate.window || {};
   const mixStart = toNumber(exit.time) + toNumber(window.audibleStart);
+  const handoffAt = toNumber(exit.time) + toNumber(window.handoffOffset);
   const anchored = ['hook', 'intro', 'drop'].includes(landingKind(entry));
   if (mixStart < protectedUntil) reasons.push('mix start precedes protected section');
+  if ((vocalWindows || []).some((vocal) => (
+    toNumber(vocal && vocal.end) > mixStart
+    && toNumber(vocal && vocal.start) < handoffAt
+  ))) reasons.push('outgoing vocal phrase incomplete');
+  if (musicalEvidence && toNumber(musicalEvidence.score) < 0.45) {
+    if (!['release', 'outro', 'natural-tail'].includes(String(exit && exit.type || '').toLowerCase())) {
+      reasons.push('musical mismatch needs release exit');
+    } else if (toNumber(exit && exit.time) / Math.max(1, toNumber(sourceDuration)) < 0.72) {
+      reasons.push('musical mismatch needs late release');
+    } else if (toNumber(window.audibleOverlap) > 3.5) {
+      reasons.push('musical mismatch needs short overlap');
+    }
+  }
   if (anchored && window.runwayAvailable === false) reasons.push('landing has no runway');
   if (anchored && !Number.isFinite(window.landingError)) reasons.push('landing diagnostic unavailable');
   else if (anchored && !isAnchoredLandingDiagnosticValid(entry, window)) reasons.push('landing error exceeds .08');
@@ -390,6 +404,18 @@ function technicalFailure(errorCode, rejected = []) {
   };
 }
 
+function terminalStartAfterVocal(windows, requested, duration) {
+  let candidate = toNumber(requested);
+  (windows || []).slice().sort((a, b) => toNumber(a && a.start) - toNumber(b && b.start)).forEach((window) => {
+    const start = toNumber(window && window.start, NaN);
+    const end = toNumber(window && window.end, NaN);
+    if (Number.isFinite(start) && Number.isFinite(end) && end > candidate && start < candidate + 0.6) {
+      candidate = end + 0.12;
+    }
+  });
+  return duration - candidate >= MINIMUM_TERMINAL_OVERLAP ? round(candidate) : round(requested);
+}
+
 function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, policy, rejected, entries = []) {
   const duration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
   const targetDuration = Math.max(0, toNumber(toProfile && toProfile.duration));
@@ -417,12 +443,17 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
   const preferredStart = selectedExit
     ? toNumber(selectedExit.time)
     : Math.max(toNumber(protectedUntil), Math.min(duration - 3.6, duration * 0.92));
-  const mixStart = selectedExit
+  const requestedMixStart = selectedExit
     ? round(toNumber(selectedExit.time))
     : round(Math.max(
       protectedBoundary,
       Math.min(duration - MINIMUM_TERMINAL_OVERLAP, preferredStart),
     ));
+  const mixStart = terminalStartAfterVocal(
+    fromAnalysis && fromAnalysis.structureMap && fromAnalysis.structureMap.vocalWindows,
+    requestedMixStart,
+    duration,
+  );
   const overlapDuration = round(Math.max(0, Math.min(3.4, duration - mixStart, targetDuration)));
   const landingOffset = 0.55;
   const bRiseAt = 0.38;
@@ -568,6 +599,8 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
           entry,
           recipeCandidate,
           diagnostics: recipePlan.diagnostics || {},
+          vocalWindows: fromAnalysis.structureMap && fromAnalysis.structureMap.vocalWindows,
+          musicalEvidence,
         });
         const window = rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics: recipePlan.diagnostics || {}, fromProfile, toProfile, policy, musicalEvidence });
         if (reasons.length) rejected.push({ ...window, rejectionReasons: reasons });

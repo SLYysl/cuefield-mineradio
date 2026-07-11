@@ -103,6 +103,16 @@ function setBarMetrics(analysis, time, metrics) {
   return analysis;
 }
 
+function musicalProfile(root) {
+  return {
+    confidence: 0.9,
+    noteCount: 64,
+    pitchClassProfile: Array.from({ length: 12 }, (_, index) => index === root ? 1 : 0),
+    intervalProfile: Array.from({ length: 25 }, (_, index) => index === 14 ? 1 : 0),
+    key: { root, mode: 'major' },
+  };
+}
+
 test('prefers usable early exit at .44 over similar .94 emergency exit', () => {
   const from = profile({
     duration: 200,
@@ -116,6 +126,60 @@ test('prefers usable early exit at .44 over similar .94 emergency exit', () => {
   const result = chooseTransitionWindow(from, to);
 
   assert.equal(result.chosen.exit.time, 88);
+});
+
+test('rejects a transition whose audible A-B window interrupts an outgoing lyric', () => {
+  const from = profile({
+    duration: 128,
+    exits: [
+      exit(80, 0.92, { exitRatio: 0.625, latePenalty: 0 }),
+      exit(112, 0.8, { exitRatio: 0.875, latePenalty: 0.2 }),
+    ],
+  });
+  from.structureMap.structureSource = 'lyric+beat';
+  from.structureMap.vocalWindows = [{ start: 75, end: 81 }];
+  const to = profile({ entries: [entry('intro', 16, { source: 'energy' })] });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.notEqual(result.chosen.exit.time, 80);
+  assert.equal(result.rejected.some((item) => item.exit.time === 80
+    && item.rejectionReasons.includes('outgoing vocal phrase incomplete')), true);
+});
+
+test('requires a release before mixing musically incompatible tracks', () => {
+  const from = profile({
+    duration: 128,
+    exits: [
+      exit(80, 0.94, { type: 'phrase-boundary', exitRatio: 0.625, latePenalty: 0 }),
+      exit(96, 0.82, { type: 'release', exitRatio: 0.75, latePenalty: 0.1 }),
+    ],
+  });
+  const to = profile({ entries: [entry('intro', 16, { source: 'energy' })] });
+  from.musicalProfile = musicalProfile(0);
+  to.musicalProfile = musicalProfile(6);
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.chosen.exit.type, 'release');
+  assert.equal(result.rejected.some((item) => item.exit.time === 80
+    && item.rejectionReasons.includes('musical mismatch needs release exit')), true);
+});
+
+test('holds a musically incompatible release until the late part of A', () => {
+  const from = profile({
+    duration: 160,
+    exits: [exit(64, 0.92, { type: 'release', exitRatio: 0.4, latePenalty: 0 })],
+  });
+  const to = profile({ entries: [entry('intro', 16, { source: 'energy' })] });
+  from.musicalProfile = musicalProfile(0);
+  to.musicalProfile = musicalProfile(6);
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.chosen.exitRatio >= 0.88, true);
+  assert.equal(result.rejected.some((item) => item.exit.time === 64
+    && item.rejectionReasons.includes('musical mismatch needs late release')), true);
 });
 
 test('late contrast rise constrains exits to its late range and uses a short overlap', () => {
@@ -324,6 +388,19 @@ test('terminal rescue returns an executable late timeline when structural window
   assert.equal(aFilter.t, aFade.t);
   assert.equal(result.chosen.audibleOverlap <= 0.15, true);
   assert.equal(result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
+});
+
+test('terminal rescue waits for an outgoing vocal window to clear when runway remains', () => {
+  const from = profile({ duration: 128, exits: [] });
+  from.structureMap.structureSource = 'lyric+beat';
+  from.structureMap.vocalWindows = [{ start: 116, end: 121 }];
+  const to = profile({ duration: 96, entries: [entry('intro', 8, { source: 'energy' })] });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.chosen.recipeCandidate.recipe, 'terminal-rescue');
+  assert.equal(result.chosen.mixStart >= 121, true);
+  assert.equal(result.chosen.handoffAt <= 128, true);
 });
 
 test('terminal rescue prerolls a trusted hook and reaches full volume on its landing', () => {

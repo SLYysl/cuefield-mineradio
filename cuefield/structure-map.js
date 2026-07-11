@@ -107,6 +107,31 @@ function latePenalty(exitRatio) {
   return round(0.45 + Math.min(0.2, (exitRatio - 0.78) * 0.5));
 }
 
+function buildVocalWindows(lines, duration) {
+  const seen = new Set();
+  const timed = (lines || [])
+    .filter((line) => String(line && (line.normalized || line.text) || '').trim())
+    .map((line) => toNumber(line && line.time, NaN))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+    .filter((time) => {
+      const key = round(time);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return timed.map((start, index) => {
+    const next = timed[index + 1];
+    const estimatedEnd = Number.isFinite(next)
+      ? Math.min(start + 6.5, Math.max(start + 0.8, next - 0.18))
+      : start + 4.5;
+    return {
+      start: round(start),
+      end: round(Math.min(Math.max(start, toNumber(duration, estimatedEnd)), estimatedEnd)),
+    };
+  }).filter((window) => window.end > window.start);
+}
+
 function buildExitCandidates(profile, protectedUntil) {
   const phrases = profile.phrases || [];
   const duration = toNumber(profile.duration);
@@ -270,6 +295,7 @@ function buildStructureMap(opts = {}) {
     structureConfidence: signature.confidence,
     protectedUntil,
     sections,
+    vocalWindows: buildVocalWindows(opts.lrcLines || [], profile.duration),
     exitCandidates: buildExitCandidates(profile, protectedUntil),
     entryCandidates: [fallbackEntry, preHookEntry, signatureEntry].filter(Boolean),
   };
