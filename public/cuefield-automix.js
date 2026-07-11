@@ -74,8 +74,8 @@
     return hasBPlay
       && !!aRamp
       && !!bRamp
-      && Math.abs(aRamp.t - bRamp.t) <= tolerance
-      && Math.abs(aRamp.duration - bRamp.duration) <= 1
+      && aRamp.t >= 0
+      && bRamp.t >= 0
       && aRamp.t + aRamp.duration / 1000 <= handoffT + tolerance;
   }
 

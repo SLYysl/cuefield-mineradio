@@ -378,7 +378,7 @@ function technicalFailure(errorCode, rejected = []) {
   };
 }
 
-function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, policy, rejected) {
+function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, policy, rejected, entries = []) {
   const duration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
   const targetDuration = Math.max(0, toNumber(toProfile && toProfile.duration));
   const protectedBoundary = toNumber(protectedUntil);
@@ -412,28 +412,38 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
       Math.min(duration - MINIMUM_TERMINAL_OVERLAP, preferredStart),
     ));
   const overlapDuration = round(Math.max(0, Math.min(3.4, duration - mixStart, targetDuration)));
-  const swapDuration = round(Math.min(1, Math.max(0.8, overlapDuration * 0.28)));
-  const swapDurationMs = Math.round(swapDuration * 1000);
-  const swapAt = round(overlapDuration - swapDuration);
-  const entry = {
+  const landingOffset = 0.55;
+  const bRiseAt = 0.38;
+  const bRiseDuration = 170;
+  const trustedEntry = entries.find((candidate) => (
+    ['hook', 'drop'].includes(landingKind(candidate))
+    && toNumber(candidate.confidence) >= 0.6
+    && toNumber(candidate.landingAt) >= landingOffset
+    && toNumber(candidate.landingAt) + overlapDuration - landingOffset <= targetDuration
+  ));
+  const requestedLanding = trustedEntry ? toNumber(trustedEntry.landingAt) : landingOffset;
+  const bStart = round(Math.max(0, requestedLanding - landingOffset));
+  const actualLanding = round(bStart + landingOffset);
+  const entry = trustedEntry ? {
+    ...trustedEntry,
+    playFrom: bStart,
+    landingAt: requestedLanding,
+  } : {
     type: 'start',
     role: 'entry',
     source: 'fallback',
     time: 0,
-    playFrom: 0,
-    landingAt: round(Math.min(3.4, overlapDuration)),
+    playFrom: bStart,
+    landingAt: actualLanding,
     landingType: 'start',
     confidence: 0.35,
   };
   const fallbackTimeline = [
-    { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
-    { t: 0, deck: 'B', op: 'bass', value: 0.15, duration: 0 },
-    { t: 0, deck: 'B', op: 'filter', type: 'highpass', value: 900, duration: 0 },
-    { t: swapAt, deck: 'A', op: 'bass', value: 0.2, duration: swapDurationMs },
-    { t: swapAt, deck: 'A', op: 'volume', value: 0, duration: swapDurationMs, curve: 'equal-power-out' },
-    { t: swapAt, deck: 'B', op: 'filter', type: 'none', value: 0, duration: swapDurationMs },
-    { t: swapAt, deck: 'B', op: 'bass', value: 1, duration: swapDurationMs },
-    { t: swapAt, deck: 'B', op: 'volume', value: 1, duration: swapDurationMs, curve: 'equal-power-in' },
+    { t: 0, deck: 'B', op: 'play', at: bStart, volume: 0 },
+    { t: 0, deck: 'A', op: 'filter', type: 'highpass', value: 1800, duration: 450 },
+    { t: 0, deck: 'A', op: 'bass', value: 0.12, duration: 350 },
+    { t: 0, deck: 'A', op: 'volume', value: 0, duration: 500, curve: 'equal-power-out' },
+    { t: bRiseAt, deck: 'B', op: 'volume', value: 1, duration: bRiseDuration, curve: 'equal-power-in' },
     { t: overlapDuration, deck: 'B', op: 'handoff' },
   ];
   const timeline = fallbackTimeline;
@@ -452,13 +462,13 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
       score: 0,
       timeline,
       fallbackTimeline,
-      window: { audibleStart: 0, audibleEnd: overlapDuration, audibleOverlap: overlapDuration, preRollDuration: 0, handoffOffset: overlapDuration, runwayAvailable: true, landingError: 0 },
+      window: { audibleStart: 0, audibleEnd: landingOffset, audibleOverlap: 0.12, preRollDuration: bRiseAt, handoffOffset: overlapDuration, runwayAvailable: true, landingError: round(actualLanding - requestedLanding) },
     },
     timeline,
     mixStart,
     handoffAt: round(mixStart + overlapDuration),
-    audibleOverlap: overlapDuration,
-    preRollDuration: 0,
+    audibleOverlap: 0.12,
+    preRollDuration: bRiseAt,
     exitRatio: round(mixStart / Math.max(1, duration)),
     energyContinuity: 0.35,
     grooveContinuity: 0.35,
@@ -507,7 +517,7 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
   };
 
   if (policy.route === 'terminal-rescue') {
-    const chosen = terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, policy, []);
+    const chosen = terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, policy, [], entries);
     chosen.policy = policy;
     return {
       chosen,
@@ -548,7 +558,7 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
   });
   candidateWindows.sort((a, b) => b.score - a.score || a.exit.time - b.exit.time || a.entry.landingAt - b.entry.landingAt);
   const selectedPolicy = candidateWindows.length ? policy : terminalRescuePolicy(policy, fromProfile, protectedUntil);
-  const chosen = candidateWindows[0] || terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, selectedPolicy, rejected);
+  const chosen = candidateWindows[0] || terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, selectedPolicy, rejected, entries);
   chosen.policy = selectedPolicy;
   if (!chosen.routeFallbackUsed) chosen.routeFallbackUsed = false;
   return {

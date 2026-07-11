@@ -315,14 +315,35 @@ test('terminal rescue returns an executable late timeline when structural window
   const aFade = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'volume');
   const bFade = result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'volume');
   const aBassCut = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'bass');
-  const bBassRestore = result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'bass' && action.value === 1);
-  assert.equal(aFade.t, bFade.t);
-  assert.equal(aFade.duration, bFade.duration);
-  assert.equal(aFade.duration >= 800 && aFade.duration <= 1000, true);
+  const aFilter = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'filter');
+  assert.equal(aFade.t, 0);
+  assert.equal(aFade.duration, 500);
+  assert.equal(bFade.t > aFade.t, true);
+  assert.equal(bFade.duration <= 220, true);
   assert.equal(aBassCut.t, aFade.t);
-  assert.equal(bBassRestore.t, bFade.t);
-  assert.equal(bBassRestore.duration, bFade.duration);
+  assert.equal(aFilter.t, aFade.t);
+  assert.equal(result.chosen.audibleOverlap <= 0.15, true);
   assert.equal(result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
+});
+
+test('terminal rescue prerolls a trusted hook and reaches full volume on its landing', () => {
+  const from = profile({ duration: 128, bpm: 122, exits: [exit(80)] });
+  const to = profile({
+    duration: 96,
+    bpm: 81,
+    entries: [entry('hook', 20, { playFrom: 20, landingAt: 20, landingType: 'hook', confidence: 0.88 })],
+  });
+
+  const result = chooseTransitionWindow(from, to);
+  const play = result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play');
+  const rise = result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'volume');
+  const landingOffset = result.chosen.entry.landingAt - play.at;
+
+  assert.equal(result.chosen.recipeCandidate.recipe, 'terminal-rescue');
+  assert.equal(result.chosen.entry.landingType, 'hook');
+  assert.equal(play.at < result.chosen.entry.landingAt, true);
+  assert.equal(Math.abs(rise.t + rise.duration / 1000 - landingOffset) <= 0.01, true);
+  assert.equal(result.chosen.preRollDuration, rise.t);
 });
 
 test('terminal rescue caps a valid late exit to a short executable overlap', () => {
@@ -335,10 +356,10 @@ test('terminal rescue caps a valid late exit to a short executable overlap', () 
   assert.equal(result.chosen.mixStart, 180);
   assert.equal(result.chosen.exit.time, result.chosen.mixStart);
   assert.equal(result.chosen.mixStart >= from.structureMap.protectedUntil, true);
-  assert.equal(result.chosen.audibleOverlap <= 3.4, true);
-  assert.equal(result.chosen.audibleOverlap >= 2.2, true);
+  assert.equal(result.chosen.audibleOverlap, 0.12);
   assert.equal(result.chosen.handoffAt <= from.duration, true);
-  assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= result.chosen.audibleOverlap), true);
+  const handoffSpan = result.chosen.handoffAt - result.chosen.mixStart;
+  assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= handoffSpan + 0.001), true);
 });
 
 test('returns a non-executable technical result when protection leaves less than 2.2 seconds', () => {
@@ -396,8 +417,8 @@ test('caps terminal rescue overlap to the playable target duration', () => {
   const result = chooseTransitionWindow(profile({ duration: 128 }), profile({ duration: 2.5 }));
 
   assert.equal(result.chosen.technicalFailure, undefined);
-  assert.equal(result.chosen.audibleOverlap, 2.5);
-  assert.equal(result.chosen.entry.landingAt, 2.5);
+  assert.equal(result.chosen.audibleOverlap, 0.12);
+  assert.equal(result.chosen.entry.landingAt, 0.55);
   assert.equal(result.chosen.handoffAt - result.chosen.mixStart, 2.5);
   assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= 2.5), true);
 });
@@ -411,9 +432,9 @@ test('terminal rescue executes an exact 2.2-second post-protection runway', () =
   assert.equal(result.chosen.mixStart, 9.8);
   assert.equal(result.chosen.mixStart < result.chosen.handoffAt, true);
   assert.equal(result.chosen.handoffAt <= 12, true);
-  assert.equal(result.chosen.audibleOverlap >= 2.2, true);
-  assert.equal(result.chosen.audibleOverlap <= 3.4, true);
-  assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= result.chosen.audibleOverlap), true);
+  assert.equal(result.chosen.audibleOverlap, 0.12);
+  const handoffSpan = result.chosen.handoffAt - result.chosen.mixStart;
+  assert.equal(result.chosen.timeline.every((action) => action.t + Number(action.duration || 0) / 1000 <= handoffSpan + 0.001), true);
 });
 
 test('rejects every structural candidate whose handoff would exceed A duration before rescuing', () => {
