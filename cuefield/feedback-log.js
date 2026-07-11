@@ -115,6 +115,17 @@ function compactBridge(transition = {}) {
   };
 }
 
+function compactMusical(transition = {}) {
+  return {
+    evidence: transition.musicalEvidence === true,
+    compatibility: roundNumber(transition.musicalCompatibility),
+    harmonicSimilarity: roundNumber(transition.harmonicSimilarity),
+    keyCompatibility: roundNumber(transition.keyCompatibility),
+    melodySimilarity: roundNumber(transition.melodySimilarity),
+    risks: compactList(transition.musicalRisks, 3),
+  };
+}
+
 function compactStructure(transition = {}) {
   return {
     source: compactString(transition.structureSource || transition.source, 24),
@@ -150,6 +161,8 @@ function compactTransition(transition = {}) {
     beatGridTrusted: transition.beatGridTrusted === true,
     runtimeDowngrade: compactString(transition.runtimeDowngrade, 40),
     setMode: ['sequential', 'smart'].includes(transition.setMode) ? transition.setMode : '',
+    minimumListenUntil: roundNumber(transition.minimumListenUntil),
+    musical: compactMusical(transition),
     bridge: compactBridge(transition),
     route: compactString(transition.route, 40),
     compatibilityClass: compactString(transition.compatibilityClass, 40),

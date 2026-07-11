@@ -40,6 +40,48 @@ test('normalizes compressed Mineradio beat arrays for Cuefield analysis', () => 
   assert.equal(analysis.analysis.downbeats.length > 2, true);
 });
 
+test('carries a cached musical profile into Cuefield analysis', () => {
+  const map = makeCompressedMap();
+  map.musicalProfile = { source: 'basic-pitch', confidence: 0.8, noteCount: 40 };
+  const result = normalizeMineradioBeatMap({ id: 'a', duration: 96 }, map);
+
+  assert.deepEqual(result.analysis.musicalProfile, map.musicalProfile);
+});
+
+test('exposes compact compatibility only when both musical profiles are reliable', () => {
+  const reliableProfile = (shift) => ({
+    source: 'basic-pitch',
+    confidence: 0.9,
+    noteCount: 48,
+    pitchClassProfile: Array.from({ length: 12 }, (_, index) => index === shift ? 1 : 0),
+    intervalProfile: Array.from({ length: 25 }, (_, index) => index === 14 ? 1 : 0),
+    key: { root: shift, mode: 'major' },
+  });
+  const cache = {
+    a: { key: 'a', map: { ...makeCompressedMap(128), musicalProfile: reliableProfile(0) } },
+    b: { key: 'b', map: { ...makeCompressedMap(96), musicalProfile: reliableProfile(0) } },
+  };
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'a',
+    toKey: 'b',
+    readBeatMapCache: (key) => cache[key],
+  });
+
+  assert.equal(result.diagnostics.musicalEvidence, true);
+  assert.equal(result.diagnostics.musicalCompatibility, 1);
+  assert.equal(result.diagnostics.harmonicSimilarity, 1);
+  assert.equal(JSON.stringify(result).includes('pitchClassProfile'), false);
+
+  cache.b.map.musicalProfile = { ...reliableProfile(0), confidence: 0.2 };
+  const neutral = planCuefieldTransitionFromCache({
+    fromKey: 'a',
+    toKey: 'b',
+    readBeatMapCache: (key) => cache[key],
+  });
+  assert.equal(neutral.diagnostics.musicalEvidence, false);
+  assert.equal(neutral.diagnostics.musicalCompatibility, null);
+});
+
 test('plans a Cuefield transition directly from Mineradio beatmap cache keys', () => {
   const cache = {
     'song:a': {

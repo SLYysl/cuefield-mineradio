@@ -134,6 +134,12 @@
     });
   }
 
+  function minimumListenUntil(durationSec) {
+    var duration = toNumber(durationSec, 0);
+    if (duration <= 0) return 0;
+    return Math.max(72, Math.min(108, duration * 0.42));
+  }
+
   function createCuefieldAutoMix(deps) {
     deps = deps || {};
     var state = {
@@ -218,6 +224,7 @@
           : toNumber(ctx.leadSec, 1);
         var leadSec = timelineLeadSec(timeline, fallbackLeadSec);
         var protectedUntil = Math.max(0, toNumber(chosen.protectedUntil, 0));
+        var listenFloor = minimumListenUntil(ctx.durationSec);
         var explicitMixStart = chosen.mixStart != null ? Number(chosen.mixStart) : NaN;
         var explicitHandoffAt = chosen.handoffAt != null ? Number(chosen.handoffAt) : NaN;
         var hasExplicitWindow = Number.isFinite(explicitMixStart)
@@ -227,6 +234,7 @@
         var triggerAt = hasExplicitWindow
           ? Math.max(protectedUntil, explicitMixStart)
           : (isFinite(exitTime) ? Math.max(protectedUntil, exitTime - leadSec) : protectedUntil);
+        triggerAt = Math.max(triggerAt, listenFloor);
         var entryTime = timelineBStart(timeline, Math.max(0, toNumber(chosen.entry && chosen.entry.time, 0)));
         state.pending = {
           token: ctx.token,
@@ -242,6 +250,7 @@
           entryTime: entryTime,
           exitTime: exitTime,
           protectedUntil: protectedUntil,
+          minimumListenUntil: listenFloor,
           audibleOverlap: chosen.audibleOverlap,
           preRollDuration: chosen.preRollDuration,
           exitRatio: chosen.exitRatio,

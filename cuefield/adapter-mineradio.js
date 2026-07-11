@@ -89,6 +89,7 @@ function normalizeMineradioBeatMap(track, map, extra = {}) {
       hasKeyData,
       hasVocalData,
       dataConfidence: beats.length >= 16 && gridStep > 0 ? 1 : 0,
+      musicalProfile: map && map.musicalProfile || extra.musicalProfile || null,
     },
   };
 }

@@ -51,6 +51,70 @@ test('prepares a transition for the current and next queue items before playback
   assert.equal(automix.shouldTrigger({ token: 7, currentIndex: 1, currentTime: 41 }), true);
 });
 
+test('holds automatic transitions until a dynamic minimum listening floor', async () => {
+  const automix = createCuefieldAutoMix({
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => ({
+      ok: true,
+      chosen: {
+        recipe: 'section-jump',
+        score: 0.9,
+        exit: { time: 30 },
+        evaluation: { tier: 'usable', risks: [] },
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+
+  automix.setEnabled(true);
+  const result = await automix.prepare({
+    token: 31,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+    durationSec: 240,
+  });
+
+  assert.equal(result.pending.minimumListenUntil, 100.8);
+  assert.equal(result.pending.triggerAt, 100.8);
+  assert.equal(automix.shouldTrigger({ token: 31, currentIndex: 0, currentTime: 100.7 }), false);
+  assert.equal(automix.shouldTrigger({ token: 31, currentIndex: 0, currentTime: 100.8 }), true);
+});
+
+test('lets a later signature section extend but never shorten the listening floor', async () => {
+  const prepareWithProtection = async (protectedUntil) => {
+    const automix = createCuefieldAutoMix({
+      getKey: (song) => song.key,
+      ensureBeatMap: async () => true,
+      planTransition: async () => ({
+        ok: true,
+        chosen: {
+          recipe: 'section-jump',
+          score: 0.9,
+          exit: { time: 40 },
+          protectedUntil,
+          evaluation: { tier: 'usable', risks: [] },
+        },
+      }),
+      prepareAudioUrl: async () => '/api/audio?url=b',
+    });
+    automix.setEnabled(true);
+    return automix.prepare({
+      token: protectedUntil,
+      currentIndex: 0,
+      nextIndex: 1,
+      currentSong: { key: 'a' },
+      nextSong: { key: 'b' },
+      durationSec: 180,
+    });
+  };
+
+  assert.equal((await prepareWithProtection(30)).pending.triggerAt, 75.6);
+  assert.equal((await prepareWithProtection(92)).pending.triggerAt, 92);
+});
+
 test('keeps weak or rejected transition plans as fallback instead of auto executing', async () => {
   const automix = createCuefieldAutoMix({
     getKey: (song) => song.key,

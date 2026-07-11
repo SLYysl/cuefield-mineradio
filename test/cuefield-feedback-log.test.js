@@ -10,6 +10,31 @@ const {
   readCuefieldFeedbackStats,
 } = require('../cuefield/feedback-log');
 
+test('keeps compact musical evidence and listening-floor diagnostics', () => {
+  const record = buildCuefieldFeedbackRecord({
+    rating: 1,
+    transition: {
+      minimumListenUntil: 100.8,
+      musicalEvidence: true,
+      musicalCompatibility: 0.82,
+      harmonicSimilarity: 0.9,
+      keyCompatibility: 0.78,
+      melodySimilarity: 0.66,
+      musicalRisks: ['harmonic-clash'],
+    },
+  });
+
+  assert.equal(record.transition.minimumListenUntil, 100.8);
+  assert.deepEqual(record.transition.musical, {
+    evidence: true,
+    compatibility: 0.82,
+    harmonicSimilarity: 0.9,
+    keyCompatibility: 0.78,
+    melodySimilarity: 0.66,
+    risks: ['harmonic-clash'],
+  });
+});
+
 test('builds a compact Cuefield feedback record without audio urls', () => {
   const record = buildCuefieldFeedbackRecord({
     rating: 1,

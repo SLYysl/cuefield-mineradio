@@ -2741,6 +2741,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 <script src="cuefield-set-planner.js"></script>
 <script src="cuefield-bridge-engine.js"></script>
 <script src="cuefield-automix.js"></script>
+<script src="cuefield-musical-sampler.js"></script>
 <script>
 'use strict';
 
@@ -10576,6 +10577,13 @@ function cuefieldFeedbackContextFromPending(pending) {
       bpmB: plannerDiagnostics.bpmB,
       relativeTempoDelta: plannerDiagnostics.relativeTempoDelta,
       beatGridTrusted: plannerDiagnostics.beatGridTrusted === true,
+      minimumListenUntil: pending.minimumListenUntil,
+      musicalEvidence: plannerDiagnostics.musicalEvidence === true,
+      musicalCompatibility: plannerDiagnostics.musicalCompatibility,
+      harmonicSimilarity: plannerDiagnostics.harmonicSimilarity,
+      keyCompatibility: plannerDiagnostics.keyCompatibility,
+      melodySimilarity: plannerDiagnostics.melodySimilarity,
+      musicalRisks: plannerDiagnostics.musicalRisks || [],
       runtimeDowngrade: pending.runtimeDowngrade || '',
       setMode: cuefieldSetMode,
       bridgeSelected: plannerDiagnostics.bridgeSelected === true,
@@ -10778,14 +10786,21 @@ function toggleCuefieldAutoMix() {
 
 async function ensureCuefieldAutoMixBeatMap(song, key, ctx) {
   if (!song || !key) return false;
-  if (beatMapCache[key]) return true;
+  if (beatMapCache[key]) {
+    scheduleCuefieldMusicalProfile(song, key, beatMapCache[key]);
+    return true;
+  }
   if (ctx && ctx.currentIndex === currentIdx && key === beatMapSongKey(playQueue[currentIdx]) && currentBeatMap) {
     beatMapCache[key] = currentBeatMap;
     writeBeatDiskCache(key, currentBeatMap, song, 'mr').catch(function(){});
+    scheduleCuefieldMusicalProfile(song, key, currentBeatMap);
     return true;
   }
   var diskMap = await readBeatDiskCache(key);
-  if (diskMap) return true;
+  if (diskMap) {
+    scheduleCuefieldMusicalProfile(song, key, diskMap);
+    return true;
+  }
   if (!isBeatPrefetchCandidate(song) || beatMapBusy) return false;
   var audioUrl = await fetchBeatPrefetchAudioUrl(song);
   if (!audioUrl || beatMapCache[key]) return !!beatMapCache[key];
@@ -10797,6 +10812,57 @@ async function ensureCuefieldAutoMixBeatMap(song, key, ctx) {
   if (!map) return false;
   beatMapCache[key] = map;
   return await writeBeatDiskCache(key, map, song, 'mr');
+}
+
+var cuefieldMusicalAnalysisTasks = {};
+
+async function decodeCuefieldMusicalAudio(audioUrl) {
+  if (!audioUrl) return null;
+  var resp = await fetch(audioUrl);
+  if (!resp.ok) return null;
+  var bytes = await resp.arrayBuffer();
+  var DecodeCtx = window.AudioContext || window.webkitAudioContext;
+  if (!DecodeCtx) return null;
+  var context = new DecodeCtx();
+  try {
+    return await new Promise(function(resolve, reject){
+      context.decodeAudioData(bytes.slice(0), resolve, reject);
+    });
+  } finally {
+    context.close && context.close();
+  }
+}
+
+async function analyzeCuefieldMusicalBuffer(buffer) {
+  if (!buffer || !window.CuefieldMusicalSampler || !window.desktopWindow
+      || typeof window.desktopWindow.analyzeCuefieldMusicalWindow !== 'function') return null;
+  var sampled = window.CuefieldMusicalSampler.sampleRepresentativeAudio(buffer);
+  var result = await window.desktopWindow.analyzeCuefieldMusicalWindow(sampled);
+  return result && result.ok ? result.profile : null;
+}
+
+function scheduleCuefieldMusicalProfile(song, key, map, decodedBuffer) {
+  if (!key || !map || map.musicalProfile || cuefieldMusicalAnalysisTasks[key]) return;
+  if (!window.desktopWindow || typeof window.desktopWindow.analyzeCuefieldMusicalWindow !== 'function') return;
+  cuefieldMusicalAnalysisTasks[key] = (async function(){
+    try {
+      var buffer = decodedBuffer;
+      if (!buffer) {
+        var audioUrl = await fetchBeatPrefetchAudioUrl(song);
+        buffer = await decodeCuefieldMusicalAudio(audioUrl);
+      }
+      var profile = await analyzeCuefieldMusicalBuffer(buffer);
+      if (!profile || Number(profile.noteCount) < 1) return;
+      map.musicalProfile = profile;
+      beatMapCache[key] = map;
+      await writeBeatDiskCache(key, map, song, 'mr');
+      console.log('Cuefield musical profile ready:', song && song.name || key, profile.key && profile.key.name || 'unknown');
+    } catch (error) {
+      console.warn('Cuefield musical analysis failed:', error && error.message ? error.message : error);
+    } finally {
+      delete cuefieldMusicalAnalysisTasks[key];
+    }
+  })();
 }
 
 function clearCuefieldAutoMixPrepareTimer() {
@@ -10982,6 +11048,7 @@ async function runCuefieldAutoMixPrepare(token, currentIndex, nextIndex, attempt
     nextIndex: nextIndex,
     currentSong: currentSong,
     nextSong: nextSong,
+    durationSec: audio && isFinite(audio.duration) ? audio.duration : 0,
     leadSec: 2.8,
     introBedLeadSec: 5.2,
   });
@@ -12399,7 +12466,10 @@ async function analyzeAudioBeats(audioUrl, durationSec, token, options) {
     if (token !== beatMapToken) { hideBeatChip(); return null; }
     if (options.prefetch) hideBeatChip();
     else showBeatChip('节奏缓冲中…');
-    return { kicks: kicks, beats: beats, pulseBeats: pulseBeats, cameraBeats: cameraBeats, gridStep: gridStep, tempoSource: musicTempoBeats.length >= 4 ? 'music-tempo' : 'local', analysisProfile: analysisProfile.id || 'default', duration: buffer.duration, visualBeatCount: visualBeatCount, analyzedAt: Date.now() };
+    var analyzedMap = { kicks: kicks, beats: beats, pulseBeats: pulseBeats, cameraBeats: cameraBeats, gridStep: gridStep, tempoSource: musicTempoBeats.length >= 4 ? 'music-tempo' : 'local', analysisProfile: analysisProfile.id || 'default', duration: buffer.duration, visualBeatCount: visualBeatCount, analyzedAt: Date.now() };
+    var musicalKey = options.song ? beatMapSongKey(options.song) : '';
+    if (musicalKey) scheduleCuefieldMusicalProfile(options.song, musicalKey, analyzedMap, buffer);
+    return analyzedMap;
   } catch (e) {
     console.warn('beat analysis failed:', e);
     hideBeatChip();
@@ -13302,6 +13372,7 @@ function packLocalBeatMap(map) {
     analyzedAt: map.analyzedAt || Date.now(),
     partial: !!map.partial,
     partialUntilSec: map.partialUntilSec || 0,
+    musicalProfile: map.musicalProfile || null,
     cameraBeats: camera,
     pulseBeats: pulse
   };
@@ -13323,7 +13394,8 @@ function unpackLocalBeatMap(stored) {
     visualBeatCount: stored.visualBeatCount || camera.length,
     analyzedAt: stored.analyzedAt || Date.now(),
     partial: !!stored.partial,
-    partialUntilSec: stored.partialUntilSec || 0
+    partialUntilSec: stored.partialUntilSec || 0,
+    musicalProfile: stored.musicalProfile || null
   };
 }
 function readLocalBeatPrefs() {

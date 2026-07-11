@@ -3,6 +3,7 @@ const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
+const { createMusicalAnalysisService } = require('./cuefield-musical-analysis');
 
 let mainWindow = null;
 let localServer = null;
@@ -23,6 +24,7 @@ let htmlFullscreenActive = false;
 let windowFullscreenActive = false;
 let mainWindowStateTimer = null;
 const registeredGlobalHotkeys = new Map();
+const cuefieldMusicalAnalysis = createMusicalAnalysisService();
 
 const WINDOWED_ASPECT = 16 / 9;
 const WINDOWED_SCALE = 3 / 4;
@@ -1119,6 +1121,14 @@ ipcMain.handle('desktop-window-get-state', (event) => {
 
 ipcMain.handle('desktop-window-close', (event) => {
   getSenderWindow(event)?.close();
+});
+
+ipcMain.handle('cuefield-musical-analyze', async (_event, payload) => {
+  try {
+    return { ok: true, profile: await cuefieldMusicalAnalysis.analyze(payload || {}) };
+  } catch (error) {
+    return { ok: false, error: error.message || 'MUSICAL_ANALYSIS_FAILED' };
+  }
 });
 
 ipcMain.handle('mineradio-hotkeys-configure-global', (_event, bindings) => {
