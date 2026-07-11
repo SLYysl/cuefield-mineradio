@@ -287,7 +287,8 @@ function planCuefieldTransitionFromCache(opts = {}) {
     climaxTime: climax && (climax.start ?? climax.time),
     vocalOverlapSec: 0,
   });
-  const bridge = chosen.technicalFailure === true ? null : planBridge({
+  const syntheticBridgeEnabled = opts.syntheticBridgeEnabled === true;
+  const bridge = !syntheticBridgeEnabled || chosen.technicalFailure === true ? null : planBridge({
     fromAnalysis: from,
     toAnalysis: to,
     directPlan: chosen,
@@ -350,6 +351,7 @@ function planCuefieldTransitionFromCache(opts = {}) {
   diagnostics.lyricLinkScore = finiteOrNull(lyricLink.score);
   diagnostics.lyricLinkReasons = Array.isArray(lyricLink.reasons) ? lyricLink.reasons.slice(0, 4) : [];
   diagnostics.bridgeSelected = !!bridge;
+  diagnostics.syntheticBridgeEnabled = syntheticBridgeEnabled;
   diagnostics.bridgeTemplate = bridge ? bridge.template : '';
   diagnostics.bridgeBars = bridge ? bridge.bars : null;
   return {
