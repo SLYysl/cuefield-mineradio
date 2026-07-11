@@ -755,6 +755,8 @@ function recipeEligibility(candidate, context) {
   if (candidate.recipe === 'filtered-pickup') {
     if (!assessment.entryTrusted) return { eligible: false, reason: 'entry evidence is not trusted', preference: 0 };
     if (route === 'terminal-rescue' || route === 'late-contrast-release') return { eligible: false, reason: 'route does not support an energy pickup', preference: 0 };
+    if (!assessment.beatGridTrusted) return { eligible: false, reason: 'beat grid is not trusted', preference: 0 };
+    if (assessment.relativeTempoDelta > 0.1) return { eligible: false, reason: 'tempo delta exceeds filtered pickup limit', preference: 0 };
     const rising = route === 'late-contrast-rise' || scores.bEnergy > scores.aEnergy + 0.08 || scores.bIntroAggression >= 0.58;
     if (!rising) return { eligible: false, reason: 'no controlled energy rise', preference: 0 };
     return { eligible: true, reason: '', preference: route === 'late-contrast-rise' ? 0.35 : 0.08 };

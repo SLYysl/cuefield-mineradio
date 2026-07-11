@@ -455,9 +455,10 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
     duration,
   );
   const overlapDuration = round(Math.max(0, Math.min(3.4, duration - mixStart, targetDuration)));
-  const landingOffset = 0.55;
-  const bRiseAt = 0.38;
-  const bRiseDuration = 170;
+  const landingOffset = round(Math.max(1.65, Math.min(overlapDuration - 0.35, overlapDuration * 0.72)));
+  const bRiseAt = round(Math.min(0.35, landingOffset * 0.14));
+  const bRiseDuration = Math.round(Math.max(0.8, landingOffset - bRiseAt) * 1000);
+  const aFadeDuration = Math.round(landingOffset * 1000);
   const trustedEntry = entries.find((candidate) => (
     ['hook', 'drop'].includes(landingKind(candidate))
     && toNumber(candidate.confidence) >= 0.6
@@ -483,13 +484,31 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
   };
   const fallbackTimeline = [
     { t: 0, deck: 'B', op: 'play', at: bStart, volume: 0 },
-    { t: 0, deck: 'A', op: 'filter', type: 'highpass', value: 1800, duration: 450 },
-    { t: 0, deck: 'A', op: 'bass', value: 0.12, duration: 350 },
-    { t: 0, deck: 'A', op: 'volume', value: 0, duration: 500, curve: 'equal-power-out' },
+    { t: 0, deck: 'A', op: 'volume', value: 0, duration: aFadeDuration, curve: 'equal-power-out' },
     { t: bRiseAt, deck: 'B', op: 'volume', value: 1, duration: bRiseDuration, curve: 'equal-power-in' },
     { t: overlapDuration, deck: 'B', op: 'handoff' },
   ];
-  const timeline = fallbackTimeline;
+  const echoReleaseAt = round(landingOffset * 0.52);
+  const filterOpenAt = round(landingOffset * 0.28);
+  const filterOpenDuration = Math.round(landingOffset * 0.56 * 1000);
+  const bassOpenAt = round(landingOffset * 0.44);
+  const bassOpenDuration = Math.round(landingOffset * 0.44 * 1000);
+  const timeline = [
+    { t: 0, deck: 'B', op: 'play', at: bStart, volume: 0 },
+    { t: 0, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
+    { t: 0, deck: 'B', op: 'filter', type: 'highpass', value: 1100, duration: 0 },
+    { t: 0, deck: 'A', op: 'echo', enabled: true, bpm: toNumber(fromProfile && fromProfile.bpm, 120), delayBeats: 0.5, feedback: 0.44, wet: 0.24, duration: 180 },
+    { t: 0, deck: 'A', op: 'bass', value: 0.2, duration: Math.min(900, aFadeDuration) },
+    { t: 0, deck: 'A', op: 'volume', value: 0, duration: aFadeDuration, curve: 'equal-power-out' },
+    { t: bRiseAt, deck: 'B', op: 'volume', value: 1, duration: bRiseDuration, curve: 'equal-power-in' },
+    { t: filterOpenAt, deck: 'B', op: 'filter', type: 'none', value: 0, duration: filterOpenDuration },
+    { t: bassOpenAt, deck: 'B', op: 'bass', value: 1, duration: bassOpenDuration },
+    { t: echoReleaseAt, deck: 'A', op: 'echo', enabled: false, bpm: toNumber(fromProfile && fromProfile.bpm, 120), delayBeats: 0.5, feedback: 0.44, wet: 0.24, duration: 160, tailMs: 1000 },
+    { t: overlapDuration, deck: 'B', op: 'handoff' },
+  ];
+  const audibleStart = bRiseAt + (bRiseDuration / 1000) * (Math.asin(0.08) / (Math.PI / 2));
+  const audibleEnd = landingOffset * (Math.acos(0.08) / (Math.PI / 2));
+  const audibleOverlap = round(Math.max(0, audibleEnd - audibleStart));
   const exit = selectedExit ? { ...selectedExit, time: mixStart } : {
     type: 'terminal-boundary',
     role: 'exit',
@@ -505,13 +524,13 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
       score: 0,
       timeline,
       fallbackTimeline,
-      window: { audibleStart: 0, audibleEnd: landingOffset, audibleOverlap: 0.12, preRollDuration: bRiseAt, handoffOffset: overlapDuration, runwayAvailable: true, landingError: round(actualLanding - requestedLanding) },
+      window: { audibleStart: 0, audibleEnd: round(audibleEnd), audibleOverlap, preRollDuration: round(audibleStart), handoffOffset: overlapDuration, runwayAvailable: true, landingError: round(actualLanding - requestedLanding) },
     },
     timeline,
     mixStart,
     handoffAt: round(mixStart + overlapDuration),
-    audibleOverlap: 0.12,
-    preRollDuration: bRiseAt,
+    audibleOverlap,
+    preRollDuration: round(audibleStart),
     exitRatio: round(mixStart / Math.max(1, duration)),
     energyContinuity: 0.35,
     grooveContinuity: 0.35,

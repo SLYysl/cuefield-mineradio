@@ -552,6 +552,37 @@ test('selects filtered pickup for a controlled late energy rise', () => {
   assert.equal(plan.chosen.timeline.some((action) => action.op === 'duck' && action.deck === 'A'), true);
 });
 
+test('rejects filtered pickup without a trusted beat grid', () => {
+  const fromProfile = makeProfile('A', 128, [{ type: 'outro', role: 'exit', time: 112, confidence: 0.84 }]);
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 8, confidence: 0.82, resolvesTo: { time: 16 } };
+  const toProfile = makeProfile('B', 120, [entry]);
+  fromProfile.downbeats.forEach((beat) => { beat.confidence = 0.3; });
+  fromProfile.bars.forEach((bar) => { bar.beatStability = 0.1; });
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { time: 112 }, entry, evaluation: { tier: 'usable', risks: [] } },
+    routePolicy: { route: 'late-contrast-rise', compatibilityClass: 'contrast', contrastDirection: 'rising' },
+  });
+  const filtered = plan.candidates.find((candidate) => candidate.recipe === 'filtered-pickup');
+
+  assert.equal(filtered.eligible, false);
+  assert.equal(filtered.eligibilityReason, 'beat grid is not trusted');
+});
+
+test('rejects filtered pickup when relative tempo delta exceeds ten percent', () => {
+  const fromProfile = makeProfile('A', 128, [{ type: 'outro', role: 'exit', time: 112, confidence: 0.84 }]);
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 8, confidence: 0.82, resolvesTo: { time: 16 } };
+  const toProfile = makeProfile('B', 120, [entry]);
+  toProfile.bpm = 96;
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { time: 112 }, entry, evaluation: { tier: 'usable', risks: [] } },
+    routePolicy: { route: 'late-contrast-rise', compatibilityClass: 'contrast', contrastDirection: 'rising' },
+  });
+  const filtered = plan.candidates.find((candidate) => candidate.recipe === 'filtered-pickup');
+
+  assert.equal(filtered.eligible, false);
+  assert.equal(filtered.eligibilityReason, 'tempo delta exceeds filtered pickup limit');
+});
+
 test('selects echo out when a late contrast has unsafe sustained overlap', () => {
   const fromProfile = makeProfile('A', 128, [
     { type: 'outro', role: 'exit', time: 112, confidence: 0.84 },
