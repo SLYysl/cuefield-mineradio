@@ -21,6 +21,15 @@ test('Cuefield feedback stats panel can fetch and render feedback stats', () => 
   assert.match(html, /cuefield-feedback-stat-failures/);
 });
 
+test('Cuefield feedback prompt captures a typed note with the rating', () => {
+  const html = readIndexHtml();
+
+  assert.match(html, /id="cuefield-feedback-note"/);
+  assert.match(html, /maxlength="240"/);
+  assert.match(html, /noteInput\.value\.trim\(\)/);
+  assert.match(html, /setTimeout\(hideCuefieldFeedbackPrompt, 120000\)/);
+});
+
 test('Cuefield AutoMix treats the active in-memory beatmap as ready before disk persistence', () => {
   const html = readIndexHtml();
 

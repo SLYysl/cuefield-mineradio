@@ -994,6 +994,9 @@ body.login-guide-active #login-guide-canvas{opacity:1}
 #cuefield-feedback.show{opacity:1;pointer-events:auto;transform:translateY(0)}
 .cuefield-feedback-title{font-size:12px;font-weight:800;letter-spacing:.08em;color:#eafffb;text-transform:uppercase}
 .cuefield-feedback-meta{margin-top:5px;font-size:11px;line-height:1.45;color:rgba(255,255,255,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cuefield-feedback-note{width:100%;height:34px;margin-top:10px;padding:0 10px;border:1px solid rgba(255,255,255,.10);border-radius:8px;outline:none;background:rgba(255,255,255,.05);color:rgba(255,255,255,.88);font:500 11px/1 var(--font-sans);user-select:text}
+.cuefield-feedback-note::placeholder{color:rgba(255,255,255,.34)}
+.cuefield-feedback-note:focus{border-color:rgba(var(--fc-accent-rgb),.42);background:rgba(255,255,255,.075);box-shadow:0 0 0 2px rgba(var(--fc-accent-rgb),.08)}
 .cuefield-feedback-actions{display:flex;gap:7px;margin-top:10px}
 .cuefield-feedback-actions button{flex:1;height:30px;border-radius:9px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.055);color:rgba(255,255,255,.78);font:760 11px/1 var(--font-sans);cursor:pointer}
 .cuefield-feedback-actions button:hover{border-color:rgba(var(--fc-accent-rgb),.36);background:rgba(var(--fc-accent-rgb),.13);color:#fff}
@@ -2678,6 +2681,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 <div id="cuefield-feedback" aria-live="polite">
   <div class="cuefield-feedback-title">Cuefield feedback</div>
   <div id="cuefield-feedback-meta" class="cuefield-feedback-meta">AutoMix transition</div>
+  <input id="cuefield-feedback-note" class="cuefield-feedback-note" type="text" maxlength="240" autocomplete="off" placeholder="写下哪里顺，或者哪里听起来怪">
   <div class="cuefield-feedback-actions">
     <button type="button" onclick="submitCuefieldFeedback(1)">1 合格</button>
     <button type="button" onclick="submitCuefieldFeedback(2)">2 不合格</button>
@@ -10646,6 +10650,8 @@ function showCuefieldFeedbackPrompt(context) {
   cuefieldFeedbackState.submitted = false;
   var el = document.getElementById('cuefield-feedback');
   var meta = document.getElementById('cuefield-feedback-meta');
+  var noteInput = document.getElementById('cuefield-feedback-note');
+  if (noteInput) noteInput.value = '';
   if (meta) {
     var pair = context.pair || {};
     var transition = context.transition || {};
@@ -10653,7 +10659,7 @@ function showCuefieldFeedbackPrompt(context) {
   }
   if (el) el.classList.add('show');
   if (cuefieldFeedbackState.timer) clearTimeout(cuefieldFeedbackState.timer);
-  cuefieldFeedbackState.timer = setTimeout(hideCuefieldFeedbackPrompt, 30000);
+  cuefieldFeedbackState.timer = setTimeout(hideCuefieldFeedbackPrompt, 120000);
 }
 
 async function submitCuefieldFeedback(rating, note) {
@@ -10661,13 +10667,16 @@ async function submitCuefieldFeedback(rating, note) {
   if (rating !== 1 && rating !== 2 && rating !== 3) return false;
   var context = cuefieldFeedbackState.context;
   if (!context || cuefieldFeedbackState.submitted) return false;
+  var noteInput = document.getElementById('cuefield-feedback-note');
+  var feedbackNote = typeof note === 'string' ? note.trim() : (noteInput ? noteInput.value.trim() : '');
   cuefieldFeedbackState.submitted = true;
   try {
     await apiJson('/api/cuefield/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(Object.assign({ rating: rating, note: note || '' }, context)),
+      body: JSON.stringify(Object.assign({ rating: rating, note: feedbackNote }, context)),
     });
+    if (noteInput) noteInput.value = '';
     showToast('Cuefield 评分已记录: ' + rating);
     hideCuefieldFeedbackPrompt();
     if (cuefieldFeedbackStatsState.visible) loadCuefieldFeedbackStats(true);
