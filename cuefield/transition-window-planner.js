@@ -412,13 +412,9 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
       Math.min(duration - MINIMUM_TERMINAL_OVERLAP, preferredStart),
     ));
   const overlapDuration = round(Math.max(0, Math.min(3.4, duration - mixStart, targetDuration)));
-  const fadeDuration = Math.max(1, Math.round(overlapDuration * 1000));
-  const bassRestoreDuration = Math.min(800, fadeDuration);
-  const bassRestoreAt = round(Math.max(0, overlapDuration - bassRestoreDuration / 1000 - 0.001));
-  const boundedBassRestoreDuration = Math.max(0, Math.min(
-    bassRestoreDuration,
-    Math.round((overlapDuration - bassRestoreAt) * 1000),
-  ));
+  const swapDuration = round(Math.min(1, Math.max(0.8, overlapDuration * 0.28)));
+  const swapDurationMs = Math.round(swapDuration * 1000);
+  const swapAt = round(overlapDuration - swapDuration);
   const entry = {
     type: 'start',
     role: 'entry',
@@ -431,25 +427,16 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
   };
   const fallbackTimeline = [
     { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
-    { t: 0, deck: 'B', op: 'bass', value: 0.2, duration: 0 },
-    { t: 0, deck: 'B', op: 'volume', value: 1, duration: fadeDuration, curve: 'equal-power-in' },
-    { t: 0, deck: 'A', op: 'volume', value: 0, duration: fadeDuration, curve: 'equal-power-out' },
-    { t: bassRestoreAt, deck: 'B', op: 'bass', value: 1, duration: boundedBassRestoreDuration },
+    { t: 0, deck: 'B', op: 'bass', value: 0.15, duration: 0 },
+    { t: 0, deck: 'B', op: 'filter', type: 'highpass', value: 900, duration: 0 },
+    { t: swapAt, deck: 'A', op: 'bass', value: 0.2, duration: swapDurationMs },
+    { t: swapAt, deck: 'A', op: 'volume', value: 0, duration: swapDurationMs, curve: 'equal-power-out' },
+    { t: swapAt, deck: 'B', op: 'filter', type: 'none', value: 0, duration: swapDurationMs },
+    { t: swapAt, deck: 'B', op: 'bass', value: 1, duration: swapDurationMs },
+    { t: swapAt, deck: 'B', op: 'volume', value: 1, duration: swapDurationMs, curve: 'equal-power-in' },
     { t: overlapDuration, deck: 'B', op: 'handoff' },
   ];
-  const echoEnabled = overlapDuration >= 2.4;
-  const echoDisableAt = round(Math.max(0.4, overlapDuration - 0.6));
-  const echoDryFadeDuration = Math.max(900, Math.round(overlapDuration * 650));
-  const timeline = echoEnabled ? [
-    { t: 0, deck: 'B', op: 'play', at: 0, volume: 0 },
-    { t: 0, deck: 'B', op: 'bass', value: 0.2, duration: 0 },
-    { t: 0, deck: 'A', op: 'echo', enabled: true, bpm: toNumber(fromProfile && fromProfile.bpm, 120), delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 180 },
-    { t: 0, deck: 'B', op: 'volume', value: 1, duration: fadeDuration, curve: 'equal-power-in' },
-    { t: 0, deck: 'A', op: 'volume', value: 0, duration: echoDryFadeDuration, curve: 'equal-power-out' },
-    { t: bassRestoreAt, deck: 'B', op: 'bass', value: 1, duration: boundedBassRestoreDuration },
-    { t: echoDisableAt, deck: 'A', op: 'echo', enabled: false, bpm: toNumber(fromProfile && fromProfile.bpm, 120), delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 160 },
-    { t: overlapDuration, deck: 'B', op: 'handoff' },
-  ] : fallbackTimeline;
+  const timeline = fallbackTimeline;
   const exit = selectedExit ? { ...selectedExit, time: mixStart } : {
     type: 'terminal-boundary',
     role: 'exit',

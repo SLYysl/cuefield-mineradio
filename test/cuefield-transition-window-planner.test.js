@@ -309,10 +309,19 @@ test('terminal rescue returns an executable late timeline when structural window
   assert.equal(result.chosen.mixStart < result.chosen.handoffAt, true);
   assert.equal(result.chosen.handoffAt <= from.duration, true);
   assert.equal(result.chosen.timeline.some((action) => action.op === 'handoff'), true);
-  assert.equal(result.chosen.timeline.some((action) => action.deck === 'A' && action.op === 'echo'), true);
+  assert.equal(result.chosen.timeline.some((action) => action.op === 'echo'), false);
   assert.equal(Array.isArray(result.chosen.recipeCandidate.fallbackTimeline), true);
   assert.equal(result.chosen.recipeCandidate.fallbackTimeline.some((action) => action.op === 'echo'), false);
-  assert.equal(result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'volume').duration < result.chosen.audibleOverlap * 1000, true);
+  const aFade = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'volume');
+  const bFade = result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'volume');
+  const aBassCut = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'bass');
+  const bBassRestore = result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'bass' && action.value === 1);
+  assert.equal(aFade.t, bFade.t);
+  assert.equal(aFade.duration, bFade.duration);
+  assert.equal(aFade.duration >= 800 && aFade.duration <= 1000, true);
+  assert.equal(aBassCut.t, aFade.t);
+  assert.equal(bBassRestore.t, bFade.t);
+  assert.equal(bBassRestore.duration, bFade.duration);
   assert.equal(result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
 });
 

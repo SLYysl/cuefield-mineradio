@@ -61,18 +61,22 @@
       return action && action.deck === 'B' && action.op === 'play'
         && Math.abs(action.t) <= tolerance && Number.isFinite(action.at);
     });
-    var hasVolumeRamp = function(deck) {
-      return timeline.some(function(action) {
+    var volumeRamp = function(deck) {
+      return timeline.find(function(action) {
         return action && action.deck === deck && action.op === 'volume'
-          && Math.abs(action.t) <= tolerance
           && Number.isFinite(action.value)
           && Number.isFinite(action.duration)
           && action.duration > 0;
       });
     };
+    var aRamp = volumeRamp('A');
+    var bRamp = volumeRamp('B');
     return hasBPlay
-      && hasVolumeRamp('A')
-      && hasVolumeRamp('B');
+      && !!aRamp
+      && !!bRamp
+      && Math.abs(aRamp.t - bRamp.t) <= tolerance
+      && Math.abs(aRamp.duration - bRamp.duration) <= 1
+      && aRamp.t + aRamp.duration / 1000 <= handoffT + tolerance;
   }
 
   function isExecutablePlan(plan, deps) {
