@@ -62,6 +62,17 @@ test('never starts before A first-Hook protection and requires usable beat grids
   assert.equal(missingGrid, null);
 });
 
+test('preserves the routed direct exit when it is valid for bridge stage one', () => {
+  const climax = { type: 'hook', start: 72, end: 88, confidence: 0.86 };
+  const plan = planBridge({
+    fromAnalysis: analysis({ duration: 140, protectedUntil: 32, exits: [40, 72, 104] }),
+    toAnalysis: analysis({ climax }),
+    directPlan: direct({ exit: { time: 104 } }),
+  });
+
+  assert.equal(plan.mixStart, 104);
+});
+
 test('constructs four, eight, or sixteen bars from available runway', () => {
   const climax = { type: 'hook', start: 72, end: 88, confidence: 0.9 };
   const four = planBridge({

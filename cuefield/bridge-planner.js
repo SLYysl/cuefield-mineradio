@@ -87,13 +87,12 @@ function chooseExit(fromAnalysis, directPlan, stage1Duration) {
   const structure = structureOf(fromAnalysis);
   const protectedUntil = toNumber(structure.protectedUntil);
   const duration = toNumber(structure.duration, toNumber(profileOf(fromAnalysis).duration));
-  const candidates = [];
-  if (directPlan && directPlan.exit) candidates.push(directPlan.exit);
-  candidates.push(...(structure.exitCandidates || []));
-  return candidates
-    .filter((candidate) => Number.isFinite(toNumber(candidate && candidate.time, NaN)))
-    .filter((candidate) => toNumber(candidate.time) >= protectedUntil)
-    .filter((candidate) => duration - toNumber(candidate.time) >= Math.min(1.5, stage1Duration * 0.6))
+  const valid = (candidate) => Number.isFinite(toNumber(candidate && candidate.time, NaN))
+    && toNumber(candidate.time) >= protectedUntil
+    && duration - toNumber(candidate.time) >= Math.min(1.5, stage1Duration * 0.6);
+  if (valid(directPlan && directPlan.exit)) return directPlan.exit;
+  return (structure.exitCandidates || [])
+    .filter(valid)
     .sort((a, b) => toNumber(a.time) - toNumber(b.time))[0] || null;
 }
 
