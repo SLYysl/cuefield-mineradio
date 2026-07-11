@@ -108,6 +108,24 @@
       normalized.delayBeats = round(clamp(toNumber(action.delayBeats, 0.5), 0.125, 2));
       normalized.feedback = round(clamp(toNumber(action.feedback, 0), 0, 0.72));
       normalized.wet = round(clamp(toNumber(action.wet, 0), 0, 0.5));
+      normalized.tailMs = Math.round(clamp(toNumber(action.tailMs, 1200), 300, 4000));
+    }
+    if (normalized.op === 'duck') {
+      normalized.bpm = round(clamp(toNumber(action.bpm, 120), 40, 240));
+      normalized.depth = round(clamp(toNumber(action.depth, 0.35), 0.08, 0.75));
+      normalized.pulses = Math.round(clamp(toNumber(action.pulses, 4), 1, 16));
+      normalized.beats = round(clamp(toNumber(action.beats, 1), 0.25, 4));
+      normalized.attack = Math.round(clamp(toNumber(action.attack, 24), 5, 120));
+      normalized.hold = Math.round(clamp(toNumber(action.hold, 70), 10, 180));
+      normalized.release = Math.round(clamp(toNumber(action.release, 180), 40, 320));
+    }
+    if (normalized.op === 'loop') {
+      normalized.enabled = action.enabled !== false;
+      normalized.startAt = Math.max(0, round(toNumber(action.startAt, normalized.at)));
+      normalized.bpm = round(clamp(toNumber(action.bpm, 120), 40, 240));
+      normalized.loopBeats = round(clamp(toNumber(action.loopBeats, 1), 0.5, 8));
+      normalized.loopSeconds = round(60 / normalized.bpm * normalized.loopBeats);
+      normalized.slip = action.slip !== false;
     }
     if (normalized.op === 'bridge') {
       var bridge = action.bridge || {};
@@ -206,13 +224,15 @@
         action.op === 'filter'
         || action.op === 'bass'
         || action.op === 'echo'
+        || action.op === 'duck'
         || (action.op === 'volume' && action.curve.indexOf('equal-power-') === 0)
       );
     });
     var requiresAGraph = actions.some(function(action) {
-      return action.deck === 'A' && action.op === 'echo';
+      return action.deck === 'A' && (action.op === 'echo' || action.op === 'duck');
     });
     var requiresBridge = actions.some(function(action) { return action.op === 'bridge'; });
+    var requiresSourceLoop = actions.some(function(action) { return action.op === 'loop'; });
     var handoff = actions.filter(function(action) { return action.op === 'handoff'; }).slice(-1)[0];
     var lastAction = actions[actions.length - 1] || null;
     var handoffDelayMs = handoff
@@ -229,6 +249,7 @@
       requiresAGraph: requiresAGraph,
       requiresBGraph: requiresBGraph,
       requiresBridge: requiresBridge,
+      requiresSourceLoop: requiresSourceLoop,
       actions: actions,
     };
   }

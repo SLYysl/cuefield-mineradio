@@ -169,6 +169,7 @@ function buildCueProfile(input = {}) {
     cuePoints: buildCuePoints(input.candidates || [], downbeats, bars, duration),
     windows: buildWindows(beats, duration),
     candidates: Array.isArray(input.candidates) ? input.candidates.slice() : [],
+    musicalProfile: map.musicalProfile || null,
   };
 }
 

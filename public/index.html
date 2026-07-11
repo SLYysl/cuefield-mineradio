@@ -2741,6 +2741,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 </div>
 
 <script src="cuefield-timeline-executor.js"></script>
+<script src="cuefield-source-loop.js"></script>
 <script src="cuefield-lyric-source.js"></script>
 <script src="cuefield-set-planner.js"></script>
 <script src="cuefield-bridge-engine.js"></script>
@@ -2755,6 +2756,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
 var audio = null, audioCtx = null, source = null, analyser = null, beatAnalyser = null, gainNode = null, audioReady = false, audioGraphElement = null;
 var cuefieldFilterNode = null, cuefieldBassNode = null, cuefieldTimelineTimers = [], cuefieldBDeckGraph = null;
 var cuefieldEchoSendNode = null, cuefieldEchoDelayNode = null, cuefieldEchoFeedbackNode = null, cuefieldEchoWetNode = null;
+var cuefieldSourceLoopRuntime = null;
 var uiSfxCtx = null, lastShelfSelectSfxAt = 0;
 var FFT_SIZE = 2048;
 var frequencyData = new Uint8Array(FFT_SIZE / 2);
@@ -11176,6 +11178,7 @@ function clearCuefieldTimelineTimers() {
     clearTimeout(cuefieldTimelineTimers[i]);
   }
   cuefieldTimelineTimers = [];
+  if (cuefieldSourceLoopRuntime && cuefieldSourceLoopRuntime.stop) cuefieldSourceLoopRuntime.stop('timeline-clear');
 }
 
 function cuefieldScheduleTimeline(delayMs, fn) {
@@ -11418,12 +11421,67 @@ function rampCuefieldGraphEcho(graph, action) {
   rampCuefieldParamInContext(graph.ctx, graph.echoDelay.delayTime, delaySeconds, durationMs);
   if (action.enabled === false) {
     rampCuefieldParamInContext(graph.ctx, graph.echoSend.gain, 0, durationMs);
+    var tailMs = clampRange(Number(action.tailMs) || 1200, 300, 4000);
+    var decayStart = (graph.ctx.currentTime || 0) + tailMs / 1000;
+    var decayEnd = decayStart + 0.32;
+    try {
+      graph.echoFeedback.gain.setValueAtTime(graph.echoFeedback.gain.value, decayStart);
+      graph.echoFeedback.gain.linearRampToValueAtTime(0, decayEnd);
+      graph.echoWet.gain.setValueAtTime(graph.echoWet.gain.value, decayStart);
+      graph.echoWet.gain.linearRampToValueAtTime(0, decayEnd);
+    } catch (error) {
+      rampCuefieldParamInContext(graph.ctx, graph.echoFeedback.gain, 0, 320);
+      rampCuefieldParamInContext(graph.ctx, graph.echoWet.gain, 0, 320);
+    }
     return true;
   }
   rampCuefieldParamInContext(graph.ctx, graph.echoFeedback.gain, clampRange(Number(action.feedback) || 0, 0, 0.72), durationMs);
   rampCuefieldParamInContext(graph.ctx, graph.echoWet.gain, clampRange(Number(action.wet) || 0, 0, 0.5), durationMs);
   rampCuefieldParamInContext(graph.ctx, graph.echoSend.gain, 1, durationMs);
   return true;
+}
+
+function scheduleCuefieldLowBandDuck(graph, action) {
+  if (!graph || !graph.ctx || !graph.bass || !graph.bass.gain || !action) return false;
+  var param = graph.bass.gain;
+  var now = graph.ctx.currentTime || 0;
+  var bpm = clampRange(Number(action.bpm) || 120, 40, 240);
+  var period = 60 / bpm * clampRange(Number(action.beats) || 1, 0.25, 4);
+  var pulses = Math.round(clampRange(Number(action.pulses) || 4, 1, 16));
+  var base = isFinite(param.value) ? Number(param.value) : 0;
+  var dip = Math.max(-24, base - clampRange(Number(action.depth) || 0.35, 0.08, 0.75) * 12);
+  var attack = Math.min(period * 0.22, clampRange(Number(action.attack) || 24, 5, 120) / 1000);
+  var hold = Math.min(period * 0.3, clampRange(Number(action.hold) || 70, 10, 180) / 1000);
+  var release = Math.min(period * 0.46, clampRange(Number(action.release) || 180, 40, 320) / 1000);
+  try {
+    if (typeof param.cancelAndHoldAtTime === 'function') param.cancelAndHoldAtTime(now);
+    else param.cancelScheduledValues(now);
+    param.setValueAtTime(base, now);
+    for (var index = 0; index < pulses; index++) {
+      var start = now + index * period;
+      param.setValueAtTime(base, start);
+      param.linearRampToValueAtTime(dip, start + attack);
+      param.setValueAtTime(dip, start + attack + hold);
+      param.linearRampToValueAtTime(base, start + attack + hold + release);
+    }
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function initCuefieldSourceLoopRuntime() {
+  if (cuefieldSourceLoopRuntime) return cuefieldSourceLoopRuntime;
+  if (!window.CuefieldSourceLoop || !window.CuefieldSourceLoop.createCuefieldSourceLoop) return null;
+  cuefieldSourceLoopRuntime = window.CuefieldSourceLoop.createCuefieldSourceLoop();
+  return cuefieldSourceLoopRuntime;
+}
+
+function applyCuefieldSourceLoopAction(action, pending, nextMedia) {
+  var runtime = initCuefieldSourceLoopRuntime();
+  if (!runtime || !action) return false;
+  var media = action.deck === 'B' ? nextMedia : audio;
+  return runtime.apply(action, media, String(pending.token) + ':' + String(pending.currentIndex));
 }
 
 function initCuefieldBridgeEngine() {
@@ -11456,6 +11514,17 @@ function cuefieldBridgeFallbackExecution(action, pending) {
   });
 }
 
+function cuefieldRecipeFallbackExecution(pending) {
+  var candidate = pending && pending.plan && pending.plan.chosen && pending.plan.chosen.recipeCandidate || {};
+  if (!Array.isArray(candidate.fallbackTimeline) || !candidate.fallbackTimeline.length) return null;
+  if (!window.CuefieldTimelineExecutor || !window.CuefieldTimelineExecutor.buildCuefieldTimelineExecution) return null;
+  return window.CuefieldTimelineExecutor.buildCuefieldTimelineExecution({
+    entryTime: pending.entryTime,
+    timeline: candidate.fallbackTimeline,
+    targetVolume: targetVolume,
+  });
+}
+
 function applyCuefieldTimelineAction(action, pending, nextMedia) {
   if (!action || !pending || pending.token !== trackSwitchToken || pending.currentIndex !== currentIdx) return;
   if (action.op === 'handoff') return;
@@ -11482,8 +11551,12 @@ function applyCuefieldTimelineAction(action, pending, nextMedia) {
       rampCuefieldGraphBass(bGraph, action.value, action.durationMs);
     } else if (action.op === 'echo') {
       rampCuefieldGraphEcho(bGraph, action);
+    } else if (action.op === 'duck') {
+      scheduleCuefieldLowBandDuck(bGraph, action);
+    } else if (action.op === 'loop') {
+      if (!applyCuefieldSourceLoopAction(action, pending, nextMedia)) pending.runtimeDowngrade = 'source-loop-unavailable';
     } else if (action.op === 'stop') {
-      stopCuefieldPreparedAudio(nextMedia);
+      try { if (nextMedia) nextMedia.pause(); } catch (e) {}
     }
     return;
   }
@@ -11501,6 +11574,10 @@ function applyCuefieldTimelineAction(action, pending, nextMedia) {
       echoFeedback: cuefieldEchoFeedbackNode,
       echoWet: cuefieldEchoWetNode,
     }, action);
+  } else if (action.op === 'duck') {
+    scheduleCuefieldLowBandDuck({ ctx: audioCtx, bass: cuefieldBassNode }, action);
+  } else if (action.op === 'loop') {
+    if (!applyCuefieldSourceLoopAction(action, pending, nextMedia)) pending.runtimeDowngrade = 'source-loop-unavailable';
   } else if (action.op === 'stop') {
     rampAudioOutputGain(0, action.durationMs || 280);
   }
@@ -11524,6 +11601,11 @@ function runCuefieldVolumeCurve(pending, nextMedia) {
   var execution = cuefieldTimelineExecutionForPending(pending);
   if (!execution) return cuefieldCrossfadeMsForPending(pending);
   clearCuefieldTimelineTimers();
+  if (execution.requiresSourceLoop && (!initCuefieldSourceLoopRuntime() || !nextMedia)) {
+    pending.runtimeDowngrade = 'source-loop-direct-fallback';
+    execution = cuefieldRecipeFallbackExecution(pending)
+      || cuefieldVolumeOnlyExecution(execution, pending);
+  }
   if (execution.requiresBridge) {
     var bridgeAction = execution.actions.find(function(action){ return action.op === 'bridge'; });
     if (!startCuefieldBridge(bridgeAction, pending)) {

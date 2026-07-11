@@ -141,6 +141,53 @@ test('normalizes bounded echo actions and requires the addressed deck graph', ()
   assert.equal(execution.requiresAGraph, true);
 });
 
+test('normalizes bounded release echo tails', () => {
+  const execution = buildCuefieldTimelineExecution({
+    timeline: [
+      { t: -1, deck: 'A', op: 'echo', enabled: false, bpm: 120, tailMs: 99999 },
+      { t: 0, deck: 'B', op: 'handoff' },
+    ],
+  });
+
+  assert.equal(execution.actions[0].tailMs, 4000);
+});
+
+test('normalizes low-band kick ducking and requires the addressed graph', () => {
+  const execution = buildCuefieldTimelineExecution({
+    timeline: [
+      { t: -2, deck: 'A', op: 'duck', bpm: 500, depth: 2, pulses: 99, beats: 0.01, attack: 999, hold: 999, release: 999 },
+      { t: 0, deck: 'B', op: 'handoff' },
+    ],
+  });
+  const duck = execution.actions.find((action) => action.op === 'duck');
+
+  assert.equal(duck.bpm, 240);
+  assert.equal(duck.depth, 0.75);
+  assert.equal(duck.pulses, 16);
+  assert.equal(duck.beats, 0.25);
+  assert.equal(duck.attack, 120);
+  assert.equal(duck.hold, 180);
+  assert.equal(duck.release, 320);
+  assert.equal(execution.requiresAGraph, true);
+});
+
+test('normalizes source loop actions and marks loop runtime as required', () => {
+  const execution = buildCuefieldTimelineExecution({
+    timeline: [
+      { t: -4, deck: 'A', op: 'loop', enabled: true, startAt: 80, bpm: 120, loopBeats: 0.1, slip: true },
+      { t: -2, deck: 'A', op: 'loop', enabled: false, slip: true },
+      { t: 0, deck: 'B', op: 'handoff' },
+    ],
+  });
+  const start = execution.actions.find((action) => action.op === 'loop' && action.enabled);
+
+  assert.equal(start.startAt, 80);
+  assert.equal(start.loopBeats, 0.5);
+  assert.equal(start.loopSeconds, 0.25);
+  assert.equal(start.slip, true);
+  assert.equal(execution.requiresSourceLoop, true);
+});
+
 test('marks B-deck echo as a B graph requirement', () => {
   const execution = buildCuefieldTimelineExecution({
     timeline: [

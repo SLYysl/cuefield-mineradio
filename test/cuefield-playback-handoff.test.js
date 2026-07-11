@@ -84,6 +84,20 @@ test('Cuefield bridge runtime starts on the shared context and stops on every re
   assert.match(reset, /stopCuefieldBridge/);
 });
 
+test('Cuefield source loops preflight a direct recipe fallback', () => {
+  const html = readIndexHtml();
+  const initStart = html.indexOf('function initCuefieldSourceLoopRuntime');
+  const runEnd = html.indexOf('function prepareCuefieldPendingAudio', initStart);
+  const runtime = html.slice(initStart, runEnd);
+
+  assert.match(html, /<script src="cuefield-source-loop\.js"><\/script>/);
+  assert.match(runtime, /execution\.requiresSourceLoop/);
+  assert.match(runtime, /source-loop-direct-fallback/);
+  assert.match(runtime, /cuefieldRecipeFallbackExecution\(pending\)/);
+  assert.match(runtime, /candidate\.fallbackTimeline/);
+  assert.match(runtime, /if \(nextMedia\) nextMedia\.pause\(\)/);
+});
+
 test('Cuefield graph lifecycle and handoff timer remain owned by the active transition', () => {
   const html = readIndexHtml();
   const pauseStart = html.indexOf('function pauseCurrentAudioForTrackSwitch');

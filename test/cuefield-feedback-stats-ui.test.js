@@ -30,6 +30,17 @@ test('Cuefield feedback prompt captures a typed note with the rating', () => {
   assert.match(html, /setTimeout\(hideCuefieldFeedbackPrompt, 120000\)/);
 });
 
+test('Cuefield runtime executes source loop, low-band ducking, and release echo tails', () => {
+  const html = readIndexHtml();
+
+  assert.match(html, /<script src="cuefield-source-loop\.js"><\/script>/);
+  assert.match(html, /function applyCuefieldSourceLoopAction/);
+  assert.match(html, /function scheduleCuefieldLowBandDuck/);
+  assert.match(html, /action\.tailMs/);
+  assert.match(html, /action\.op === 'loop'/);
+  assert.match(html, /action\.op === 'duck'/);
+});
+
 test('Cuefield AutoMix treats the active in-memory beatmap as ready before disk persistence', () => {
   const html = readIndexHtml();
 

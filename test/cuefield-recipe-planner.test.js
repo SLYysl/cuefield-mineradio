@@ -39,6 +39,17 @@ function makeProfile(title, duration, candidates, mutateBeat) {
   });
 }
 
+function reliableMusicalProfile(root = 0) {
+  return {
+    source: 'basic-pitch',
+    confidence: 0.9,
+    noteCount: 64,
+    pitchClassProfile: Array.from({ length: 12 }, (_, index) => index === root ? 1 : 0),
+    intervalProfile: Array.from({ length: 25 }, (_, index) => index === 14 ? 1 : 0),
+    key: { root, mode: 'major' },
+  };
+}
+
 test('builds cue profile bars, cue points, and density windows from beatmap data', () => {
   const profile = buildCueProfile({
     track: { title: 'A', duration: 128 },
@@ -219,7 +230,8 @@ test('plans multiple recipe candidates with timelines and chooses the safest hig
   assert.equal(plan.candidates.every((candidate) => typeof candidate.window.runwayAvailable === 'boolean'), true);
   assert.equal(plan.candidates.every((candidate) => Number.isFinite(candidate.window.landingError)), true);
   assert.equal(plan.candidates.every((candidate) => {
-    const play = candidate.timeline.find((action) => action.deck === 'B' && action.op === 'play');
+    const plays = candidate.timeline.filter((action) => action.deck === 'B' && action.op === 'play');
+    const play = plays[plays.length - 1];
     const handoffs = candidate.timeline.filter((action) => action.op === 'handoff');
     const handoff = handoffs[handoffs.length - 1];
     const expected = play && handoff
@@ -537,6 +549,7 @@ test('selects filtered pickup for a controlled late energy rise', () => {
   assert.equal(plan.chosen.recipe, 'filtered-pickup');
   assert.equal(plan.diagnostics.eligibleRecipes.includes('filtered-pickup'), true);
   assert.equal(plan.chosen.window.runwayAvailable, true);
+  assert.equal(plan.chosen.timeline.some((action) => action.op === 'duck' && action.deck === 'A'), true);
 });
 
 test('selects echo out when a late contrast has unsafe sustained overlap', () => {
@@ -570,6 +583,109 @@ test('selects echo out when a late contrast has unsafe sustained overlap', () =>
   assert.equal(Array.isArray(plan.chosen.fallbackTimeline), true);
   assert.equal(plan.chosen.fallbackTimeline.some((action) => action.op === 'echo'), false);
   assert.equal(plan.diagnostics.eligibleRecipes.includes('echo-out'), true);
+  const release = plan.chosen.timeline.find((action) => action.op === 'echo' && action.enabled === false);
+  const handoff = plan.chosen.timeline.find((action) => action.op === 'handoff');
+  assert.equal(release.tailMs >= 1000, true);
+  assert.equal(handoff.t - release.t >= 1, true);
+});
+
+test('embeds low-band ducking in a trusted bass handoff', () => {
+  const fromProfile = makeProfile('A', 128, [{ type: 'release', role: 'exit', time: 112, confidence: 0.88 }]);
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 8, confidence: 0.86, resolvesTo: { time: 24 } };
+  const toProfile = makeProfile('B', 120, [entry]);
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { type: 'release', time: 112 }, entry, evaluation: { tier: 'usable', risks: [] } },
+    routePolicy: { route: 'late-contrast-release' },
+  });
+  const bass = plan.candidates.find((candidate) => candidate.recipe === 'bass-eq-handoff');
+
+  assert.equal(bass.eligible, true);
+  assert.equal(bass.timeline.some((action) => action.op === 'duck' && action.deck === 'A'), true);
+});
+
+test('selects a source loop roll for a trusted non-vocal release', () => {
+  const fromProfile = makeProfile('A', 128, [{ type: 'release', role: 'exit', time: 112, confidence: 0.9 }]);
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 8, confidence: 0.86, resolvesTo: { time: 24 } };
+  const toProfile = makeProfile('B', 120, [entry]);
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { type: 'release', time: 112 }, entry, evaluation: { tier: 'usable', risks: [] } },
+    routePolicy: { route: 'structure-mix' },
+  });
+  const loop = plan.candidates.find((candidate) => candidate.recipe === 'source-loop-roll');
+
+  assert.equal(loop.eligible, true);
+  assert.equal(loop.timeline.filter((action) => action.op === 'loop' && action.enabled).length, 3);
+  assert.equal(loop.timeline.some((action) => action.op === 'loop' && action.enabled === false), true);
+  assert.equal(Array.isArray(loop.fallbackTimeline), true);
+  assert.equal(loop.window.audibleStart, -4);
+});
+
+test('selects a hook teaser only with trusted musical and structural evidence', () => {
+  const fromProfile = makeProfile('A', 128, [{ type: 'release', role: 'exit', time: 112, confidence: 0.9 }]);
+  const entry = { type: 'hook', role: 'entry', source: 'lyric+beat', time: 32, landingAt: 32, confidence: 0.9 };
+  const toProfile = makeProfile('B', 120, [entry], (beat) => {
+    if (beat.time >= 24 && beat.time < 40) beat.low = 0.72;
+    return beat;
+  });
+  fromProfile.musicalProfile = reliableMusicalProfile(0);
+  toProfile.musicalProfile = reliableMusicalProfile(0);
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { type: 'release', time: 112 }, entry, evaluation: { tier: 'usable', risks: [] } },
+    routePolicy: { route: 'structure-mix' },
+  });
+  const teaser = plan.candidates.find((candidate) => candidate.recipe === 'hook-teaser');
+
+  assert.equal(teaser.eligible, true);
+  assert.equal(teaser.timeline.filter((action) => action.deck === 'B' && action.op === 'play').length, 2);
+  assert.equal(teaser.timeline.some((action) => action.deck === 'B' && action.op === 'stop'), true);
+  assert.equal(teaser.window.audibleStart, -7);
+});
+
+test('rejects a source loop roll without release runway', () => {
+  const fromProfile = makeProfile('A', 128, [{ type: 'release', role: 'exit', time: 127, confidence: 0.9 }]);
+  const entry = { type: 'intro', role: 'entry', source: 'energy', time: 8, confidence: 0.86, resolvesTo: { time: 24 } };
+  const toProfile = makeProfile('B', 120, [entry]);
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { type: 'release', time: 127 }, entry, evaluation: { tier: 'usable', risks: [] } },
+    routePolicy: { route: 'structure-mix' },
+  });
+  const loop = plan.candidates.find((candidate) => candidate.recipe === 'source-loop-roll');
+
+  assert.equal(loop.eligible, false);
+  assert.equal(loop.eligibilityReason, 'source runway is too short for loop release');
+});
+
+test('selects a harmonic double drop only for tightly matched tracks', () => {
+  const fromProfile = makeProfile('A', 128, [{ type: 'release', role: 'exit', time: 112, confidence: 0.92 }]);
+  const entry = { type: 'hook', role: 'entry', source: 'lyric+beat', time: 32, landingAt: 32, confidence: 0.92 };
+  const toProfile = makeProfile('B', 120, [entry]);
+  fromProfile.musicalProfile = reliableMusicalProfile(0);
+  toProfile.musicalProfile = reliableMusicalProfile(0);
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { type: 'release', time: 112 }, entry, evaluation: { tier: 'magic', risks: [] } },
+    routePolicy: { route: 'structure-mix' },
+  });
+  const doubleDrop = plan.candidates.find((candidate) => candidate.recipe === 'harmonic-double-drop');
+
+  assert.equal(doubleDrop.eligible, true);
+  assert.equal(plan.chosen.recipe, 'harmonic-double-drop');
+  assert.equal(doubleDrop.timeline.some((action) => action.op === 'duck'), true);
+});
+
+test('rejects advanced performance recipes when musical and beat evidence is weak', () => {
+  const fromProfile = makeProfile('A', 128, [{ type: 'outro', role: 'exit', time: 112, confidence: 0.5 }]);
+  const entry = { type: 'hook', role: 'entry', source: 'fallback', time: 2, confidence: 0.35 };
+  const toProfile = makeProfile('B', 120, [entry]);
+  fromProfile.musicalProfile = { ...reliableMusicalProfile(0), confidence: 0.2 };
+  toProfile.musicalProfile = { ...reliableMusicalProfile(6), confidence: 0.2 };
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit: { type: 'outro', time: 112 }, entry, evaluation: { tier: 'weak', risks: ['vocal collision'] } },
+    routePolicy: { route: 'terminal-rescue' },
+  });
+
+  ['source-loop-roll', 'hook-teaser', 'harmonic-double-drop'].forEach((recipe) => {
+    assert.equal(plan.candidates.find((candidate) => candidate.recipe === recipe).eligible, false, recipe);
+  });
 });
 
 test('reports why unsafe long recipes were rejected', () => {
