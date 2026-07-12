@@ -1,7 +1,10 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { sampleRepresentativeAudio } = require('../public/cuefield-musical-sampler');
+const {
+  sampleRepresentativeAudio,
+  selectTransitionWindowStarts,
+} = require('../public/cuefield-musical-sampler');
 
 function fakeBuffer(channels, sampleRate) {
   return {
@@ -12,6 +15,45 @@ function fakeBuffer(channels, sampleRate) {
     getChannelData(index) { return channels[index]; },
   };
 }
+
+test('selects transition-aware windows from entries and exits', () => {
+  const structure = {
+    entryCandidates: [
+      { type: 'intro', role: 'entry', time: 2, landingAt: 2, confidence: 0.7 },
+      { type: 'hook', role: 'entry', time: 44, landingAt: 44, confidence: 0.9 },
+    ],
+    exitCandidates: [
+      { type: 'release', role: 'exit', time: 118, confidence: 0.82 },
+      { type: 'outro', role: 'exit', time: 188, confidence: 0.88 },
+    ],
+  };
+
+  assert.deepEqual(selectTransitionWindowStarts(structure, 200, 4), [2, 44, 114, 184]);
+});
+
+test('deduplicates structural windows and fills deterministic fallback positions', () => {
+  const structure = {
+    entryCandidates: [{ type: 'intro', role: 'entry', time: 0, confidence: 0.9 }],
+    exitCandidates: [{ type: 'release', role: 'exit', time: 3, confidence: 0.9 }],
+  };
+
+  const starts = selectTransitionWindowStarts(structure, 100, 4);
+  assert.equal(starts.length, 4);
+  assert.equal(new Set(starts).size, 4);
+  assert.deepEqual(starts, [0, 28, 56, 78]);
+});
+
+test('samples supplied transition starts without exceeding the payload cap', () => {
+  const channel = new Float32Array(44100 * 240);
+  const sampled = sampleRepresentativeAudio(fakeBuffer([channel], 44100), {
+    targetSampleRate: 22050,
+    windowSeconds: 4,
+    windowStarts: [2, 44, 114, 184, 220],
+  });
+
+  assert.deepEqual(sampled.windowStarts, [2, 44, 114, 184]);
+  assert.equal(sampled.samples.length <= 22050 * 16, true);
+});
 
 test('includes the opening before later representative windows', () => {
   const channel = Float32Array.from({ length: 1000 }, (_, index) => index);
