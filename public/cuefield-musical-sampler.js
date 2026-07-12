@@ -28,7 +28,8 @@
     var maximumStart = Math.max(0, duration - windowSeconds);
     var starts = [];
     values.forEach(function(value) {
-      addWindowStart(starts, finite(value, NaN), maximumStart, windowSeconds);
+      if (typeof value !== 'number' || !Number.isFinite(value)) return;
+      addWindowStart(starts, value, maximumStart, windowSeconds);
     });
     [0, duration * 0.28, duration * 0.56, duration * 0.78].forEach(function(value) {
       addWindowStart(starts, value, maximumStart, windowSeconds);

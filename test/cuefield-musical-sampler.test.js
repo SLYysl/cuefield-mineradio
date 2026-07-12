@@ -66,6 +66,17 @@ test('filters and deduplicates malformed explicit starts before filling fallback
   assert.deepEqual(sampled.windowStarts, [0, 28, 56, 78]);
 });
 
+test('accepts only finite number values for explicit starts', () => {
+  const channel = new Float32Array(1000);
+  const sampled = sampleRepresentativeAudio(fakeBuffer([channel], 10), {
+    targetSampleRate: 10,
+    windowSeconds: 1,
+    windowStarts: [0, null, true, '12'],
+  });
+
+  assert.deepEqual(sampled.windowStarts, [0, 28, 56, 78]);
+});
+
 test('keeps one clamped window when an explicit short track cannot provide four starts', () => {
   const channel = new Float32Array(30);
   const sampled = sampleRepresentativeAudio(fakeBuffer([channel], 10), {
