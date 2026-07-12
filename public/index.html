@@ -10532,8 +10532,11 @@ async function planCuefieldSongPair(fromSong, toSong, ctx) {
           }),
         ]);
         if (profiles[0] && profiles[1]) {
-          plan = await postCuefieldTransition();
-          applyCuefieldPlanStructure(plan, fromKey, toKey);
+          var refinedPlan = await postCuefieldTransition();
+          if (refinedPlan && refinedPlan.ok !== false) {
+            plan = refinedPlan;
+            applyCuefieldPlanStructure(plan, fromKey, toKey);
+          }
         }
       } catch (error) {
         console.warn('Cuefield musical refinement skipped:', error && error.message ? error.message : error);

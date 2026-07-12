@@ -262,16 +262,44 @@ test('returns only compact summaries without profiles or raw lyrics', () => {
   ];
   assert.deepEqual(Object.keys(result.from.structureMap).sort(), structureKeys.slice().sort());
   assert.deepEqual(Object.keys(result.to.structureMap).sort(), structureKeys.slice().sort());
-  assert.equal(result.from.structureMap.exitCandidates.length <= 8, true);
-  assert.equal(result.to.structureMap.entryCandidates.length <= 6, true);
-  result.from.structureMap.exitCandidates.concat(result.to.structureMap.entryCandidates).forEach((candidate) => {
+  [result.from.structureMap, result.to.structureMap].forEach((structureMap) => {
+    assert.equal(structureMap.entryCandidates.length <= 6, true);
+    assert.equal(structureMap.exitCandidates.length <= 8, true);
+  });
+  const returnedCandidates = [result.from.structureMap, result.to.structureMap].flatMap((structureMap) => (
+    structureMap.entryCandidates.concat(structureMap.exitCandidates)
+  ));
+  returnedCandidates.forEach((candidate) => {
     assert.deepEqual(Object.keys(candidate).sort(), [
       'confidence', 'landingAt', 'landingType', 'playFrom', 'role', 'source', 'time', 'type',
     ]);
   });
+  const forbiddenCandidateFields = [
+    'text', 'lyric', 'evidence', 'pitchclassprofile', 'intervalprofile',
+    'melodycontour', 'audio', 'url',
+  ];
+  const assertCandidatePrivacy = (value, path = 'candidates') => {
+    if (Array.isArray(value)) return value.forEach((item, index) => assertCandidatePrivacy(item, `${path}[${index}]`));
+    if (!value || typeof value !== 'object') return;
+    Object.entries(value).forEach(([key, nested]) => {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z]/g, '');
+      assert.equal(forbiddenCandidateFields.some((field) => normalizedKey.includes(field)), false, `${path}.${key}`);
+      assertCandidatePrivacy(nested, `${path}.${key}`);
+    });
+  };
+  assertCandidatePrivacy({
+    from: {
+      entryCandidates: result.from.structureMap.entryCandidates,
+      exitCandidates: result.from.structureMap.exitCandidates,
+    },
+    to: {
+      entryCandidates: result.to.structureMap.entryCandidates,
+      exitCandidates: result.to.structureMap.exitCandidates,
+    },
+  });
   const serialized = JSON.stringify(result);
-  ['private lyric', 'cueProfile', 'sections', 'rawLrc', '"text":', '"bars":', '"phrases":']
-    .forEach((sentinel) => assert.equal(serialized.includes(sentinel), false, sentinel));
+  ['private lyric', 'cueProfile', 'sections', 'rawLrc', 'pitchClassProfile', 'intervalProfile', 'melodyContour', 'audioUrl', '"url"', '"text"', '"bars"', '"phrases"']
+    .forEach((sentinel) => assert.equal(serialized.toLowerCase().includes(sentinel.toLowerCase()), false, sentinel));
 });
 
 test('runtime wrapper exposes compact BPM diagnostics and beat-only fallback never claims hook entry', () => {
