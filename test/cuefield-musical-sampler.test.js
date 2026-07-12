@@ -55,6 +55,29 @@ test('samples supplied transition starts without exceeding the payload cap', () 
   assert.equal(sampled.samples.length <= 22050 * 16, true);
 });
 
+test('filters and deduplicates malformed explicit starts before filling fallback windows', () => {
+  const channel = new Float32Array(1000);
+  const sampled = sampleRepresentativeAudio(fakeBuffer([channel], 10), {
+    targetSampleRate: 10,
+    windowSeconds: 1,
+    windowStarts: [0, 0.25, 'bad', NaN, Infinity, 0],
+  });
+
+  assert.deepEqual(sampled.windowStarts, [0, 28, 56, 78]);
+});
+
+test('keeps one clamped window when an explicit short track cannot provide four starts', () => {
+  const channel = new Float32Array(30);
+  const sampled = sampleRepresentativeAudio(fakeBuffer([channel], 10), {
+    targetSampleRate: 10,
+    windowSeconds: 4,
+    windowStarts: [0, 1, 'bad', Infinity],
+  });
+
+  assert.deepEqual(sampled.windowStarts, [0]);
+  assert.equal(sampled.samples.length, 30);
+});
+
 test('includes the opening before later representative windows', () => {
   const channel = Float32Array.from({ length: 1000 }, (_, index) => index);
   const sampled = sampleRepresentativeAudio(fakeBuffer([channel], 10), {
@@ -85,5 +108,6 @@ test('bounds the default payload to sixteen seconds at 22.05 kHz', () => {
   const sampled = sampleRepresentativeAudio(fakeBuffer([channel], 44100));
 
   assert.equal(sampled.sampleRate, 22050);
+  assert.equal(sampled.windowStarts.length, 4);
   assert.equal(sampled.samples.length, 22050 * 16);
 });
