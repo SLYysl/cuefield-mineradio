@@ -17,6 +17,11 @@ function sourceBlock(source, from, to) {
 
 function createMusicalQueueHarness(options = {}) {
   const source = read('public/index.html');
+  const lookupSource = sourceBlock(
+    source,
+    'async function fetchBeatPrefetchAudioUrl',
+    'function readCuefieldSetModePreference',
+  );
   const queueSource = sourceBlock(
     source,
     'var cuefieldMusicalAnalysisTasks = {};',
@@ -29,14 +34,10 @@ function createMusicalQueueHarness(options = {}) {
   const analyzeCalls = [];
   const persistCalls = [];
   const closeCalls = [];
+  const lookupCalls = [];
   const context = {
     beatMapCache: {},
     console: { log() {}, warn() {} },
-    fetchBeatPrefetchAudioUrl: async (song, quality) => {
-      audioUrlCalls.push(song.key);
-      assert.equal(quality, 'standard');
-      return `/audio/${song.key}`;
-    },
     fetch: async (url, requestOptions) => {
       fetchCalls.push(url);
       fetchOptions.push(requestOptions);
@@ -47,10 +48,30 @@ function createMusicalQueueHarness(options = {}) {
       persistCalls.push(args);
       return true;
     },
+    apiJson: async (url, requestOptions) => {
+      lookupCalls.push({ url, options: requestOptions });
+      if (options.lookup) return options.lookup(url, requestOptions, lookupCalls.length);
+      return { url: `https://audio.test/${lookupCalls.length}` };
+    },
+    songProviderKey: (song) => song && song.provider || 'netease',
+    normalizePlaybackQuality: (quality) => quality || 'hires',
+    playbackQuality: 'hires',
+    hasProviderSvip: () => true,
+    loginStatus: {},
+    qqPlaybackQualityCeiling: '',
   };
+  if (!options.useRealAudioLookup) {
+    context.fetchBeatPrefetchAudioUrl = async (song, lookupOptions) => {
+      audioUrlCalls.push(song.key);
+      assert.equal(lookupOptions.quality, 'standard');
+      assert.ok(Number.isFinite(lookupOptions.timeoutMs));
+      if (options.lookup) return options.lookup(song, lookupOptions, audioUrlCalls.length);
+      return `/audio/${song.key}`;
+    };
+  }
   class AudioContextStub {
     decodeAudioData(bytes, resolve, reject) {
-      const job = { resolve: () => resolve({ duration: 100 }), reject };
+      const job = { bytes, resolve: () => resolve({ duration: 100 }), reject };
       decodeJobs.push(job);
       if (options.decode) return options.decode(job, decodeJobs.length);
       if (!options.holdDecode) job.resolve();
@@ -82,10 +103,12 @@ function createMusicalQueueHarness(options = {}) {
     var CUEFIELD_MUSICAL_QUEUE_LIMIT = 4;
     var CUEFIELD_MUSICAL_FETCH_TIMEOUT_MS = ${options.fetchTimeoutMs || 20};
     var CUEFIELD_MUSICAL_DECODE_TIMEOUT_MS = ${options.decodeTimeoutMs || 20};
-    var CUEFIELD_MUSICAL_MAX_AUDIO_BYTES = 32 * 1024 * 1024;
+    var CUEFIELD_MUSICAL_URL_TIMEOUT_MS = ${options.lookupTimeoutMs || 20};
+    var CUEFIELD_MUSICAL_MAX_AUDIO_BYTES = ${options.maxAudioBytes || 32 * 1024 * 1024};
+    ${options.useRealAudioLookup ? lookupSource : ''}
     ${queueSource}
   `, context);
-  return { context, decodeJobs, audioUrlCalls, fetchCalls, fetchOptions, analyzeCalls, persistCalls, closeCalls };
+  return { context, decodeJobs, audioUrlCalls, fetchCalls, fetchOptions, analyzeCalls, persistCalls, closeCalls, lookupCalls };
 }
 
 function createEnsureBeatMapHarness(options = {}) {
@@ -371,6 +394,137 @@ test('musical fetch rejects a body that exceeds the byte cap without a content l
 
   assert.equal(await harness.context.scheduleCuefieldMusicalProfile({ key: 'large-body' }, 'large-body', queueMap()), null);
   assert.equal(harness.decodeJobs.length, 0);
+});
+
+test('musical URL lookup passes a finite timeout for NetEase and QQ requests', async () => {
+  const harness = createMusicalQueueHarness({ useRealAudioLookup: true });
+
+  await harness.context.fetchBeatPrefetchAudioUrl(
+    { id: 1, key: 'netease', provider: 'netease' },
+    { quality: 'standard', timeoutMs: 17 },
+  );
+  await harness.context.fetchBeatPrefetchAudioUrl(
+    { id: 2, mid: 'qq-mid', key: 'qq', provider: 'qq' },
+    { quality: 'standard', timeoutMs: 19 },
+  );
+  await harness.context.fetchBeatPrefetchAudioUrl(
+    { id: 3, key: 'legacy', provider: 'netease' },
+    'standard',
+  );
+
+  assert.match(harness.lookupCalls[0].url, /^\/api\/song\/url/);
+  assert.equal(harness.lookupCalls[0].options.timeoutMs, 17);
+  assert.match(harness.lookupCalls[1].url, /^\/api\/qq\/song\/url/);
+  assert.equal(harness.lookupCalls[1].options.timeoutMs, 19);
+  assert.equal(harness.lookupCalls[2].options, undefined);
+});
+
+test('hung musical URL lookup times out and releases the next queue job', async () => {
+  const harness = createMusicalQueueHarness({
+    useRealAudioLookup: true,
+    lookupTimeoutMs: 5,
+    lookup: async (url, requestOptions, callCount) => callCount === 1
+      ? new Promise(() => {})
+      : { url: 'https://audio.test/recovered' },
+  });
+  const failed = harness.context.scheduleCuefieldMusicalProfile(
+    { id: 1, key: 'hung' },
+    'hung',
+    queueMap(),
+  );
+  const recovered = harness.context.scheduleCuefieldMusicalProfile(
+    { id: 2, key: 'next' },
+    'next',
+    queueMap(),
+  );
+
+  assert.equal(await failed, null);
+  assert.equal((await recovered).noteCount, 4);
+  assert.equal(harness.lookupCalls[0].options.timeoutMs, 5);
+  assert.equal(harness.context.cuefieldMusicalAnalysisActive, false);
+});
+
+test('unknown-length musical stream aborts and cancels as soon as chunks cross the cap', async () => {
+  let signal;
+  let reads = 0;
+  let cancels = 0;
+  const chunks = [new Uint8Array(5), new Uint8Array(5), new Uint8Array(5)];
+  const harness = createMusicalQueueHarness({
+    maxAudioBytes: 8,
+    fetch: async (url, requestOptions) => {
+      signal = requestOptions.signal;
+      return {
+        ok: true,
+        headers: { get: () => null },
+        body: {
+          getReader: () => ({
+            read: async () => ({ done: false, value: chunks[reads++] }),
+            cancel: async () => { cancels += 1; },
+          }),
+        },
+        arrayBuffer: async () => { throw new Error('stream fallback should not run'); },
+      };
+    },
+  });
+
+  assert.equal(await harness.context.scheduleCuefieldMusicalProfile({ key: 'stream-large' }, 'stream-large', queueMap()), null);
+  assert.equal(reads, 2);
+  assert.equal(cancels, 1);
+  assert.equal(signal.aborted, true);
+  assert.equal(harness.decodeJobs.length, 0);
+});
+
+test('bounded musical stream assembles chunks before decode', async () => {
+  let index = 0;
+  const chunks = [new Uint8Array([1, 2, 3]), new Uint8Array([4, 5])];
+  const harness = createMusicalQueueHarness({
+    maxAudioBytes: 8,
+    fetch: async () => ({
+      ok: true,
+      headers: { get: () => null },
+      body: {
+        getReader: () => ({
+          read: async () => index < chunks.length
+            ? { done: false, value: chunks[index++] }
+            : { done: true },
+          cancel: async () => {},
+        }),
+      },
+      arrayBuffer: async () => { throw new Error('stream fallback should not run'); },
+    }),
+  });
+
+  assert.equal((await harness.context.scheduleCuefieldMusicalProfile({ key: 'stream-ok' }, 'stream-ok', queueMap())).noteCount, 4);
+  assert.equal(harness.decodeJobs[0].bytes.byteLength, 5);
+});
+
+test('musical stream timeout aborts and cancels the reader', async () => {
+  let signal;
+  let cancels = 0;
+  const harness = createMusicalQueueHarness({
+    fetchTimeoutMs: 5,
+    fetch: async (url, requestOptions) => {
+      signal = requestOptions.signal;
+      return {
+        ok: true,
+        headers: { get: () => null },
+        body: {
+          getReader: () => ({
+            read: async () => new Promise(() => {}),
+            cancel: () => {
+              cancels += 1;
+              return new Promise(() => {});
+            },
+          }),
+        },
+      };
+    },
+  });
+
+  assert.equal(await harness.context.scheduleCuefieldMusicalProfile({ key: 'stream-timeout' }, 'stream-timeout', queueMap()), null);
+  assert.equal(signal.aborted, true);
+  assert.equal(cancels, 1);
+  assert.equal(harness.context.cuefieldMusicalAnalysisActive, false);
 });
 
 test('decode timeout closes its context and pumps the next musical job', async () => {

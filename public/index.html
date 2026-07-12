@@ -2817,6 +2817,7 @@ var CUEFIELD_SET_MODE_STORE_KEY = 'mineradio-cuefield-set-mode-v1';
 var CUEFIELD_PAIR_PLAN_TTL_MS = 5 * 60 * 1000;
 var CUEFIELD_SMART_PLAN_BUDGET_MS = 12 * 1000;
 var CUEFIELD_MUSICAL_QUEUE_LIMIT = 4;
+var CUEFIELD_MUSICAL_URL_TIMEOUT_MS = 8 * 1000;
 var CUEFIELD_MUSICAL_FETCH_TIMEOUT_MS = 15 * 1000;
 var CUEFIELD_MUSICAL_DECODE_TIMEOUT_MS = 15 * 1000;
 var CUEFIELD_MUSICAL_REFINEMENT_TIMEOUT_MS = 35 * 1000;
@@ -10408,16 +10409,35 @@ function normalizeBeatPrefetchState(state) {
   };
 }
 
-async function fetchBeatPrefetchAudioUrl(song, qualityOverride) {
+async function fetchBeatPrefetchAudioUrl(song, qualityOrOptions) {
   if (!song) return null;
+  var lookupOptions = qualityOrOptions && typeof qualityOrOptions === 'object'
+    ? qualityOrOptions
+    : { quality: qualityOrOptions };
   var isQQ = songProviderKey(song) === 'qq';
-  var requestedQuality = normalizePlaybackQuality(qualityOverride || playbackQuality);
+  var requestedQuality = normalizePlaybackQuality(lookupOptions.quality || playbackQuality);
+  var timeoutMs = Math.max(0, Number(lookupOptions.timeoutMs) || 0);
   if (!isQQ && requestedQuality === 'jymaster' && !hasProviderSvip('netease', loginStatus)) requestedQuality = 'hires';
   if (isQQ && qqPlaybackQualityCeiling && (requestedQuality === 'jymaster' || requestedQuality === 'hires' || requestedQuality === 'lossless')) requestedQuality = qqPlaybackQualityCeiling;
   var qualityParam = '&quality=' + encodeURIComponent(requestedQuality);
-  var data = isQQ
-    ? await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam)
-    : await apiJson('/api/song/url?id=' + encodeURIComponent(song.id) + qualityParam);
+  var lookupUrl = isQQ
+    ? '/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam
+    : '/api/song/url?id=' + encodeURIComponent(song.id) + qualityParam;
+  var lookupPromise = apiJson(lookupUrl, timeoutMs ? { timeoutMs: timeoutMs } : undefined);
+  var lookupTimer = null;
+  var data;
+  try {
+    data = timeoutMs ? await Promise.race([
+      lookupPromise,
+      new Promise(function(resolve, reject) {
+        lookupTimer = setTimeout(function() {
+          reject(new Error('CUEFIELD_MUSICAL_URL_TIMEOUT'));
+        }, timeoutMs);
+      }),
+    ]) : await lookupPromise;
+  } finally {
+    if (lookupTimer) clearTimeout(lookupTimer);
+  }
   if (!data || !data.url || data.trial) return null;
   return '/api/audio?url=' + encodeURIComponent(data.url);
 }
@@ -10926,6 +10946,7 @@ async function decodeCuefieldMusicalAudio(audioUrl) {
     }, CUEFIELD_MUSICAL_FETCH_TIMEOUT_MS);
   });
   var bytes;
+  var reader = null;
   try {
     var resp = await Promise.race([
       fetch(audioUrl, controller ? { signal: controller.signal } : undefined),
@@ -10936,10 +10957,43 @@ async function decodeCuefieldMusicalAudio(audioUrl) {
     if (isFinite(contentLength) && contentLength > CUEFIELD_MUSICAL_MAX_AUDIO_BYTES) {
       throw new Error('CUEFIELD_MUSICAL_AUDIO_TOO_LARGE');
     }
-    bytes = await Promise.race([resp.arrayBuffer(), timeoutPromise]);
-    if (!bytes || bytes.byteLength > CUEFIELD_MUSICAL_MAX_AUDIO_BYTES) {
-      throw new Error('CUEFIELD_MUSICAL_AUDIO_TOO_LARGE');
+    if (resp.body && typeof resp.body.getReader === 'function') {
+      reader = resp.body.getReader();
+      var chunks = [];
+      var totalBytes = 0;
+      while (true) {
+        var readResult = await Promise.race([reader.read(), timeoutPromise]);
+        if (!readResult || readResult.done) break;
+        var value = readResult.value;
+        var chunk = new Uint8Array(value.buffer || value, value.byteOffset || 0, value.byteLength);
+        totalBytes += chunk.byteLength;
+        if (totalBytes > CUEFIELD_MUSICAL_MAX_AUDIO_BYTES) {
+          throw new Error('CUEFIELD_MUSICAL_AUDIO_TOO_LARGE');
+        }
+        chunks.push(chunk);
+      }
+      var combined = new Uint8Array(totalBytes);
+      var offset = 0;
+      chunks.forEach(function(chunk) {
+        combined.set(chunk, offset);
+        offset += chunk.byteLength;
+      });
+      bytes = combined.buffer;
+    } else {
+      bytes = await Promise.race([resp.arrayBuffer(), timeoutPromise]);
+      if (!bytes || bytes.byteLength > CUEFIELD_MUSICAL_MAX_AUDIO_BYTES) {
+        throw new Error('CUEFIELD_MUSICAL_AUDIO_TOO_LARGE');
+      }
     }
+  } catch (error) {
+    if (controller) controller.abort();
+    if (reader && typeof reader.cancel === 'function') {
+      try {
+        var cancellation = reader.cancel();
+        if (cancellation && typeof cancellation.catch === 'function') cancellation.catch(function(){});
+      } catch (e) {}
+    }
+    throw error;
   } finally {
     if (fetchTimer) clearTimeout(fetchTimer);
   }
@@ -11011,7 +11065,10 @@ async function runCuefieldMusicalAnalysisTask(task) {
   try {
     var buffer = task.decodedBuffer;
     if (!buffer) {
-      var audioUrl = await fetchBeatPrefetchAudioUrl(task.song, 'standard');
+      var audioUrl = await fetchBeatPrefetchAudioUrl(task.song, {
+        quality: 'standard',
+        timeoutMs: CUEFIELD_MUSICAL_URL_TIMEOUT_MS,
+      });
       buffer = await decodeCuefieldMusicalAudio(audioUrl);
     }
     var profile = await analyzeCuefieldMusicalBuffer(buffer, task.map, task.sampling.structureMap, task.sampling.windowStarts);
