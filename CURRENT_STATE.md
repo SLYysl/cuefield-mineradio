@@ -9,8 +9,12 @@
 - compact local profiles、pair ranking 与 compact feedback diagnostics。
 - 高置信 clash 会阻止 long overlap 和 harmonic double-drop，但保留短可执行 fallback。
 - old/weak cache 对 local musical scoring 保持 neutral；local evidence 不覆盖 structure/vocal/timing。
-- 回归：`node --test test/*.test.js` = 322 tests, 322 pass, 0 fail。
+- 回归：`node --test test/*.test.js` = 346/346 tests pass, 0 fail。
 - sampler 聚焦测试 = 11 tests, 11 pass，并确认 <=22050*16 cap。
+- smart candidate evaluation skips Basic Pitch。
+- final selected A/B uses sanitized lyric+beat structure windows, then replans once。
+- upstream queue: one active request, max 4 queued；standard-quality URL lookup 8s；stream 32MiB。
+- fetch/decode/refinement each have bounded timeouts；structured result cannot be overwritten by stale generic。
 
 ## 未做 / 下一步
 - real-song listening，确认局部匹配在真实歌曲上听感成立。
