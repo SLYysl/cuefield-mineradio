@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  deriveTransitionSamplingStructure,
   sampleRepresentativeAudio,
   selectTransitionWindowStarts,
 } = require('../public/cuefield-musical-sampler');
@@ -121,4 +122,52 @@ test('bounds the default payload to sixteen seconds at 22.05 kHz', () => {
   assert.equal(sampled.sampleRate, 22050);
   assert.equal(sampled.windowStarts.length, 4);
   assert.equal(sampled.samples.length, 22050 * 16);
+});
+
+test('derives compact beat-only entry and release candidates from energy bins', () => {
+  const beats = [
+    { time: 0, strength: 0.1 },
+    { time: 32, strength: 0.95 },
+    { time: 48, impact: 0.95 },
+    { time: 52, strength: 0.1 },
+    { time: 76, strength: 0.92 },
+    { time: 80, strength: 0.1 },
+  ];
+  const structure = deriveTransitionSamplingStructure({ beats }, 100, 4);
+
+  assert.equal(structure.entryCandidates[0].time, 0);
+  assert.equal(structure.entryCandidates.some((candidate) => candidate.time === 32), true);
+  assert.equal(structure.exitCandidates.some((candidate) => candidate.time === 52), true);
+  assert.equal(structure.exitCandidates.some((candidate) => candidate.time === 80), true);
+  assert.equal(structure.entryCandidates.every((candidate) => !('lyrics' in candidate)), true);
+});
+
+test('uses beat-only structure for sampling and fixed fallback without beat evidence', () => {
+  const channel = new Float32Array(1000);
+  const beatMap = {
+    cameraBeats: [
+      { time: 32, impact: 0.95 },
+      { time: 48, impact: 0.95 },
+      { time: 52, impact: 0.1 },
+      { time: 76, impact: 0.92 },
+      { time: 80, impact: 0.1 },
+    ],
+  };
+  const structured = sampleRepresentativeAudio(fakeBuffer([channel], 10), {
+    targetSampleRate: 10,
+    windowSeconds: 4,
+    beatMap,
+  });
+  const fallback = sampleRepresentativeAudio(fakeBuffer([channel], 10), {
+    targetSampleRate: 10,
+    windowSeconds: 4,
+    beatMap: {},
+  });
+
+  assert.notDeepEqual(structured.windowStarts, [0, 28, 56, 78]);
+  assert.deepEqual(fallback.windowStarts, [0, 28, 56, 78]);
+  assert.deepEqual(deriveTransitionSamplingStructure({}, 100, 4), {
+    entryCandidates: [],
+    exitCandidates: [],
+  });
 });

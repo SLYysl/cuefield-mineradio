@@ -23,7 +23,7 @@ test('renderer persists musical profiles in packed beat maps', () => {
 test('renderer passes the structure map into bounded musical sampling', () => {
   const source = read('public/index.html');
   assert.match(source, /async function analyzeCuefieldMusicalBuffer\(buffer, map\)/);
-  assert.match(source, /sampleRepresentativeAudio\(buffer,\s*\{\s*structureMap:\s*map\s*&&\s*map\.structureMap\s*\|\|\s*null\s*\}\)/);
+  assert.match(source, /sampleRepresentativeAudio\(buffer,\s*\{\s*structureMap:\s*map\s*&&\s*map\.structureMap\s*\|\|\s*null,\s*beatMap:\s*map\s*\}\)/);
   assert.match(source, /analyzeCuefieldMusicalBuffer\(buffer, map\)/);
 });
 

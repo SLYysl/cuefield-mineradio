@@ -10849,7 +10849,8 @@ async function analyzeCuefieldMusicalBuffer(buffer, map) {
   if (!buffer || !window.CuefieldMusicalSampler || !window.desktopWindow
       || typeof window.desktopWindow.analyzeCuefieldMusicalWindow !== 'function') return null;
   var sampled = window.CuefieldMusicalSampler.sampleRepresentativeAudio(buffer, {
-    structureMap: map && map.structureMap || null
+    structureMap: map && map.structureMap || null,
+    beatMap: map
   });
   var result = await window.desktopWindow.analyzeCuefieldMusicalWindow(sampled);
   return result && result.ok ? result.profile : null;
