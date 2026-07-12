@@ -19,3 +19,24 @@ test('renderer persists musical profiles in packed beat maps', () => {
   assert.match(source, /CuefieldMusicalSampler\.sampleRepresentativeAudio/);
   assert.match(source, /analyzeCuefieldMusicalWindow/);
 });
+
+test('renderer passes the structure map into bounded musical sampling', () => {
+  const source = read('public/index.html');
+  assert.match(source, /async function analyzeCuefieldMusicalBuffer\(buffer, map\)/);
+  assert.match(source, /sampleRepresentativeAudio\(buffer,\s*\{\s*structureMap:\s*map\s*&&\s*map\.structureMap\s*\|\|\s*null\s*\}\)/);
+  assert.match(source, /analyzeCuefieldMusicalBuffer\(buffer, map\)/);
+});
+
+test('worker exposes bounded musical fields for each analyzed window', () => {
+  const source = read('desktop/cuefield-musical-worker.js');
+  assert.match(source, /noteDensity:\s*profile\.noteDensity/);
+  assert.match(source, /pitchRange:\s*profile\.pitchRange/);
+  assert.match(source, /start:\s*Number\(starts\[index\]\)\s*\|\|\s*0/);
+  assert.match(source, /duration:\s*segment\.length\s*\/\s*payload\.sampleRate/);
+  assert.match(source, /confidence:\s*profile\.confidence/);
+  assert.match(source, /noteCount:\s*profile\.noteCount/);
+  assert.match(source, /pitchClassProfile:\s*profile\.pitchClassProfile/);
+  assert.match(source, /key:\s*profile\.key/);
+  assert.match(source, /intervalProfile:\s*profile\.intervalProfile/);
+  assert.doesNotMatch(source, /windows\.push\(\{[\s\S]*?notes\s*:/);
+});

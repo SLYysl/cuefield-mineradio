@@ -63,9 +63,11 @@ async function analyze(payload) {
       duration: segment.length / payload.sampleRate,
       confidence: profile.confidence,
       noteCount: profile.noteCount,
+      noteDensity: profile.noteDensity,
       pitchClassProfile: profile.pitchClassProfile,
       key: profile.key,
       intervalProfile: profile.intervalProfile,
+      pitchRange: profile.pitchRange,
     });
     notes.forEach((note) => allNotes.push({
       ...note,

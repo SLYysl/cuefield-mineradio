@@ -10845,10 +10845,12 @@ async function decodeCuefieldMusicalAudio(audioUrl) {
   }
 }
 
-async function analyzeCuefieldMusicalBuffer(buffer) {
+async function analyzeCuefieldMusicalBuffer(buffer, map) {
   if (!buffer || !window.CuefieldMusicalSampler || !window.desktopWindow
       || typeof window.desktopWindow.analyzeCuefieldMusicalWindow !== 'function') return null;
-  var sampled = window.CuefieldMusicalSampler.sampleRepresentativeAudio(buffer);
+  var sampled = window.CuefieldMusicalSampler.sampleRepresentativeAudio(buffer, {
+    structureMap: map && map.structureMap || null
+  });
   var result = await window.desktopWindow.analyzeCuefieldMusicalWindow(sampled);
   return result && result.ok ? result.profile : null;
 }
@@ -10863,7 +10865,7 @@ function scheduleCuefieldMusicalProfile(song, key, map, decodedBuffer) {
         var audioUrl = await fetchBeatPrefetchAudioUrl(song);
         buffer = await decodeCuefieldMusicalAudio(audioUrl);
       }
-      var profile = await analyzeCuefieldMusicalBuffer(buffer);
+      var profile = await analyzeCuefieldMusicalBuffer(buffer, map);
       if (!profile || Number(profile.noteCount) < 1) return;
       map.musicalProfile = profile;
       beatMapCache[key] = map;
