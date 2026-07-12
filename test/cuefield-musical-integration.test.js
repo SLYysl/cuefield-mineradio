@@ -69,6 +69,82 @@ function createMusicalQueueHarness(options = {}) {
   return { context, decodeJobs, audioUrlCalls, fetchCalls, analyzeCalls };
 }
 
+function createPairFlowHarness(responses) {
+  const source = read('public/index.html');
+  const pairSource = sourceBlock(source, 'async function planCuefieldSongPair', 'function initCuefieldAutoMix');
+  const initSource = sourceBlock(source, 'function initCuefieldAutoMix', 'function cuefieldFeedbackSongMeta');
+  const ensureSource = sourceBlock(source, 'async function ensureCuefieldAutoMixBeatMap', 'var cuefieldMusicalAnalysisTasks = {};');
+  const evaluateSource = sourceBlock(source, 'async function cuefieldEvaluatePair', 'function cuefieldEvaluateWithinBudget');
+  const songs = {
+    from: { key: 'selected-from', name: 'From' },
+    to: { key: 'selected-to', name: 'To' },
+  };
+  const maps = {
+    'selected-from': queueMap(),
+    'selected-to': queueMap(),
+    unrelated: queueMap(),
+  };
+  const apiCalls = [];
+  const structuredJobs = [];
+  let autoMixDeps = null;
+  const context = {
+    CUEFIELD_PAIR_PLAN_TTL_MS: 300000,
+    cuefieldPairPlanCache: new Map(),
+    beatMapCache: maps,
+    beatMapSongKey: (song) => song && song.key || '',
+    songProviderKey: () => 'test',
+    apiJson: async (url, options) => {
+      apiCalls.push({ url, options });
+      return responses.shift();
+    },
+    scheduleCuefieldMusicalProfile: async (song, key, map, decodedBuffer, options) => {
+      structuredJobs.push({ song, key, map, decodedBuffer, options });
+      return { noteCount: 4 };
+    },
+    currentIdx: 0,
+    currentBeatMap: null,
+    playQueue: [songs.from, songs.to],
+    trackSwitchToken: 17,
+    cuefieldAutoMix: null,
+    cuefieldAutoMixEnabled: true,
+    updateCuefieldAutoMixUi() {},
+    cuefieldPlanFacts: (plan) => ({ plan }),
+    logCuefieldAutoMix() {},
+    console: { warn() {} },
+  };
+  context.window = {
+    CuefieldLyricSource: {
+      fetchRawLrc: async () => '',
+    },
+    CuefieldAutoMix: {
+      createCuefieldAutoMix: (deps) => {
+        autoMixDeps = deps;
+        return { setEnabled() {} };
+      },
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext([pairSource, initSource, ensureSource, evaluateSource].join('\n'), context);
+  return {
+    context,
+    songs,
+    maps,
+    apiCalls,
+    structuredJobs,
+    getAutoMixDeps: () => autoMixDeps,
+  };
+}
+
+function pairPlanFixture(label) {
+  return {
+    ok: true,
+    label,
+    chosen: { timeline: [{ op: 'handoff' }] },
+    from: { structureMap: { entryCandidates: [{ type: 'intro', role: 'entry', time: 0 }] } },
+    to: { structureMap: { entryCandidates: [{ type: 'drop', role: 'entry', time: 8 }] } },
+  };
+}
+
 function queueMap(starts = [0, 20]) {
   return { duration: 100, structureMap: { starts } };
 }
@@ -220,6 +296,51 @@ test('failed refined transition response returns and caches the initial usable p
   assert.equal(result, initialPlan);
   assert.equal(context.cuefieldPairPlanCache.get('a->b:refined').plan, initialPlan);
   assert.equal(context.cuefieldPairPlanCache.get('a->b:coarse').plan, coarsePlan);
+});
+
+test('smart candidate evaluation executes ensure with musical profiling skipped and plans only once', async () => {
+  const initialPlan = pairPlanFixture('smart-coarse');
+  const harness = createPairFlowHarness([initialPlan]);
+
+  const result = await harness.context.cuefieldEvaluatePair(
+    harness.songs.from,
+    harness.songs.to,
+    0,
+    17,
+  );
+
+  assert.equal(result.plan, initialPlan);
+  assert.equal(harness.apiCalls.length, 1);
+  assert.equal(harness.apiCalls[0].url, '/api/cuefield/transition');
+  assert.deepEqual(harness.structuredJobs, []);
+  assert.equal(harness.context.cuefieldPairPlanCache.get('selected-from->selected-to:coarse').plan, initialPlan);
+});
+
+test('final AutoMix plan schedules only selected structured pair and replans exactly once', async () => {
+  const initialPlan = pairPlanFixture('initial');
+  const refinedPlan = pairPlanFixture('refined');
+  const harness = createPairFlowHarness([initialPlan, refinedPlan]);
+  harness.context.initCuefieldAutoMix();
+
+  const result = await harness.getAutoMixDeps().planTransition('ignored-from', 'ignored-to', {
+    currentSong: harness.songs.from,
+    nextSong: harness.songs.to,
+  });
+
+  assert.equal(result, refinedPlan);
+  assert.equal(harness.apiCalls.length, 2);
+  harness.apiCalls.forEach((call) => assert.equal(call.url, '/api/cuefield/transition'));
+  assert.equal(harness.structuredJobs.length, 2);
+  assert.deepEqual(harness.structuredJobs.map((job) => job.key), ['selected-from', 'selected-to']);
+  assert.equal(harness.structuredJobs[0].song, harness.songs.from);
+  assert.equal(harness.structuredJobs[1].song, harness.songs.to);
+  assert.equal(harness.structuredJobs[0].map, harness.maps['selected-from']);
+  assert.equal(harness.structuredJobs[1].map, harness.maps['selected-to']);
+  assert.equal(harness.structuredJobs[0].options.structured, true);
+  assert.equal(harness.structuredJobs[1].options.structured, true);
+  assert.equal(harness.structuredJobs[0].options.structureMap, initialPlan.from.structureMap);
+  assert.equal(harness.structuredJobs[1].options.structureMap, initialPlan.to.structureMap);
+  assert.equal(harness.structuredJobs.some((job) => job.key === 'unrelated'), false);
 });
 
 test('renderer uses structure signatures and only profiles final pairs after the server plan', () => {
