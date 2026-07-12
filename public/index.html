@@ -10949,7 +10949,9 @@ async function runCuefieldMusicalAnalysisTask(task) {
     var profile = await analyzeCuefieldMusicalBuffer(buffer, task.map, task.sampling.structureMap, task.sampling.windowStarts);
     if (!profile || Number(profile.noteCount) < 1) return settleCuefieldMusicalTask(task, null);
     profile = Object.assign({}, profile, {
-      windowStrategy: { type: 'transition-windows', starts: task.sampling.windowStarts },
+      windowStrategy: task.structured
+        ? 'structure-v1'
+        : { type: 'transition-windows', starts: task.sampling.windowStarts },
       windowSignature: task.sampling.signature,
     });
     task.map.musicalProfile = profile;
@@ -11974,6 +11976,11 @@ async function runQueueBeatPrefetch(fromIdx, token, seq, state) {
   }
 }
 
+function shouldScheduleCuefieldMusicalProfile(musicalKey, options) {
+  options = options || {};
+  return !!musicalKey && !options.prefetch && !options.skipMusicalProfile;
+}
+
 async function analyzeAudioBeats(audioUrl, durationSec, token, options) {
   options = options || {};
   var analysisProfile = cinemaAnalysisProfileForSong(options.song);
@@ -12727,7 +12734,7 @@ async function analyzeAudioBeats(audioUrl, durationSec, token, options) {
     else showBeatChip('节奏缓冲中…');
     var analyzedMap = { kicks: kicks, beats: beats, pulseBeats: pulseBeats, cameraBeats: cameraBeats, gridStep: gridStep, tempoSource: musicTempoBeats.length >= 4 ? 'music-tempo' : 'local', analysisProfile: analysisProfile.id || 'default', duration: buffer.duration, visualBeatCount: visualBeatCount, analyzedAt: Date.now() };
     var musicalKey = options.song ? beatMapSongKey(options.song) : '';
-    if (musicalKey && !options.prefetch && !options.skipMusicalProfile) scheduleCuefieldMusicalProfile(options.song, musicalKey, analyzedMap, buffer);
+    if (shouldScheduleCuefieldMusicalProfile(musicalKey, options)) scheduleCuefieldMusicalProfile(options.song, musicalKey, analyzedMap, buffer);
     return analyzedMap;
   } catch (e) {
     console.warn('beat analysis failed:', e);

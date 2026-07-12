@@ -26,6 +26,7 @@ function createMusicalQueueHarness(options = {}) {
   const audioUrlCalls = [];
   const fetchCalls = [];
   const analyzeCalls = [];
+  const persistCalls = [];
   const context = {
     beatMapCache: {},
     console: { log() {}, warn() {} },
@@ -37,7 +38,10 @@ function createMusicalQueueHarness(options = {}) {
       fetchCalls.push(url);
       return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
     },
-    writeBeatDiskCache: async () => true,
+    writeBeatDiskCache: async (...args) => {
+      persistCalls.push(args);
+      return true;
+    },
   };
   class AudioContextStub {
     decodeAudioData(bytes, resolve, reject) {
@@ -66,7 +70,41 @@ function createMusicalQueueHarness(options = {}) {
   };
   vm.createContext(context);
   vm.runInContext(`var CUEFIELD_MUSICAL_QUEUE_LIMIT = 4;\n${queueSource}`, context);
-  return { context, decodeJobs, audioUrlCalls, fetchCalls, analyzeCalls };
+  return { context, decodeJobs, audioUrlCalls, fetchCalls, analyzeCalls, persistCalls };
+}
+
+function createEnsureBeatMapHarness(options = {}) {
+  const source = read('public/index.html');
+  const ensureSource = sourceBlock(
+    source,
+    'async function ensureCuefieldAutoMixBeatMap',
+    'var cuefieldMusicalAnalysisTasks = {};',
+  );
+  const song = { key: 'selected', name: 'Selected' };
+  const scheduleCalls = [];
+  const diskReads = [];
+  const diskWrites = [];
+  const context = {
+    beatMapCache: {},
+    currentIdx: 0,
+    playQueue: [song],
+    currentBeatMap: options.currentBeatMap || null,
+    beatMapSongKey: (value) => value && value.key || '',
+    scheduleCuefieldMusicalProfile: (...args) => scheduleCalls.push(args),
+    writeBeatDiskCache: async (...args) => {
+      diskWrites.push(args);
+      return true;
+    },
+    readBeatDiskCache: async (key) => {
+      diskReads.push(key);
+      return options.diskMap || null;
+    },
+    isBeatPrefetchCandidate: () => false,
+    beatMapBusy: false,
+  };
+  vm.createContext(context);
+  vm.runInContext(ensureSource, context);
+  return { context, song, scheduleCalls, diskReads, diskWrites };
 }
 
 function createPairFlowHarness(responses) {
@@ -262,6 +300,75 @@ test('matching musical window signature resolves without fetch, decode, or analy
   assert.deepEqual(harness.analyzeCalls, []);
 });
 
+test('skipMusicalProfile avoids scheduling when ensure adopts currentBeatMap', async () => {
+  const currentMap = queueMap();
+  const harness = createEnsureBeatMapHarness({ currentBeatMap: currentMap });
+
+  const ready = await harness.context.ensureCuefieldAutoMixBeatMap(
+    harness.song,
+    'selected',
+    { currentIndex: 0, skipMusicalProfile: true },
+  );
+
+  assert.equal(ready, true);
+  assert.equal(harness.context.beatMapCache.selected, currentMap);
+  assert.deepEqual(harness.scheduleCalls, []);
+  assert.equal(harness.diskWrites.length, 1);
+});
+
+test('skipMusicalProfile avoids scheduling when ensure reads a disk map', async () => {
+  const diskMap = queueMap();
+  const harness = createEnsureBeatMapHarness({ diskMap });
+
+  const ready = await harness.context.ensureCuefieldAutoMixBeatMap(
+    harness.song,
+    'selected',
+    { currentIndex: 1, skipMusicalProfile: true },
+  );
+
+  assert.equal(ready, true);
+  assert.deepEqual(harness.diskReads, ['selected']);
+  assert.deepEqual(harness.scheduleCalls, []);
+});
+
+test('beat analysis scheduling guard rejects prefetch musical profiling', () => {
+  const source = read('public/index.html');
+  const guardSource = sourceBlock(
+    source,
+    'function shouldScheduleCuefieldMusicalProfile',
+    'async function analyzeAudioBeats',
+  );
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(guardSource, context);
+
+  assert.equal(context.shouldScheduleCuefieldMusicalProfile('song:a', { prefetch: true }), false);
+  assert.equal(context.shouldScheduleCuefieldMusicalProfile('song:a', { skipMusicalProfile: true }), false);
+  assert.equal(context.shouldScheduleCuefieldMusicalProfile('', {}), false);
+  assert.equal(context.shouldScheduleCuefieldMusicalProfile('song:a', {}), true);
+});
+
+test('successful structured analysis stores deterministic strategy and persists the updated map', async () => {
+  const harness = createMusicalQueueHarness();
+  const map = queueMap([5, 40]);
+
+  const profile = await harness.context.scheduleCuefieldMusicalProfile(
+    { key: 'selected', name: 'Selected' },
+    'selected',
+    map,
+    null,
+    { structured: true, structureMap: map.structureMap },
+  );
+
+  assert.equal(map.musicalProfile, profile);
+  assert.equal(profile.windowStrategy, 'structure-v1');
+  assert.equal(profile.windowSignature, 'transition-v1:100.000:5,40');
+  assert.equal(harness.persistCalls.length, 1);
+  assert.equal(harness.persistCalls[0][0], 'selected');
+  assert.equal(harness.persistCalls[0][1], map);
+  assert.equal(harness.persistCalls[0][1].musicalProfile, profile);
+});
+
 test('failed refined transition response returns and caches the initial usable plan', async () => {
   const source = read('public/index.html');
   const pairSource = sourceBlock(source, 'async function planCuefieldSongPair', 'function initCuefieldAutoMix');
@@ -352,8 +459,7 @@ test('renderer uses structure signatures and only profiles final pairs after the
   assert.match(profiles, /existing\.windowSignature === sampling\.signature/);
 
   const analysis = source.slice(source.indexOf('async function analyzeAudioBeats'), source.indexOf('function localBeatRound'));
-  assert.match(analysis, /!options\.prefetch/);
-  assert.match(analysis, /skipMusicalProfile/);
+  assert.match(analysis, /shouldScheduleCuefieldMusicalProfile\(musicalKey, options\)/);
 
   const pairPlan = source.slice(source.indexOf('async function planCuefieldSongPair'), source.indexOf('function initCuefieldAutoMix'));
   assert.match(pairPlan, /refineMusical/);
