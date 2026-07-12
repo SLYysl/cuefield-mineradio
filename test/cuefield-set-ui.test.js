@@ -83,6 +83,8 @@ test('pair planning is shared and cached with a bounded TTL', () => {
   const pairPlan = block('async function planCuefieldSongPair', 'function initCuefieldAutoMix');
   assert.match(pairPlan, /cuefieldPairPlanCache\.get/);
   assert.match(pairPlan, /Date\.now\(\) - cached\.createdAt < CUEFIELD_PAIR_PLAN_TTL_MS/);
+  assert.match(pairPlan, /cacheKey = fromKey \+ '->' \+ toKey \+ ':' \+ cacheKind/);
+  assert.match(pairPlan, /cacheKind = ctx\.refineMusical \? 'refined' : 'coarse'/);
   assert.match(pairPlan, /fromLrc:/);
   assert.match(pairPlan, /toLrc:/);
 

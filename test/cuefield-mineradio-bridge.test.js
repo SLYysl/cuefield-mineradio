@@ -257,13 +257,20 @@ test('returns only compact summaries without profiles or raw lyrics', () => {
   assert.deepEqual(Object.keys(result.from).sort(), ['structureMap', 'track']);
   assert.deepEqual(Object.keys(result.to).sort(), ['structureMap', 'track']);
   const structureKeys = [
-    'entryCandidateCount', 'exitCandidateCount', 'protectedUntil',
+    'entryCandidateCount', 'entryCandidates', 'exitCandidateCount', 'exitCandidates', 'protectedUntil',
     'structureConfidence', 'structureSource',
   ];
   assert.deepEqual(Object.keys(result.from.structureMap).sort(), structureKeys.slice().sort());
   assert.deepEqual(Object.keys(result.to.structureMap).sort(), structureKeys.slice().sort());
+  assert.equal(result.from.structureMap.exitCandidates.length <= 8, true);
+  assert.equal(result.to.structureMap.entryCandidates.length <= 6, true);
+  result.from.structureMap.exitCandidates.concat(result.to.structureMap.entryCandidates).forEach((candidate) => {
+    assert.deepEqual(Object.keys(candidate).sort(), [
+      'confidence', 'landingAt', 'landingType', 'playFrom', 'role', 'source', 'time', 'type',
+    ]);
+  });
   const serialized = JSON.stringify(result);
-  ['private lyric', 'cueProfile', 'sections', 'exitCandidates', 'entryCandidates', 'rawLrc', '"text":', '"bars":', '"phrases":']
+  ['private lyric', 'cueProfile', 'sections', 'rawLrc', '"text":', '"bars":', '"phrases":']
     .forEach((sentinel) => assert.equal(serialized.includes(sentinel), false, sentinel));
 });
 

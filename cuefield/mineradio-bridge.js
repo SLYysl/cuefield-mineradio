@@ -117,6 +117,8 @@ function compactStructureMap(structureMap = {}) {
     protectedUntil: finiteOrNull(structureMap.protectedUntil),
     exitCandidateCount: compactCount((structureMap.exitCandidates || []).length),
     entryCandidateCount: compactCount((structureMap.entryCandidates || []).length),
+    exitCandidates: compactTransitionCandidates(structureMap.exitCandidates, 8),
+    entryCandidates: compactTransitionCandidates(structureMap.entryCandidates, 6),
   };
 }
 
@@ -139,6 +141,13 @@ function compactTransitionPoint(point) {
     landingAt: finiteOrNull(point.landingAt),
     landingType: compactString(point.landingType, 32),
   };
+}
+
+function compactTransitionCandidates(candidates, limit) {
+  return (Array.isArray(candidates) ? candidates : [])
+    .slice(0, limit)
+    .map(compactTransitionPoint)
+    .filter(Boolean);
 }
 
 function compactBridgePlan(plan) {
