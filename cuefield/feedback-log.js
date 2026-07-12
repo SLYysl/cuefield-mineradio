@@ -20,6 +20,17 @@ function compactList(value, maxItems = 8) {
     : [];
 }
 
+function presentValue(value) {
+  if (value == null || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'number') return Number.isFinite(value);
+  return true;
+}
+
+function firstPresent(...values) {
+  return values.find(presentValue);
+}
+
 function normalizeHookCount(value) {
   if (value == null) return null;
   const n = Number(value);
@@ -128,16 +139,15 @@ function compactMusical(transition = {}) {
 
 function compactLocalMusical(transition = {}) {
   const local = transition.localMusical || {};
-  const value = (field, fallbackField) => roundNumber(
-    transition[field] != null ? transition[field] : local[fallbackField],
-  );
-  const risks = transition.localMusicalRisks != null
-    ? transition.localMusicalRisks
-    : local.risks;
+  // Prefer canonical nested records, then migrate interim nested keys, then use flat planner fields.
+  const value = (flatField, ...nestedFields) => roundNumber(firstPresent(
+    ...nestedFields.map((field) => local[field]),
+    transition[flatField],
+  ));
+  const evidence = firstPresent(local.evidence, transition.localMusicalEvidence);
+  const risks = firstPresent(local.risks, transition.localMusicalRisks);
   return {
-    evidence: transition.localMusicalEvidence != null
-      ? transition.localMusicalEvidence === true
-      : local.evidence === true,
+    evidence: evidence === true,
     compatibility: value('localMusicalCompatibility', 'compatibility'),
     harmonicSimilarity: value('localHarmonicSimilarity', 'harmonicSimilarity'),
     keyCompatibility: value('localKeyCompatibility', 'keyCompatibility'),
@@ -145,8 +155,8 @@ function compactLocalMusical(transition = {}) {
     confidence: value('localMusicalConfidence', 'confidence'),
     aWindowStart: value('localAWindowStart', 'aWindowStart'),
     bWindowStart: value('localBWindowStart', 'bWindowStart'),
-    aDistance: value('localAWindowDistance', 'aDistance'),
-    bDistance: value('localBWindowDistance', 'bDistance'),
+    aDistance: value('localAWindowDistance', 'aDistance', 'aWindowDistance'),
+    bDistance: value('localBWindowDistance', 'bDistance', 'bWindowDistance'),
     risks: compactList(risks, 3),
   };
 }

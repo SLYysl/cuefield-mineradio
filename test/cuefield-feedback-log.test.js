@@ -125,6 +125,58 @@ test('keeps sanitized local musical diagnostics with rounded window metadata', (
   });
 });
 
+test('normalizes canonical, interim, and flat local musical diagnostic shapes', () => {
+  const canonical = compactLocalMusical({
+    localMusicalEvidence: '',
+    localMusicalRisks: [],
+    localAWindowDistance: '',
+    localBWindowDistance: null,
+    localMusical: {
+      evidence: false,
+      aDistance: 0,
+      bDistance: 0,
+      aWindowDistance: 1.234,
+      bWindowDistance: 2.345,
+      risks: ['nested-risk'],
+    },
+  });
+  assert.deepEqual(canonical, {
+    evidence: false,
+    compatibility: null,
+    harmonicSimilarity: null,
+    keyCompatibility: null,
+    melodySimilarity: null,
+    confidence: null,
+    aWindowStart: null,
+    bWindowStart: null,
+    aDistance: 0,
+    bDistance: 0,
+    risks: ['nested-risk'],
+  });
+
+  const interim = compactLocalMusical({
+    localAWindowDistance: 9.876,
+    localBWindowDistance: 8.765,
+    localMusical: {
+      aWindowDistance: 1.2345,
+      bWindowDistance: 2.3456,
+      risks: ['interim-risk'],
+    },
+  });
+  assert.equal(interim.aDistance, 1.235);
+  assert.equal(interim.bDistance, 2.346);
+  assert.deepEqual(interim.risks, ['interim-risk']);
+
+  const flat = compactLocalMusical({
+    localAWindowDistance: 3.4567,
+    localBWindowDistance: 4.5678,
+    localMusicalRisks: ['flat-risk'],
+  });
+  assert.equal(flat.aDistance, 3.457);
+  assert.equal(flat.bDistance, 4.568);
+  assert.deepEqual(flat.risks, ['flat-risk']);
+});
+
 test('builds a compact Cuefield feedback record without audio urls', () => {
   const record = buildCuefieldFeedbackRecord({
     rating: 1,
