@@ -144,4 +144,45 @@ function compareMusicalProfiles(first = {}, second = {}) {
   };
 }
 
-module.exports = { buildMusicalProfile, compareMusicalProfiles, estimateKey, keyCompatibility };
+function distanceToWindow(time, window) {
+  const start = toNumber(window && window.start, NaN);
+  const duration = toNumber(window && window.duration, NaN);
+  if (!Number.isFinite(time) || !Number.isFinite(start) || !Number.isFinite(duration) || duration < 0) return Infinity;
+  const end = start + duration;
+  if (time < start) return start - time;
+  if (time > end) return time - end;
+  return 0;
+}
+
+function nearestReliableWindow(profile, time) {
+  return (Array.isArray(profile && profile.windows) ? profile.windows : [])
+    .filter((window) => toNumber(window && window.confidence) >= 0.55 && toNumber(window && window.noteCount) >= 12)
+    .map((window) => ({ window, distance: distanceToWindow(time, window) }))
+    .filter((match) => match.distance <= Math.max(2, toNumber(match.window.duration, 0) * 1.5))
+    .sort((a, b) => a.distance - b.distance || toNumber(b.window.confidence) - toNumber(a.window.confidence))[0] || null;
+}
+
+function compareLocalMusicalWindows(first, second, firstTime, secondTime) {
+  const a = nearestReliableWindow(first, firstTime);
+  const b = nearestReliableWindow(second, secondTime);
+  if (!a || !b) return null;
+  const comparison = compareMusicalProfiles(a.window, b.window);
+  return {
+    ...comparison,
+    confidence: round(Math.min(toNumber(a.window.confidence), toNumber(b.window.confidence))),
+    aWindowStart: round(toNumber(a.window.start)),
+    bWindowStart: round(toNumber(b.window.start)),
+    aDistance: round(a.distance),
+    bDistance: round(b.distance),
+  };
+}
+
+module.exports = {
+  buildMusicalProfile,
+  compareMusicalProfiles,
+  compareLocalMusicalWindows,
+  distanceToWindow,
+  estimateKey,
+  keyCompatibility,
+  nearestReliableWindow,
+};

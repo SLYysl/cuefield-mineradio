@@ -1,7 +1,13 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { buildMusicalProfile, compareMusicalProfiles, keyCompatibility } = require('../cuefield/musical-profile');
+const {
+  buildMusicalProfile,
+  compareMusicalProfiles,
+  compareLocalMusicalWindows,
+  keyCompatibility,
+  nearestReliableWindow,
+} = require('../cuefield/musical-profile');
 
 function notes(pitches, offset = 0) {
   return pitches.map((pitch, index) => ({
@@ -44,4 +50,56 @@ test('recognizes a transposed melody contour without requiring identical notes',
 
   assert.equal(compareMusicalProfiles(first, transposed).melodySimilarity > 0.95, true);
   assert.equal(compareMusicalProfiles(first, unrelated).melodySimilarity < 0.5, true);
+});
+
+test('compares reliable musical windows nearest to candidate times', () => {
+  const first = buildMusicalProfile(notes([60, 62, 64, 67, 65, 64]));
+  const second = buildMusicalProfile(notes([60, 62, 64, 67, 65, 64], 12));
+  first.windows = [{ ...first, start: 96, duration: 4, confidence: 0.9, noteCount: 30 }];
+  second.windows = [{ ...second, start: 8, duration: 4, confidence: 0.9, noteCount: 30 }];
+
+  const local = compareLocalMusicalWindows(first, second, 100, 8);
+  assert.equal(local.score > 0.8, true);
+  assert.equal(local.aWindowStart, 96);
+  assert.equal(local.bWindowStart, 8);
+  assert.equal(local.aDistance, 0);
+  assert.equal(local.bDistance, 0);
+  assert.equal('notes' in local, false);
+});
+
+test('returns no local evidence for weak or distant windows', () => {
+  const profile = buildMusicalProfile(notes([60, 62, 64, 67, 65, 64]));
+  profile.windows = [{ ...profile, start: 0, duration: 4, confidence: 0.2, noteCount: 4 }];
+  assert.equal(compareLocalMusicalWindows(profile, profile, 90, 90), null);
+  assert.equal(compareLocalMusicalWindows({}, profile, 0, 0), null);
+});
+
+test('selects the nearest reliable window, then higher confidence', () => {
+  const profile = {
+    windows: [
+      { start: 0, duration: 4, confidence: 0.6, noteCount: 12 },
+      { start: 8, duration: 4, confidence: 0.9, noteCount: 12 },
+      { start: 4, duration: 4, confidence: 0.7, noteCount: 12 },
+    ],
+  };
+
+  assert.equal(nearestReliableWindow(profile, 9).window.start, 8);
+  assert.equal(nearestReliableWindow(profile, 4).window.confidence, 0.7);
+});
+
+test('treats both window edges as inclusive', () => {
+  const profile = {
+    windows: [{ start: 8, duration: 4, confidence: 0.7, noteCount: 12 }],
+  };
+
+  assert.equal(nearestReliableWindow(profile, 8).distance, 0);
+  assert.equal(nearestReliableWindow(profile, 12).distance, 0);
+});
+
+test('returns infinite distance for invalid window inputs', () => {
+  const { distanceToWindow } = require('../cuefield/musical-profile');
+
+  assert.equal(distanceToWindow(1, { start: 0 }), Infinity);
+  assert.equal(distanceToWindow(1, { start: 0, duration: -1 }), Infinity);
+  assert.equal(distanceToWindow(Number.NaN, { start: 0, duration: 4 }), Infinity);
 });
