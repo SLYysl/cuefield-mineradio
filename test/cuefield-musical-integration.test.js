@@ -25,17 +25,22 @@ function createMusicalQueueHarness(options = {}) {
   const decodeJobs = [];
   const audioUrlCalls = [];
   const fetchCalls = [];
+  const fetchOptions = [];
   const analyzeCalls = [];
   const persistCalls = [];
+  const closeCalls = [];
   const context = {
     beatMapCache: {},
     console: { log() {}, warn() {} },
-    fetchBeatPrefetchAudioUrl: async (song) => {
+    fetchBeatPrefetchAudioUrl: async (song, quality) => {
       audioUrlCalls.push(song.key);
+      assert.equal(quality, 'standard');
       return `/audio/${song.key}`;
     },
-    fetch: async (url) => {
+    fetch: async (url, requestOptions) => {
       fetchCalls.push(url);
+      fetchOptions.push(requestOptions);
+      if (options.fetch) return options.fetch(url, requestOptions, fetchCalls.length);
       return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
     },
     writeBeatDiskCache: async (...args) => {
@@ -47,9 +52,10 @@ function createMusicalQueueHarness(options = {}) {
     decodeAudioData(bytes, resolve, reject) {
       const job = { resolve: () => resolve({ duration: 100 }), reject };
       decodeJobs.push(job);
+      if (options.decode) return options.decode(job, decodeJobs.length);
       if (!options.holdDecode) job.resolve();
     }
-    close() {}
+    close() { closeCalls.push(true); }
   }
   context.window = {
     AudioContext: AudioContextStub,
@@ -68,9 +74,18 @@ function createMusicalQueueHarness(options = {}) {
       },
     },
   };
+  context.AbortController = AbortController;
+  context.setTimeout = setTimeout;
+  context.clearTimeout = clearTimeout;
   vm.createContext(context);
-  vm.runInContext(`var CUEFIELD_MUSICAL_QUEUE_LIMIT = 4;\n${queueSource}`, context);
-  return { context, decodeJobs, audioUrlCalls, fetchCalls, analyzeCalls, persistCalls };
+  vm.runInContext(`
+    var CUEFIELD_MUSICAL_QUEUE_LIMIT = 4;
+    var CUEFIELD_MUSICAL_FETCH_TIMEOUT_MS = ${options.fetchTimeoutMs || 20};
+    var CUEFIELD_MUSICAL_DECODE_TIMEOUT_MS = ${options.decodeTimeoutMs || 20};
+    var CUEFIELD_MUSICAL_MAX_AUDIO_BYTES = 32 * 1024 * 1024;
+    ${queueSource}
+  `, context);
+  return { context, decodeJobs, audioUrlCalls, fetchCalls, fetchOptions, analyzeCalls, persistCalls, closeCalls };
 }
 
 function createEnsureBeatMapHarness(options = {}) {
@@ -107,7 +122,7 @@ function createEnsureBeatMapHarness(options = {}) {
   return { context, song, scheduleCalls, diskReads, diskWrites };
 }
 
-function createPairFlowHarness(responses) {
+function createPairFlowHarness(responses, options = {}) {
   const source = read('public/index.html');
   const pairSource = sourceBlock(source, 'async function planCuefieldSongPair', 'function initCuefieldAutoMix');
   const initSource = sourceBlock(source, 'function initCuefieldAutoMix', 'function cuefieldFeedbackSongMeta');
@@ -135,10 +150,14 @@ function createPairFlowHarness(responses) {
       apiCalls.push({ url, options });
       return responses.shift();
     },
-    scheduleCuefieldMusicalProfile: async (song, key, map, decodedBuffer, options) => {
-      structuredJobs.push({ song, key, map, decodedBuffer, options });
+    scheduleCuefieldMusicalProfile: async (song, key, map, decodedBuffer, profileOptions) => {
+      structuredJobs.push({ song, key, map, decodedBuffer, options: profileOptions });
+      if (options.schedule) return options.schedule(song, key, map, decodedBuffer, profileOptions);
       return { noteCount: 4 };
     },
+    CUEFIELD_MUSICAL_REFINEMENT_TIMEOUT_MS: options.refinementTimeoutMs || 35000,
+    setTimeout,
+    clearTimeout,
     currentIdx: 0,
     currentBeatMap: null,
     playQueue: [songs.from, songs.to],
@@ -261,6 +280,117 @@ test('structured final-pair jobs run before pending generic jobs', async () => {
   assert.deepEqual(harness.audioUrlCalls.slice(0, 2), ['a', 'final']);
 });
 
+test('structured request prevents a stale active generic profile from overwriting the same song', async () => {
+  let releaseGeneric;
+  const genericAnalysis = new Promise((resolve) => { releaseGeneric = resolve; });
+  const harness = createMusicalQueueHarness({
+    analyze: async (sampled, callCount) => callCount === 1
+      ? genericAnalysis
+      : { ok: true, profile: { noteCount: 4, marker: 'structured' } },
+  });
+  const { context } = harness;
+  const map = queueMap([5, 40]);
+  const generic = context.scheduleCuefieldMusicalProfile({ key: 'same' }, 'same', map);
+
+  await flushTasks();
+  const structured = context.scheduleCuefieldMusicalProfile({ key: 'same' }, 'same', map, null, {
+    structured: true,
+    structureMap: { starts: [5, 40] },
+  });
+  releaseGeneric({ ok: true, profile: { noteCount: 4, marker: 'generic' } });
+
+  assert.equal(await generic, null);
+  const profile = await structured;
+  assert.equal(profile.marker, 'structured');
+  assert.equal(map.musicalProfile.windowStrategy, 'structure-v1');
+  assert.equal(map.musicalProfile.windowSignature, 'transition-v1:100.000:5,40');
+  assert.equal(harness.persistCalls.length, 1);
+  assert.equal(harness.persistCalls[0][1].musicalProfile.marker, 'structured');
+});
+
+test('structured request removes a queued generic task for the same song', async () => {
+  const harness = createMusicalQueueHarness({ holdDecode: true });
+  const { context } = harness;
+  const blocker = context.scheduleCuefieldMusicalProfile({ key: 'blocker' }, 'blocker', queueMap());
+  const generic = context.scheduleCuefieldMusicalProfile({ key: 'same' }, 'same', queueMap());
+  const structured = context.scheduleCuefieldMusicalProfile({ key: 'same' }, 'same', queueMap([5, 40]), null, {
+    structured: true,
+    structureMap: { starts: [5, 40] },
+  });
+
+  assert.equal(await generic, null);
+  assert.equal(context.cuefieldMusicalAnalysisQueue.length, 1);
+  assert.equal(context.cuefieldMusicalAnalysisQueue[0].structured, true);
+  await flushTasks();
+  harness.decodeJobs[0].resolve();
+  await blocker;
+  await flushTasks();
+  harness.decodeJobs[1].resolve();
+  assert.equal((await structured).windowStrategy, 'structure-v1');
+});
+
+test('musical fetch aborts on timeout and rejects oversized responses before decode', async () => {
+  let timeoutSignal;
+  const timedOut = createMusicalQueueHarness({
+    fetchTimeoutMs: 5,
+    fetch: async (url, requestOptions) => {
+      timeoutSignal = requestOptions.signal;
+      return new Promise(() => {});
+    },
+  });
+
+  assert.equal(await timedOut.context.scheduleCuefieldMusicalProfile({ key: 'timeout' }, 'timeout', queueMap()), null);
+  assert.equal(timeoutSignal.aborted, true);
+  assert.equal(timedOut.decodeJobs.length, 0);
+
+  let bodyRead = false;
+  const oversized = createMusicalQueueHarness({
+    fetch: async () => ({
+      ok: true,
+      headers: { get: () => String(32 * 1024 * 1024 + 1) },
+      arrayBuffer: async () => {
+        bodyRead = true;
+        return new ArrayBuffer(1);
+      },
+    }),
+  });
+
+  assert.equal(await oversized.context.scheduleCuefieldMusicalProfile({ key: 'large' }, 'large', queueMap()), null);
+  assert.equal(bodyRead, false);
+  assert.equal(oversized.decodeJobs.length, 0);
+});
+
+test('musical fetch rejects a body that exceeds the byte cap without a content length', async () => {
+  const harness = createMusicalQueueHarness({
+    fetch: async () => ({
+      ok: true,
+      headers: { get: () => null },
+      arrayBuffer: async () => ({ byteLength: 32 * 1024 * 1024 + 1 }),
+    }),
+  });
+
+  assert.equal(await harness.context.scheduleCuefieldMusicalProfile({ key: 'large-body' }, 'large-body', queueMap()), null);
+  assert.equal(harness.decodeJobs.length, 0);
+});
+
+test('decode timeout closes its context and pumps the next musical job', async () => {
+  const harness = createMusicalQueueHarness({
+    decodeTimeoutMs: 5,
+    decode: (job, callCount) => {
+      if (callCount > 1) job.resolve();
+    },
+  });
+  const failed = harness.context.scheduleCuefieldMusicalProfile({ key: 'stalled' }, 'stalled', queueMap());
+  const recovered = harness.context.scheduleCuefieldMusicalProfile({ key: 'next' }, 'next', queueMap());
+
+  assert.equal(await failed, null);
+  assert.equal((await recovered).noteCount, 4);
+  assert.equal(harness.closeCalls.length, 2);
+  assert.equal(harness.context.cuefieldMusicalAnalysisActive, false);
+  assert.deepEqual(Object.keys(harness.context.cuefieldMusicalAnalysisTasks), []);
+  assert.deepEqual(Object.keys(harness.context.cuefieldMusicalDesiredTasks), []);
+});
+
 test('rejected musical analysis clears active state and task registry before draining the next job', async () => {
   const harness = createMusicalQueueHarness({
     analyze: async (sampled, callCount) => {
@@ -277,6 +407,7 @@ test('rejected musical analysis clears active state and task registry before dra
   assert.equal(context.cuefieldMusicalAnalysisActive, false);
   assert.equal(context.cuefieldMusicalAnalysisQueue.length, 0);
   assert.deepEqual(Object.keys(context.cuefieldMusicalAnalysisTasks), []);
+  assert.deepEqual(Object.keys(context.cuefieldMusicalDesiredTasks), []);
 });
 
 test('matching musical window signature resolves without fetch, decode, or analysis', async () => {
@@ -382,6 +513,7 @@ test('failed refined transition response returns and caches the initial usable p
   const responses = [initialPlan, { ok: false, error: 'x' }];
   const context = {
     CUEFIELD_PAIR_PLAN_TTL_MS: 300000,
+    CUEFIELD_MUSICAL_REFINEMENT_TIMEOUT_MS: 35000,
     cuefieldPairPlanCache: new Map([['a->b:coarse', { createdAt: Date.now(), plan: coarsePlan }]]),
     beatMapCache: { a: queueMap(), b: queueMap() },
     beatMapSongKey: (song) => song.key,
@@ -394,6 +526,8 @@ test('failed refined transition response returns and caches the initial usable p
       },
     },
     console: { warn() {} },
+    setTimeout,
+    clearTimeout,
   };
   vm.createContext(context);
   vm.runInContext(pairSource, context);
@@ -429,6 +563,28 @@ test('thrown refined transition request returns and caches the initial usable pl
   assert.equal(harness.apiCalls.length, 2);
   assert.equal(
     harness.context.cuefieldPairPlanCache.get('selected-from->selected-to:refined').plan,
+    initialPlan,
+  );
+});
+
+test('refinement timeout returns the initial plan without populating refined cache', async () => {
+  const initialPlan = pairPlanFixture('initial-before-refine-timeout');
+  const harness = createPairFlowHarness([initialPlan], {
+    refinementTimeoutMs: 5,
+    schedule: async () => new Promise(() => {}),
+  });
+
+  const result = await harness.context.planCuefieldSongPair(
+    harness.songs.from,
+    harness.songs.to,
+    { refineMusical: true },
+  );
+
+  assert.equal(result, initialPlan);
+  assert.equal(harness.apiCalls.length, 1);
+  assert.equal(harness.context.cuefieldPairPlanCache.has('selected-from->selected-to:refined'), false);
+  assert.equal(
+    harness.context.cuefieldPairPlanCache.get('selected-from->selected-to:coarse').plan,
     initialPlan,
   );
 });

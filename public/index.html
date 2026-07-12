@@ -2817,6 +2817,10 @@ var CUEFIELD_SET_MODE_STORE_KEY = 'mineradio-cuefield-set-mode-v1';
 var CUEFIELD_PAIR_PLAN_TTL_MS = 5 * 60 * 1000;
 var CUEFIELD_SMART_PLAN_BUDGET_MS = 12 * 1000;
 var CUEFIELD_MUSICAL_QUEUE_LIMIT = 4;
+var CUEFIELD_MUSICAL_FETCH_TIMEOUT_MS = 15 * 1000;
+var CUEFIELD_MUSICAL_DECODE_TIMEOUT_MS = 15 * 1000;
+var CUEFIELD_MUSICAL_REFINEMENT_TIMEOUT_MS = 35 * 1000;
+var CUEFIELD_MUSICAL_MAX_AUDIO_BYTES = 32 * 1024 * 1024;
 var LOCAL_BEAT_COMBOS = ['', 'downbeat', 'push', 'drop', 'rebound', 'accent'];
 var HOTKEY_ACTIONS = [
   { key:'togglePlay', label:'播放 / 暂停', category:'播放', local:'Space', global:'Ctrl+Alt+Space' },
@@ -10404,10 +10408,10 @@ function normalizeBeatPrefetchState(state) {
   };
 }
 
-async function fetchBeatPrefetchAudioUrl(song) {
+async function fetchBeatPrefetchAudioUrl(song, qualityOverride) {
   if (!song) return null;
   var isQQ = songProviderKey(song) === 'qq';
-  var requestedQuality = normalizePlaybackQuality(playbackQuality);
+  var requestedQuality = normalizePlaybackQuality(qualityOverride || playbackQuality);
   if (!isQQ && requestedQuality === 'jymaster' && !hasProviderSvip('netease', loginStatus)) requestedQuality = 'hires';
   if (isQQ && qqPlaybackQualityCeiling && (requestedQuality === 'jymaster' || requestedQuality === 'hires' || requestedQuality === 'lossless')) requestedQuality = qqPlaybackQualityCeiling;
   var qualityParam = '&quality=' + encodeURIComponent(requestedQuality);
@@ -10516,34 +10520,51 @@ async function planCuefieldSongPair(fromSong, toSong, ctx) {
     })
   }); };
   var plan = await postCuefieldTransition();
+  var refinementTimedOut = false;
   if (ctx.refineMusical) {
     var maps = applyCuefieldPlanStructure(plan, fromKey, toKey);
     if (maps.from && maps.to && hasCuefieldStructureCandidates(plan && plan.from && plan.from.structureMap)
         && hasCuefieldStructureCandidates(plan && plan.to && plan.to.structureMap)) {
+      var refinementState = { active: true };
+      var refinementTimer = null;
       try {
-        var profiles = await Promise.all([
-          scheduleCuefieldMusicalProfile(fromSong, fromKey, maps.from, null, {
-            structured: true,
-            structureMap: plan.from.structureMap,
+        var refinementResult = await Promise.race([
+          Promise.all([
+            scheduleCuefieldMusicalProfile(fromSong, fromKey, maps.from, null, {
+              structured: true,
+              structureMap: plan.from.structureMap,
+            }),
+            scheduleCuefieldMusicalProfile(toSong, toKey, maps.to, null, {
+              structured: true,
+              structureMap: plan.to.structureMap,
+            }),
+          ]).then(async function(profiles) {
+            if (!refinementState.active || !profiles[0] || !profiles[1]) return null;
+            var refinedPlan = await postCuefieldTransition();
+            return refinementState.active ? refinedPlan : null;
           }),
-          scheduleCuefieldMusicalProfile(toSong, toKey, maps.to, null, {
-            structured: true,
-            structureMap: plan.to.structureMap,
+          new Promise(function(resolve) {
+            refinementTimer = setTimeout(function() {
+              refinementTimedOut = true;
+              refinementState.active = false;
+              resolve(null);
+            }, CUEFIELD_MUSICAL_REFINEMENT_TIMEOUT_MS);
           }),
         ]);
-        if (profiles[0] && profiles[1]) {
-          var refinedPlan = await postCuefieldTransition();
-          if (refinedPlan && refinedPlan.ok !== false) {
-            plan = refinedPlan;
-            applyCuefieldPlanStructure(plan, fromKey, toKey);
-          }
+        if (refinementResult && refinementResult.ok !== false) {
+          plan = refinementResult;
+          applyCuefieldPlanStructure(plan, fromKey, toKey);
         }
       } catch (error) {
         console.warn('Cuefield musical refinement skipped:', error && error.message ? error.message : error);
+      } finally {
+        refinementState.active = false;
+        if (refinementTimer) clearTimeout(refinementTimer);
       }
     }
   }
-  cuefieldPairPlanCache.set(cacheKey, { createdAt: Date.now(), plan: plan });
+  var storedCacheKey = refinementTimedOut ? fromKey + '->' + toKey + ':coarse' : cacheKey;
+  cuefieldPairPlanCache.set(storedCacheKey, { createdAt: Date.now(), plan: plan });
   if (cuefieldPairPlanCache.size > 96) cuefieldPairPlanCache.delete(cuefieldPairPlanCache.keys().next().value);
   return plan;
 }
@@ -10890,23 +10911,67 @@ async function ensureCuefieldAutoMixBeatMap(song, key, ctx) {
 }
 
 var cuefieldMusicalAnalysisTasks = {};
+var cuefieldMusicalDesiredTasks = {};
 var cuefieldMusicalAnalysisQueue = [];
 var cuefieldMusicalAnalysisActive = false;
 
 async function decodeCuefieldMusicalAudio(audioUrl) {
   if (!audioUrl) return null;
-  var resp = await fetch(audioUrl);
-  if (!resp.ok) return null;
-  var bytes = await resp.arrayBuffer();
+  var controller = typeof AbortController === 'function' ? new AbortController() : null;
+  var fetchTimer = null;
+  var timeoutPromise = new Promise(function(resolve, reject) {
+    fetchTimer = setTimeout(function() {
+      if (controller) controller.abort();
+      reject(new Error('CUEFIELD_MUSICAL_FETCH_TIMEOUT'));
+    }, CUEFIELD_MUSICAL_FETCH_TIMEOUT_MS);
+  });
+  var bytes;
+  try {
+    var resp = await Promise.race([
+      fetch(audioUrl, controller ? { signal: controller.signal } : undefined),
+      timeoutPromise,
+    ]);
+    if (!resp || !resp.ok) throw new Error('CUEFIELD_MUSICAL_FETCH_FAILED');
+    var contentLength = Number(resp.headers && resp.headers.get && resp.headers.get('content-length'));
+    if (isFinite(contentLength) && contentLength > CUEFIELD_MUSICAL_MAX_AUDIO_BYTES) {
+      throw new Error('CUEFIELD_MUSICAL_AUDIO_TOO_LARGE');
+    }
+    bytes = await Promise.race([resp.arrayBuffer(), timeoutPromise]);
+    if (!bytes || bytes.byteLength > CUEFIELD_MUSICAL_MAX_AUDIO_BYTES) {
+      throw new Error('CUEFIELD_MUSICAL_AUDIO_TOO_LARGE');
+    }
+  } finally {
+    if (fetchTimer) clearTimeout(fetchTimer);
+  }
   var DecodeCtx = window.AudioContext || window.webkitAudioContext;
   if (!DecodeCtx) return null;
   var context = new DecodeCtx();
   try {
     return await new Promise(function(resolve, reject){
-      context.decodeAudioData(bytes.slice(0), resolve, reject);
+      var settled = false;
+      var decodeTimer = setTimeout(function() {
+        if (settled) return;
+        settled = true;
+        reject(new Error('CUEFIELD_MUSICAL_DECODE_TIMEOUT'));
+      }, CUEFIELD_MUSICAL_DECODE_TIMEOUT_MS);
+      var finish = function(callback) {
+        return function(value) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(decodeTimer);
+          callback(value);
+        };
+      };
+      try {
+        context.decodeAudioData(bytes.slice(0), finish(resolve), finish(reject));
+      } catch (error) {
+        finish(reject)(error);
+      }
     });
   } finally {
-    context.close && context.close();
+    if (context.close) {
+      try { await context.close(); } catch (e) {}
+    }
   }
 }
 
@@ -10935,7 +11000,10 @@ function cuefieldMusicalSamplingPlan(map, structureMap) {
 }
 
 function settleCuefieldMusicalTask(task, profile) {
-  delete cuefieldMusicalAnalysisTasks[task.taskKey];
+  if (cuefieldMusicalAnalysisTasks[task.taskKey] === task) delete cuefieldMusicalAnalysisTasks[task.taskKey];
+  if (cuefieldMusicalDesiredTasks[task.key] === task) delete cuefieldMusicalDesiredTasks[task.key];
+  if (task.settled) return;
+  task.settled = true;
   task.resolve(profile || null);
 }
 
@@ -10943,7 +11011,7 @@ async function runCuefieldMusicalAnalysisTask(task) {
   try {
     var buffer = task.decodedBuffer;
     if (!buffer) {
-      var audioUrl = await fetchBeatPrefetchAudioUrl(task.song);
+      var audioUrl = await fetchBeatPrefetchAudioUrl(task.song, 'standard');
       buffer = await decodeCuefieldMusicalAudio(audioUrl);
     }
     var profile = await analyzeCuefieldMusicalBuffer(buffer, task.map, task.sampling.structureMap, task.sampling.windowStarts);
@@ -10954,8 +11022,11 @@ async function runCuefieldMusicalAnalysisTask(task) {
         : { type: 'transition-windows', starts: task.sampling.windowStarts },
       windowSignature: task.sampling.signature,
     });
+    if (cuefieldMusicalDesiredTasks[task.key] !== task) return settleCuefieldMusicalTask(task, null);
     task.map.musicalProfile = profile;
+    if (cuefieldMusicalDesiredTasks[task.key] !== task) return settleCuefieldMusicalTask(task, null);
     beatMapCache[task.key] = task.map;
+    if (cuefieldMusicalDesiredTasks[task.key] !== task) return settleCuefieldMusicalTask(task, null);
     await writeBeatDiskCache(task.key, task.map, task.song, 'mr');
     console.log('Cuefield musical profile ready:', task.song && task.song.name || task.key, profile.key && profile.key.name || 'unknown');
     settleCuefieldMusicalTask(task, profile);
@@ -10979,16 +11050,32 @@ function drainCuefieldMusicalAnalysisQueue() {
 function enqueueCuefieldMusicalAnalysis(task) {
   var existing = cuefieldMusicalAnalysisTasks[task.taskKey];
   if (existing) {
-    if (task.structured && !existing.structured && !existing.active) {
-      existing.structured = true;
-      var index = cuefieldMusicalAnalysisQueue.indexOf(existing);
-      if (index >= 0) cuefieldMusicalAnalysisQueue.splice(index, 1);
-      cuefieldMusicalAnalysisQueue.unshift(existing);
+    if (!task.structured || existing.structured) return existing.promise;
+    if (existing.active) {
+      delete cuefieldMusicalAnalysisTasks[task.taskKey];
+    } else {
+      var existingIndex = cuefieldMusicalAnalysisQueue.indexOf(existing);
+      if (existingIndex >= 0) cuefieldMusicalAnalysisQueue.splice(existingIndex, 1);
+      settleCuefieldMusicalTask(existing, null);
     }
-    return existing.promise;
   }
+  var desired = cuefieldMusicalDesiredTasks[task.key];
+  if (!task.structured && desired && desired.structured) return desired.promise;
   task.promise = new Promise(function(resolve) { task.resolve = resolve; });
   cuefieldMusicalAnalysisTasks[task.taskKey] = task;
+  if (task.structured) {
+    for (var queuedIndex = cuefieldMusicalAnalysisQueue.length - 1; queuedIndex >= 0; queuedIndex--) {
+      var queuedTask = cuefieldMusicalAnalysisQueue[queuedIndex];
+      if (queuedTask.key === task.key) {
+        cuefieldMusicalAnalysisQueue.splice(queuedIndex, 1);
+        settleCuefieldMusicalTask(queuedTask, null);
+      }
+    }
+  } else if (desired && !desired.active) {
+    var desiredIndex = cuefieldMusicalAnalysisQueue.indexOf(desired);
+    if (desiredIndex >= 0) cuefieldMusicalAnalysisQueue.splice(desiredIndex, 1);
+    settleCuefieldMusicalTask(desired, null);
+  }
   if (cuefieldMusicalAnalysisQueue.length >= CUEFIELD_MUSICAL_QUEUE_LIMIT) {
     var genericIndex = cuefieldMusicalAnalysisQueue.findIndex(function(queued) { return !queued.structured; });
     if (task.structured && genericIndex >= 0) {
@@ -10998,6 +11085,7 @@ function enqueueCuefieldMusicalAnalysis(task) {
       return task.promise;
     }
   }
+  cuefieldMusicalDesiredTasks[task.key] = task;
   if (task.structured) cuefieldMusicalAnalysisQueue.unshift(task);
   else cuefieldMusicalAnalysisQueue.push(task);
   drainCuefieldMusicalAnalysisQueue();
