@@ -126,6 +126,31 @@ function compactMusical(transition = {}) {
   };
 }
 
+function compactLocalMusical(transition = {}) {
+  const local = transition.localMusical || {};
+  const value = (field, fallbackField) => roundNumber(
+    transition[field] != null ? transition[field] : local[fallbackField],
+  );
+  const risks = transition.localMusicalRisks != null
+    ? transition.localMusicalRisks
+    : local.risks;
+  return {
+    evidence: transition.localMusicalEvidence != null
+      ? transition.localMusicalEvidence === true
+      : local.evidence === true,
+    compatibility: value('localMusicalCompatibility', 'compatibility'),
+    harmonicSimilarity: value('localHarmonicSimilarity', 'harmonicSimilarity'),
+    keyCompatibility: value('localKeyCompatibility', 'keyCompatibility'),
+    melodySimilarity: value('localMelodySimilarity', 'melodySimilarity'),
+    confidence: value('localMusicalConfidence', 'confidence'),
+    aWindowStart: value('localAWindowStart', 'aWindowStart'),
+    bWindowStart: value('localBWindowStart', 'bWindowStart'),
+    aWindowDistance: value('localAWindowDistance', 'aWindowDistance'),
+    bWindowDistance: value('localBWindowDistance', 'bWindowDistance'),
+    risks: compactList(risks, 3),
+  };
+}
+
 function compactStructure(transition = {}) {
   return {
     source: compactString(transition.structureSource || transition.source, 24),
@@ -163,6 +188,7 @@ function compactTransition(transition = {}) {
     setMode: ['sequential', 'smart'].includes(transition.setMode) ? transition.setMode : '',
     minimumListenUntil: roundNumber(transition.minimumListenUntil),
     musical: compactMusical(transition),
+    localMusical: compactLocalMusical(transition),
     bridge: compactBridge(transition),
     route: compactString(transition.route, 40),
     compatibilityClass: compactString(transition.compatibilityClass, 40),
@@ -284,6 +310,7 @@ module.exports = {
   appendCuefieldFeedback,
   buildCuefieldFeedbackRecord,
   compactPair,
+  compactLocalMusical,
   compactString,
   readCuefieldFeedbackStats,
   compactTransition,

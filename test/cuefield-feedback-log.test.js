@@ -7,6 +7,7 @@ const test = require('node:test');
 const {
   appendCuefieldFeedback,
   buildCuefieldFeedbackRecord,
+  compactLocalMusical,
   readCuefieldFeedbackStats,
 } = require('../cuefield/feedback-log');
 
@@ -32,6 +33,62 @@ test('keeps compact musical evidence and listening-floor diagnostics', () => {
     keyCompatibility: 0.78,
     melodySimilarity: 0.66,
     risks: ['harmonic-clash'],
+  });
+});
+
+test('keeps sanitized local musical diagnostics with rounded window metadata', () => {
+  const record = buildCuefieldFeedbackRecord({
+    rating: 1,
+    transition: {
+      localMusicalEvidence: true,
+      localMusicalCompatibility: 0.81234,
+      localHarmonicSimilarity: 0.90123,
+      localKeyCompatibility: 0.78456,
+      localMelodySimilarity: 0.66789,
+      localMusicalConfidence: 0.87654,
+      localAWindowStart: 12.34567,
+      localBWindowStart: 23.45678,
+      localAWindowDistance: 0.00456,
+      localBWindowDistance: 1.23456,
+      localMusicalRisks: ['harmonic-clash', 'melody-contour-contrast', 'late', 'privacy sentinel'],
+      pitchClassProfile: [1, 2, 3],
+      intervalProfile: [4, 5],
+      melodyContour: [60, 62],
+      notes: [{ pitch: 60 }],
+      audioUrl: 'https://example.com/private.mp3',
+      lyrics: 'private lyric sentinel',
+    },
+  });
+
+  assert.deepEqual(record.transition.localMusical, {
+    evidence: true,
+    compatibility: 0.812,
+    harmonicSimilarity: 0.901,
+    keyCompatibility: 0.785,
+    melodySimilarity: 0.668,
+    confidence: 0.877,
+    aWindowStart: 12.346,
+    bWindowStart: 23.457,
+    aWindowDistance: 0.005,
+    bWindowDistance: 1.235,
+    risks: ['harmonic-clash', 'melody-contour-contrast', 'late'],
+  });
+  assert.deepEqual(compactLocalMusical({}), {
+    evidence: false,
+    compatibility: null,
+    harmonicSimilarity: null,
+    keyCompatibility: null,
+    melodySimilarity: null,
+    confidence: null,
+    aWindowStart: null,
+    bWindowStart: null,
+    aWindowDistance: null,
+    bWindowDistance: null,
+    risks: [],
+  });
+  const serialized = JSON.stringify(record);
+  ['pitchClassProfile', 'intervalProfile', 'melodyContour', 'notes', 'audioUrl', 'private.mp3', 'lyrics', 'private lyric sentinel'].forEach((sentinel) => {
+    assert.equal(serialized.includes(sentinel), false, sentinel);
   });
 });
 
@@ -340,6 +397,49 @@ test('keeps older feedback records readable without adaptive diagnostics', () =>
     grooveContinuity: null,
     tempoCompatibility: null,
     rejectionReasons: [],
+  });
+  assert.deepEqual(record.transition.localMusical, {
+    evidence: false,
+    compatibility: null,
+    harmonicSimilarity: null,
+    keyCompatibility: null,
+    melodySimilarity: null,
+    confidence: null,
+    aWindowStart: null,
+    bWindowStart: null,
+    aWindowDistance: null,
+    bWindowDistance: null,
+    risks: [],
+  });
+});
+
+test('reads legacy feedback JSONL stats without local musical diagnostics', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuefield-feedback-'));
+  const file = path.join(dir, 'feedback.jsonl');
+  fs.writeFileSync(file, JSON.stringify({
+    createdAt: '2026-07-08T03:00:00.000Z',
+    rating: 2,
+    pair: { fromKey: 'legacy:a', toKey: 'legacy:b' },
+    transition: { transitionRecipe: 'legacy-blend', risks: ['old risk'] },
+  }) + '\n');
+
+  const stats = readCuefieldFeedbackStats(file);
+
+  assert.equal(stats.total, 1);
+  assert.equal(stats.byRecipe[0].key, 'legacy-blend');
+  assert.equal(stats.failedSamples[0].transition.transitionRecipe, 'legacy-blend');
+  assert.deepEqual(stats.failedSamples[0].transition.localMusical, {
+    evidence: false,
+    compatibility: null,
+    harmonicSimilarity: null,
+    keyCompatibility: null,
+    melodySimilarity: null,
+    confidence: null,
+    aWindowStart: null,
+    bWindowStart: null,
+    aWindowDistance: null,
+    bWindowDistance: null,
+    risks: [],
   });
 });
 

@@ -70,7 +70,9 @@ test('exposes compact compatibility only when both musical profiles are reliable
   assert.equal(result.diagnostics.musicalEvidence, true);
   assert.equal(result.diagnostics.musicalCompatibility, 1);
   assert.equal(result.diagnostics.harmonicSimilarity, 1);
-  assert.equal(JSON.stringify(result).includes('pitchClassProfile'), false);
+  ['pitchClassProfile', 'intervalProfile', 'melodyContour', 'notes', 'audioUrl', 'lyrics'].forEach((sentinel) => {
+    assert.equal(JSON.stringify(result).includes(sentinel), false, sentinel);
+  });
 
   cache.b.map.musicalProfile = { ...reliableProfile(0), confidence: 0.2 };
   const neutral = planCuefieldTransitionFromCache({
@@ -80,6 +82,52 @@ test('exposes compact compatibility only when both musical profiles are reliable
   });
   assert.equal(neutral.diagnostics.musicalEvidence, false);
   assert.equal(neutral.diagnostics.musicalCompatibility, null);
+});
+
+test('maps selected local musical evidence into scalar bridge diagnostics', () => {
+  const profile = (windowStart) => ({
+    source: 'basic-pitch',
+    confidence: 0.9,
+    noteCount: 48,
+    pitchClassProfile: Array.from({ length: 12 }, (_, index) => index === 0 ? 1 : 0),
+    intervalProfile: Array.from({ length: 25 }, (_, index) => index === 14 ? 1 : 0),
+    key: { root: 0, mode: 'major' },
+    windows: [{
+      start: windowStart,
+      duration: 200,
+      confidence: 0.87654,
+      noteCount: 24,
+      pitchClassProfile: Array.from({ length: 12 }, (_, index) => index === 0 ? 1 : 0),
+      intervalProfile: Array.from({ length: 25 }, (_, index) => index === 14 ? 1 : 0),
+      key: { root: 0, mode: 'major' },
+    }],
+  });
+  const cache = {
+    a: { key: 'a', map: { ...makeCompressedMap(128), musicalProfile: profile(10) } },
+    b: { key: 'b', map: { ...makeCompressedMap(96), musicalProfile: profile(20) } },
+  };
+
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'a',
+    toKey: 'b',
+    fromLrc: '[00:18.00]we own the night\n[00:34.00]nothing feels the same\n[01:06.00]we own the night\n[01:22.00]nothing feels the same',
+    toLrc: '[00:18.00]take me higher\n[00:34.00]feel it rising\n[01:06.00]take me higher\n[01:22.00]feel it rising',
+    readBeatMapCache: (key) => cache[key],
+  });
+  const local = result.chosen.localMusicalEvidence;
+
+  assert.equal(local && local.score > 0, true);
+  assert.equal(result.diagnostics.localMusicalEvidence, true);
+  assert.equal(result.diagnostics.localMusicalCompatibility, local.score);
+  assert.equal(result.diagnostics.localHarmonicSimilarity, local.harmonicSimilarity);
+  assert.equal(result.diagnostics.localKeyCompatibility, local.keyCompatibility);
+  assert.equal(result.diagnostics.localMelodySimilarity, local.melodySimilarity);
+  assert.equal(result.diagnostics.localMusicalConfidence, local.confidence);
+  assert.equal(result.diagnostics.localAWindowStart, local.aWindowStart);
+  assert.equal(result.diagnostics.localBWindowStart, local.bWindowStart);
+  assert.equal(result.diagnostics.localAWindowDistance, local.aDistance);
+  assert.equal(result.diagnostics.localBWindowDistance, local.bDistance);
+  assert.deepEqual(result.diagnostics.localMusicalRisks, local.risks.slice(0, 3));
 });
 
 test('plans a Cuefield transition directly from Mineradio beatmap cache keys', () => {
@@ -276,6 +324,13 @@ test('normalizes empty bridge diagnostic metadata to finite values or null', () 
   });
   assert.equal(diagnostics.exitConfidence, null);
   assert.equal(diagnostics.hookConfidence, null);
+  assert.equal(diagnostics.localMusicalEvidence, false);
+  [
+    'localMusicalCompatibility', 'localHarmonicSimilarity', 'localKeyCompatibility',
+    'localMelodySimilarity', 'localMusicalConfidence', 'localAWindowStart',
+    'localBWindowStart', 'localAWindowDistance', 'localBWindowDistance',
+  ].forEach((key) => assert.equal(diagnostics[key], null, key));
+  assert.deepEqual(diagnostics.localMusicalRisks, []);
   assert.equal(diagnostics.entrySource, 'fallback');
   assert.deepEqual(diagnostics.windowRejectionReasons, ['no valid complete transition window']);
   assert.equal(result.ok, false);

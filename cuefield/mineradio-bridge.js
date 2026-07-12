@@ -174,6 +174,7 @@ function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
   const recipeDiagnostics = windowPlan.diagnostics || {};
   const policy = chosen.policy || windowPlan.policy || {};
   const entry = chosen.entry || {};
+  const localMusical = chosen.localMusicalEvidence || null;
   const rawLandingType = String(entry.landingType || entry.type || 'start').toLowerCase();
   const landingType = toStructure.structureSource !== 'lyric+beat' && rawLandingType === 'hook'
     ? (entry.source === 'fallback' ? 'start' : 'drop')
@@ -207,6 +208,19 @@ function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
     energyContinuity: finiteOrNull(chosen.energyContinuity),
     grooveContinuity: finiteOrNull(chosen.grooveContinuity),
     tempoCompatibility: finiteOrNull(chosen.tempoCompatibility),
+    localMusicalEvidence: !!localMusical,
+    localMusicalCompatibility: finiteOrNull(localMusical && localMusical.score),
+    localHarmonicSimilarity: finiteOrNull(localMusical && localMusical.harmonicSimilarity),
+    localKeyCompatibility: finiteOrNull(localMusical && localMusical.keyCompatibility),
+    localMelodySimilarity: finiteOrNull(localMusical && localMusical.melodySimilarity),
+    localMusicalConfidence: finiteOrNull(localMusical && localMusical.confidence),
+    localAWindowStart: finiteOrNull(localMusical && localMusical.aWindowStart),
+    localBWindowStart: finiteOrNull(localMusical && localMusical.bWindowStart),
+    localAWindowDistance: finiteOrNull(localMusical && localMusical.aDistance),
+    localBWindowDistance: finiteOrNull(localMusical && localMusical.bDistance),
+    localMusicalRisks: Array.isArray(localMusical && localMusical.risks)
+      ? localMusical.risks.filter((risk) => typeof risk === 'string').slice(0, 3)
+      : [],
     musicalEvidence: recipeDiagnostics.musicalEvidence === true,
     musicalCompatibility: finiteOrNull(recipeDiagnostics.musicalCompatibility),
     harmonicSimilarity: finiteOrNull(recipeDiagnostics.harmonicSimilarity),
@@ -273,6 +287,7 @@ function planCuefieldTransitionFromCache(opts = {}) {
     energyContinuity: selected.energyContinuity,
     grooveContinuity: selected.grooveContinuity,
     tempoCompatibility: selected.tempoCompatibility,
+    localMusicalEvidence: selected.localMusicalEvidence || null,
     rejectionReasons: selected.rejectionReasons || [],
     policy: {
       ...policy,

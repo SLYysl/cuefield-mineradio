@@ -89,6 +89,10 @@ test('Cuefield feedback captures adaptive planner and runtime diagnostics', () =
     'grooveContinuity', 'tempoCompatibility', 'windowRejectionReasons',
     'route', 'compatibilityClass', 'contrastDirection', 'preferredExitRange',
     'routeReasons', 'routeFallbackUsed',
+    'localMusicalEvidence', 'localMusicalCompatibility', 'localHarmonicSimilarity',
+    'localKeyCompatibility', 'localMelodySimilarity', 'localMusicalConfidence',
+    'localAWindowStart', 'localBWindowStart', 'localAWindowDistance',
+    'localBWindowDistance', 'localMusicalRisks',
   ].forEach((field) => assert.match(contextBlock, new RegExp('plannerDiagnostics\\.' + field)));
   assert.match(contextBlock, /pending\.runtimeDowngrade/);
   assert.match(contextBlock, /pending\.actualHandoffAt/);
