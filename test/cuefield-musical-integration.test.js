@@ -405,6 +405,34 @@ test('failed refined transition response returns and caches the initial usable p
   assert.equal(context.cuefieldPairPlanCache.get('a->b:coarse').plan, coarsePlan);
 });
 
+test('thrown refined transition request returns and caches the initial usable plan', async () => {
+  const initialPlan = pairPlanFixture('initial-before-refine-error');
+  let responseCount = 0;
+  const harness = createPairFlowHarness({
+    shift() {
+      responseCount += 1;
+      if (responseCount === 1) return initialPlan;
+      throw new Error('refined transition failed');
+    },
+  });
+  let result;
+
+  await assert.doesNotReject(async () => {
+    result = await harness.context.planCuefieldSongPair(
+      harness.songs.from,
+      harness.songs.to,
+      { refineMusical: true },
+    );
+  });
+
+  assert.equal(result, initialPlan);
+  assert.equal(harness.apiCalls.length, 2);
+  assert.equal(
+    harness.context.cuefieldPairPlanCache.get('selected-from->selected-to:refined').plan,
+    initialPlan,
+  );
+});
+
 test('smart candidate evaluation executes ensure with musical profiling skipped and plans only once', async () => {
   const initialPlan = pairPlanFixture('smart-coarse');
   const harness = createPairFlowHarness([initialPlan]);
