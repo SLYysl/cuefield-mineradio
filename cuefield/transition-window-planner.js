@@ -2,7 +2,7 @@ const { round, toNumber } = require('./cue-profile');
 const { planRecipeCandidates } = require('./recipe-planner');
 const { scoreCandidatePair } = require('./section-candidates');
 const { classifyTransitionRoute } = require('./transition-router');
-const { compareMusicalProfiles } = require('./musical-profile');
+const { compareLocalMusicalWindows, compareMusicalProfiles } = require('./musical-profile');
 
 const MINIMUM_TERMINAL_OVERLAP = 2.2;
 
@@ -28,6 +28,16 @@ function musicalEvidenceFor(fromAnalysis, toAnalysis) {
     && toNumber(profile.confidence) >= 0.55
     && toNumber(profile.noteCount) >= 12;
   return reliable(first) && reliable(second) ? compareMusicalProfiles(first, second) : null;
+}
+
+function localMusicalEvidenceFor(fromAnalysis, toAnalysis, exit, entry) {
+  if (!exit || !entry) return null;
+  return compareLocalMusicalWindows(
+    fromAnalysis && fromAnalysis.musicalProfile,
+    toAnalysis && toAnalysis.musicalProfile,
+    toNumber(exit.time, NaN),
+    toNumber(entry.playFrom, toNumber(entry.landingAt, NaN)),
+  );
 }
 
 function landingKind(entry) {
@@ -219,7 +229,7 @@ function isAnchoredLandingDiagnosticValid(entry, window) {
   return Number.isFinite(landingError) && Math.abs(landingError) <= 0.08;
 }
 
-function rejectionReasons({ protectedUntil, sourceDuration, exit, entry, recipeCandidate, diagnostics, vocalWindows, musicalEvidence }) {
+function rejectionReasons({ protectedUntil, sourceDuration, exit, entry, recipeCandidate, diagnostics, vocalWindows, musicalEvidence, localMusicalEvidence }) {
   const reasons = [];
   const window = recipeCandidate.window || {};
   const mixStart = toNumber(exit.time) + toNumber(window.audibleStart);
@@ -238,6 +248,12 @@ function rejectionReasons({ protectedUntil, sourceDuration, exit, entry, recipeC
     } else if (toNumber(window.audibleOverlap) > 3.5) {
       reasons.push('musical mismatch needs short overlap');
     }
+  }
+  if (localMusicalEvidence
+    && toNumber(localMusicalEvidence.confidence) >= 0.55
+    && (toNumber(localMusicalEvidence.score, 0.5) < 0.42 || toNumber(localMusicalEvidence.harmonicSimilarity, 0.5) < 0.4)
+    && toNumber(window.audibleOverlap) > 3.5) {
+    reasons.push('local musical clash needs short overlap');
   }
   if (anchored && window.runwayAvailable === false) reasons.push('landing has no runway');
   if (anchored && !Number.isFinite(window.landingError)) reasons.push('landing diagnostic unavailable');
@@ -283,7 +299,7 @@ function recipeCandidateAllowedByRoute(candidate, policy) {
   return true;
 }
 
-function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, fromProfile, toProfile, policy, musicalEvidence }) {
+function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, fromProfile, toProfile, policy, musicalEvidence, localMusicalEvidence }) {
   const energyContinuity = clamp(diagnostics.energyScore);
   const tempoCompatibility = clamp(diagnostics.bpmScore);
   const groove = grooveContinuity(fromProfile, toProfile, exit, entry, diagnostics);
@@ -293,6 +309,9 @@ function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, 
   const latePenalty = Math.max(normalizePenalty(exit.latePenalty), policy && policy.route === 'structure-mix' && exitRatio > 0.78 ? 0.45 : 0);
   const routePenalty = rangeDistancePenalty(exitRatio, policy) + entryPolicyPenalty(entry, policy);
   const musicalAdjustment = musicalEvidence ? (toNumber(musicalEvidence.score, 0.5) - 0.5) * 0.12 : 0;
+  const localMusicalAdjustment = localMusicalEvidence
+    ? Math.max(-0.08, Math.min(0.08, (toNumber(localMusicalEvidence.score, 0.5) - 0.5) * 0.16))
+    : 0;
   const score = clamp(clamp(sectionChoice.score) * 0.34
     + clamp(recipeCandidate.selectionScore == null ? recipeCandidate.score : recipeCandidate.selectionScore) * 0.2
     + ((clamp(exit.confidence) + clamp(entry.confidence)) / 2) * 0.16
@@ -300,7 +319,8 @@ function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, 
     + continuity * 0.18
     - latePenalty
     - routePenalty
-    + musicalAdjustment);
+    + musicalAdjustment
+    + localMusicalAdjustment);
   return {
     exit,
     entry,
@@ -315,8 +335,26 @@ function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, 
     energyContinuity: round(energyContinuity),
     grooveContinuity: groove,
     tempoCompatibility: round(tempoCompatibility),
+    localMusicalEvidence,
     score: round(score),
     rejectionReasons: [],
+  };
+}
+
+function compactLocalMusicalEvidence(evidence) {
+  if (!evidence) return null;
+  const scalar = (value) => Number.isFinite(toNumber(value, NaN)) ? toNumber(value) : null;
+  return {
+    score: scalar(evidence.score),
+    harmonicSimilarity: scalar(evidence.harmonicSimilarity),
+    keyCompatibility: scalar(evidence.keyCompatibility),
+    melodySimilarity: scalar(evidence.melodySimilarity),
+    confidence: scalar(evidence.confidence),
+    aWindowStart: scalar(evidence.aWindowStart),
+    bWindowStart: scalar(evidence.bWindowStart),
+    aDistance: scalar(evidence.aDistance),
+    bDistance: scalar(evidence.bDistance),
+    risks: Array.isArray(evidence.risks) ? evidence.risks.filter((risk) => typeof risk === 'string').slice(0, 4) : [],
   };
 }
 
@@ -338,6 +376,7 @@ function compactWindow(window) {
     audibleOverlap: toNumber(window.audibleOverlap),
     mixStart: window.mixStart,
     handoffAt: window.handoffAt,
+    localMusicalEvidence: compactLocalMusicalEvidence(window.localMusicalEvidence),
     rejectionReasons: Array.isArray(window.rejectionReasons) ? window.rejectionReasons.slice() : [],
   };
 }
@@ -396,6 +435,7 @@ function technicalFailure(errorCode, rejected = []) {
     energyContinuity: null,
     grooveContinuity: null,
     tempoCompatibility: null,
+    localMusicalEvidence: null,
     score: 0,
     rejectionReasons: ['no valid complete transition window', ...(rejected.length ? ['structural windows rejected'] : [])],
     errorCode,
@@ -416,7 +456,7 @@ function terminalStartAfterVocal(windows, requested, duration) {
   return duration - candidate >= MINIMUM_TERMINAL_OVERLAP ? round(candidate) : round(requested);
 }
 
-function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, policy, rejected, entries = []) {
+function terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protectedUntil, policy, rejected, entries = []) {
   const duration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
   const targetDuration = Math.max(0, toNumber(toProfile && toProfile.duration));
   const protectedBoundary = toNumber(protectedUntil);
@@ -535,6 +575,7 @@ function terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, po
     energyContinuity: 0.35,
     grooveContinuity: 0.35,
     tempoCompatibility: 0,
+    localMusicalEvidence: localMusicalEvidenceFor(fromAnalysis, toAnalysis, exit, entry),
     score: 0,
     rejectionReasons: ['no valid complete transition window', ...(rejected.length ? ['structural windows rejected'] : [])],
     routeFallbackUsed: true,
@@ -586,7 +627,7 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
   };
 
   if (policy.route === 'terminal-rescue') {
-    const chosen = terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, policy, [], entries);
+    const chosen = terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protectedUntil, policy, [], entries);
     chosen.policy = policy;
     return {
       chosen,
@@ -604,6 +645,7 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
     entries.forEach((entry) => {
       const scoredSectionChoice = scoreCandidatePair(exit, entry, fromAnalysis, toAnalysis, scoreWindowExit, exits);
       const sectionChoice = { ...scoredSectionChoice, score: clamp(scoredSectionChoice.score) };
+      const localMusicalEvidence = localMusicalEvidenceFor(fromAnalysis, toAnalysis, exit, entry);
       const recipePlan = planRecipeCandidates(fromProfile, toProfile, {
         sectionChoice: { ...sectionChoice, entry: recipeSectionEntry(entry) },
         routePolicy: policy,
@@ -620,8 +662,9 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
           diagnostics: recipePlan.diagnostics || {},
           vocalWindows: fromAnalysis.structureMap && fromAnalysis.structureMap.vocalWindows,
           musicalEvidence,
+          localMusicalEvidence,
         });
-        const window = rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics: recipePlan.diagnostics || {}, fromProfile, toProfile, policy, musicalEvidence });
+        const window = rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics: recipePlan.diagnostics || {}, fromProfile, toProfile, policy, musicalEvidence, localMusicalEvidence });
         if (reasons.length) rejected.push({ ...window, rejectionReasons: reasons });
         else candidateWindows.push(window);
       });
@@ -629,7 +672,7 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
   });
   candidateWindows.sort((a, b) => b.score - a.score || a.exit.time - b.exit.time || a.entry.landingAt - b.entry.landingAt);
   const selectedPolicy = candidateWindows.length ? policy : terminalRescuePolicy(policy, fromProfile, protectedUntil);
-  const chosen = candidateWindows[0] || terminalRescue(fromAnalysis, fromProfile, toProfile, protectedUntil, selectedPolicy, rejected, entries);
+  const chosen = candidateWindows[0] || terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protectedUntil, selectedPolicy, rejected, entries);
   chosen.policy = selectedPolicy;
   if (!chosen.routeFallbackUsed) chosen.routeFallbackUsed = false;
   return {

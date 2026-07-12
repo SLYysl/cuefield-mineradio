@@ -103,13 +103,23 @@ function setBarMetrics(analysis, time, metrics) {
   return analysis;
 }
 
-function musicalProfile(root) {
+function musicalProfile(root, extra = {}) {
   return {
     confidence: 0.9,
     noteCount: 64,
     pitchClassProfile: Array.from({ length: 12 }, (_, index) => index === root ? 1 : 0),
     intervalProfile: Array.from({ length: 25 }, (_, index) => index === 14 ? 1 : 0),
     key: { root, mode: 'major' },
+    ...extra,
+  };
+}
+
+function musicalWindow(start, root, extra = {}) {
+  return {
+    ...musicalProfile(root),
+    start,
+    duration: 8,
+    ...extra,
   };
 }
 
@@ -694,4 +704,77 @@ test('does not promote a raw single-line lyric candidate to a Hook landing', () 
   assert.notEqual(result.chosen.entry.landingType, 'hook');
   assert.equal(result.candidates.some((candidate) => candidate.entry.landingType === 'hook'), false);
   assert.equal(result.rejected.some((candidate) => candidate.entry.landingType === 'hook'), false);
+});
+
+test('prefers a locally compatible entry over an otherwise equivalent incompatible entry', () => {
+  const from = profile({ exits: [exit(80)] });
+  const to = profile({ entries: [
+    entry('intro', 16, { playFrom: 0, landingAt: 16, landingType: 'intro' }),
+    entry('drop', 32, { playFrom: 32, landingAt: 32, landingType: 'drop' }),
+  ] });
+  from.musicalProfile = musicalProfile(0, { windows: [musicalWindow(80, 0)] });
+  to.musicalProfile = musicalProfile(0, {
+    windows: [musicalWindow(0, 0), musicalWindow(32, 6)],
+  });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.chosen.entry.playFrom, 0);
+  assert.equal(result.chosen.localMusicalEvidence.score > 0.9, true);
+  assert.equal(result.candidates.some((candidate) => candidate.entry.landingAt === 32
+    && candidate.localMusicalEvidence.score < 0.42), true);
+});
+
+test('local musical clash rejects long overlap while retaining an executable short transition', () => {
+  const from = profile({ duration: 160, exits: [exit(112, 0.92)] });
+  const to = profile({ entries: [entry('intro', 16, { source: 'energy', playFrom: 0, landingAt: 16, landingType: 'intro' })] });
+  from.musicalProfile = musicalProfile(0, { windows: [musicalWindow(112, 0)] });
+  to.musicalProfile = musicalProfile(0, { windows: [musicalWindow(0, 6)] });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.equal(result.rejected.some((candidate) => candidate.audibleOverlap > 3.5
+    && candidate.rejectionReasons.includes('local musical clash needs short overlap')), true);
+  assert.equal(result.chosen.audibleOverlap <= 3.5, true);
+  assert.equal(result.chosen.localMusicalEvidence.score < 0.42, true);
+});
+
+test('missing, weak, and distant local windows leave local musical scoring neutral', () => {
+  const scenarios = [
+    { fromWindows: [], toWindows: [] },
+    { fromWindows: [musicalWindow(80, 0, { confidence: 0.54 })], toWindows: [musicalWindow(0, 0)] },
+    { fromWindows: [musicalWindow(20, 0)], toWindows: [musicalWindow(80, 0)] },
+  ];
+
+  scenarios.forEach(({ fromWindows, toWindows }) => {
+    const from = profile({ exits: [exit(80)] });
+    const to = profile({ entries: [entry('intro', 16, { playFrom: 0, landingAt: 16, landingType: 'intro' })] });
+    from.musicalProfile = musicalProfile(0, { windows: fromWindows });
+    to.musicalProfile = musicalProfile(0, { windows: toWindows });
+
+    const result = chooseTransitionWindow(from, to);
+
+    assert.equal(result.chosen.localMusicalEvidence, null);
+  });
+});
+
+test('compact transition windows expose local diagnostics without raw musical profile arrays', () => {
+  const from = profile({ exits: [exit(80), exit(96)] });
+  const to = profile({ entries: [
+    entry('intro', 16, { playFrom: 0, landingAt: 16, landingType: 'intro' }),
+    entry('drop', 32, { playFrom: 32, landingAt: 32, landingType: 'drop' }),
+  ] });
+  from.musicalProfile = musicalProfile(0, { windows: [musicalWindow(80, 0), musicalWindow(96, 0)] });
+  to.musicalProfile = musicalProfile(0, { windows: [musicalWindow(0, 0), musicalWindow(32, 6)] });
+
+  const result = chooseTransitionWindow(from, to);
+  const compact = [...result.candidates, ...result.rejected];
+  const compactJson = JSON.stringify(compact);
+
+  assert.equal(compact.length > 0, true);
+  assert.equal(compact.every((candidate) => candidate.localMusicalEvidence
+    && Number.isFinite(candidate.localMusicalEvidence.score)), true);
+  assert.equal(compactJson.includes('pitchClassProfile'), false);
+  assert.equal(compactJson.includes('intervalProfile'), false);
+  assert.equal(compactJson.includes('melodyContour'), false);
 });
