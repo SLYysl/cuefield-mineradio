@@ -40,6 +40,12 @@ function localMusicalEvidenceFor(fromAnalysis, toAnalysis, exit, entry) {
   );
 }
 
+function hasReliableLocalMusicalClash(evidence) {
+  return !!(evidence
+    && toNumber(evidence.confidence) >= 0.55
+    && (toNumber(evidence.score, 0.5) < 0.42 || toNumber(evidence.harmonicSimilarity, 0.5) < 0.4));
+}
+
 function landingKind(entry) {
   const explicit = String(entry && entry.landingType || '').toLowerCase();
   if (explicit) return explicit;
@@ -249,11 +255,12 @@ function rejectionReasons({ protectedUntil, sourceDuration, exit, entry, recipeC
       reasons.push('musical mismatch needs short overlap');
     }
   }
-  if (localMusicalEvidence
-    && toNumber(localMusicalEvidence.confidence) >= 0.55
-    && (toNumber(localMusicalEvidence.score, 0.5) < 0.42 || toNumber(localMusicalEvidence.harmonicSimilarity, 0.5) < 0.4)
-    && toNumber(window.audibleOverlap) > 3.5) {
-    reasons.push('local musical clash needs short overlap');
+  if (hasReliableLocalMusicalClash(localMusicalEvidence)) {
+    if (recipeCandidate.recipe === 'harmonic-double-drop') {
+      reasons.push('local musical clash forbids harmonic double drop');
+    } else if (toNumber(window.audibleOverlap) > 3.5) {
+      reasons.push('local musical clash needs short overlap');
+    }
   }
   if (anchored && window.runwayAvailable === false) reasons.push('landing has no runway');
   if (anchored && !Number.isFinite(window.landingError)) reasons.push('landing diagnostic unavailable');

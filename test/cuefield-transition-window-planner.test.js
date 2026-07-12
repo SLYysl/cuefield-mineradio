@@ -735,8 +735,36 @@ test('local musical clash rejects long overlap while retaining an executable sho
 
   assert.equal(result.rejected.some((candidate) => candidate.audibleOverlap > 3.5
     && candidate.rejectionReasons.includes('local musical clash needs short overlap')), true);
-  assert.equal(result.chosen.audibleOverlap <= 3.5, true);
+  assert.notEqual(result.chosen.technicalFailure, true);
+  assert.equal(Array.isArray(result.chosen.timeline) && result.chosen.timeline.some((action) => action.op === 'handoff'), true);
+  assert.equal(Number.isFinite(result.chosen.audibleOverlap) && result.chosen.audibleOverlap <= 3.5, true);
   assert.equal(result.chosen.localMusicalEvidence.score < 0.42, true);
+});
+
+test('local musical clash rejects a short harmonic double drop and removes it from valid candidates', () => {
+  const from = profile({
+    duration: 128,
+    exits: [exit(112, 0.92, { energyAfter: 0.55, text: 'help me break through' })],
+  });
+  const to = profile({
+    entries: [entry('hook', 32, {
+      source: 'lyric+beat',
+      confidence: 0.92,
+      text: 'take me through the night',
+      playFrom: 32,
+      landingAt: 32,
+      landingType: 'hook',
+    })],
+  });
+  from.musicalProfile = musicalProfile(0, { windows: [musicalWindow(112, 0)] });
+  to.musicalProfile = musicalProfile(0, { windows: [musicalWindow(32, 6)] });
+
+  const result = chooseTransitionWindow(from, to);
+
+  assert.notEqual(result.chosen.recipeCandidate.recipe, 'harmonic-double-drop');
+  assert.equal(result.candidates.some((candidate) => candidate.recipe === 'harmonic-double-drop'), false);
+  assert.equal(result.rejected.some((candidate) => candidate.recipe === 'harmonic-double-drop'
+    && candidate.rejectionReasons.includes('local musical clash forbids harmonic double drop')), true);
 });
 
 test('missing, weak, and distant local windows leave local musical scoring neutral', () => {
