@@ -101,6 +101,59 @@ test('Cuefield feedback captures adaptive planner and runtime diagnostics', () =
   assert.equal(executeBlock.indexOf('runCuefieldVolumeCurve') < executeBlock.indexOf('cuefieldFeedbackContextFromPending'), true);
 });
 
+test('Cuefield feedback context propagates local musical diagnostics at runtime', () => {
+  const html = readIndexHtml();
+  const contextStart = html.indexOf('function cuefieldFeedbackSongMeta');
+  const contextEnd = html.indexOf('function hideCuefieldFeedbackPrompt', contextStart);
+  const contextBlock = html.slice(contextStart, contextEnd);
+  const context = {
+    playQueue: [
+      { id: 'song:a', name: 'A', artist: 'Artist A' },
+      { id: 'song:b', name: 'B', artist: 'Artist B' },
+    ],
+    beatMapSongKey: (song) => song.id,
+    cuefieldSetMode: 'smart',
+  };
+  vm.createContext(context);
+  vm.runInContext(contextBlock, context);
+
+  const result = context.cuefieldFeedbackContextFromPending({
+    currentIndex: 0,
+    nextIndex: 1,
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    executionMode: 'filtered-pickup',
+    plan: {
+      chosen: { recipe: 'section-jump', evaluation: { tier: 'usable', score: 0.81 } },
+      diagnostics: {
+        localMusicalEvidence: true,
+        localMusicalCompatibility: 0.812,
+        localHarmonicSimilarity: 0.901,
+        localKeyCompatibility: 0.785,
+        localMelodySimilarity: 0.668,
+        localMusicalConfidence: 0.877,
+        localAWindowStart: 12.346,
+        localBWindowStart: 23.457,
+        localAWindowDistance: 0.005,
+        localBWindowDistance: 1.235,
+        localMusicalRisks: ['harmonic-clash', 'late'],
+      },
+    },
+  });
+
+  assert.deepEqual(result.transition.localMusicalEvidence, true);
+  assert.equal(result.transition.localMusicalCompatibility, 0.812);
+  assert.equal(result.transition.localHarmonicSimilarity, 0.901);
+  assert.equal(result.transition.localKeyCompatibility, 0.785);
+  assert.equal(result.transition.localMelodySimilarity, 0.668);
+  assert.equal(result.transition.localMusicalConfidence, 0.877);
+  assert.equal(result.transition.localAWindowStart, 12.346);
+  assert.equal(result.transition.localBWindowStart, 23.457);
+  assert.equal(result.transition.localAWindowDistance, 0.005);
+  assert.equal(result.transition.localBWindowDistance, 1.235);
+  assert.deepEqual(result.transition.localMusicalRisks, ['harmonic-clash', 'late']);
+});
+
 test('Cuefield separates terminal fallback from musical rescue status', () => {
   const html = readIndexHtml();
   const statusStart = html.indexOf('function cuefieldAutoMixStatusText');

@@ -69,10 +69,12 @@ test('keeps sanitized local musical diagnostics with rounded window metadata', (
     confidence: 0.877,
     aWindowStart: 12.346,
     bWindowStart: 23.457,
-    aWindowDistance: 0.005,
-    bWindowDistance: 1.235,
+    aDistance: 0.005,
+    bDistance: 1.235,
     risks: ['harmonic-clash', 'melody-contour-contrast', 'late'],
   });
+  assert.equal(Object.prototype.hasOwnProperty.call(record.transition.localMusical, 'aWindowDistance'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(record.transition.localMusical, 'bWindowDistance'), false);
   assert.deepEqual(compactLocalMusical({}), {
     evidence: false,
     compatibility: null,
@@ -82,9 +84,40 @@ test('keeps sanitized local musical diagnostics with rounded window metadata', (
     confidence: null,
     aWindowStart: null,
     bWindowStart: null,
-    aWindowDistance: null,
-    bWindowDistance: null,
+    aDistance: null,
+    bDistance: null,
     risks: [],
+  });
+  const nested = buildCuefieldFeedbackRecord({
+    rating: 1,
+    transition: {
+      localMusical: {
+        evidence: true,
+        compatibility: 0.71234,
+        harmonicSimilarity: 0.62345,
+        keyCompatibility: 0.73456,
+        melodySimilarity: 0.64567,
+        confidence: 0.85678,
+        aWindowStart: 4.56789,
+        bWindowStart: 8.67891,
+        aDistance: 0.01234,
+        bDistance: 0.05678,
+        risks: ['nested-risk'],
+      },
+    },
+  });
+  assert.deepEqual(nested.transition.localMusical, {
+    evidence: true,
+    compatibility: 0.712,
+    harmonicSimilarity: 0.623,
+    keyCompatibility: 0.735,
+    melodySimilarity: 0.646,
+    confidence: 0.857,
+    aWindowStart: 4.568,
+    bWindowStart: 8.679,
+    aDistance: 0.012,
+    bDistance: 0.057,
+    risks: ['nested-risk'],
   });
   const serialized = JSON.stringify(record);
   ['pitchClassProfile', 'intervalProfile', 'melodyContour', 'notes', 'audioUrl', 'private.mp3', 'lyrics', 'private lyric sentinel'].forEach((sentinel) => {
@@ -407,8 +440,8 @@ test('keeps older feedback records readable without adaptive diagnostics', () =>
     confidence: null,
     aWindowStart: null,
     bWindowStart: null,
-    aWindowDistance: null,
-    bWindowDistance: null,
+    aDistance: null,
+    bDistance: null,
     risks: [],
   });
 });
@@ -437,8 +470,8 @@ test('reads legacy feedback JSONL stats without local musical diagnostics', () =
     confidence: null,
     aWindowStart: null,
     bWindowStart: null,
-    aWindowDistance: null,
-    bWindowDistance: null,
+    aDistance: null,
+    bDistance: null,
     risks: [],
   });
 });

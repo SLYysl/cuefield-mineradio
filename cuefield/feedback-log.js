@@ -145,8 +145,8 @@ function compactLocalMusical(transition = {}) {
     confidence: value('localMusicalConfidence', 'confidence'),
     aWindowStart: value('localAWindowStart', 'aWindowStart'),
     bWindowStart: value('localBWindowStart', 'bWindowStart'),
-    aWindowDistance: value('localAWindowDistance', 'aWindowDistance'),
-    bWindowDistance: value('localBWindowDistance', 'bWindowDistance'),
+    aDistance: value('localAWindowDistance', 'aDistance'),
+    bDistance: value('localBWindowDistance', 'bDistance'),
     risks: compactList(risks, 3),
   };
 }
