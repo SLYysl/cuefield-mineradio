@@ -240,7 +240,7 @@ test('Cuefield late-action helper skips only optional actions strictly past tole
   assert.equal(context.shouldSkipCuefieldLateAction({ optionalWhenLate: true, maxLateMs: 60 }, 1000, undefined), false);
 });
 
-test('Cuefield runtime skips a late optional fake-out without stranding later mandatory actions', () => {
+test('Cuefield runtime skips a late optional fake-out without replacing an earlier downgrade', () => {
   const html = readIndexHtml();
   const runtimeStart = html.indexOf('function cuefieldVolumeOnlyExecution');
   const runtimeEnd = html.indexOf('function prepareCuefieldPendingAudio', runtimeStart);
@@ -278,5 +278,18 @@ test('Cuefield runtime skips a late optional fake-out without stranding later ma
   scheduled[1].callback();
 
   assert.equal(pending.runtimeDowngrade, 'late-fake-gap-skipped');
+  assert.deepEqual(applied, [mandatoryImpact]);
+
+  const downgradedPending = { runtimeDowngrade: 'source-loop-unavailable' };
+  scheduled.length = 0;
+  applied.length = 0;
+  nowMs = 1000;
+  context.runCuefieldVolumeCurve(downgradedPending, {});
+  nowMs = 1071;
+  scheduled[0].callback();
+  nowMs = 5000;
+  scheduled[1].callback();
+
+  assert.equal(downgradedPending.runtimeDowngrade, 'source-loop-unavailable');
   assert.deepEqual(applied, [mandatoryImpact]);
 });

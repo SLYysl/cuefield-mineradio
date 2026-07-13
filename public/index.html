@@ -11980,7 +11980,7 @@ function runCuefieldVolumeCurve(pending, nextMedia) {
       var dueAt = cuefieldTimelineNow() + action.delayMs;
       cuefieldScheduleTimeline(action.delayMs, function() {
         if (shouldSkipCuefieldLateAction(action, dueAt, cuefieldTimelineNow())) {
-          pending.runtimeDowngrade = 'late-fake-gap-skipped';
+          if (!pending.runtimeDowngrade) pending.runtimeDowngrade = 'late-fake-gap-skipped';
           return;
         }
         applyCuefieldTimelineAction(action, pending, nextMedia);
