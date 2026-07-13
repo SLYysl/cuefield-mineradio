@@ -251,6 +251,7 @@ function createHandoffHistoryHarness(options = {}) {
     cuefieldAutoMixExecuting: false,
     trackSwitchToken: 17,
     currentIdx: 0,
+    playing: true,
     playQueue: [{ key: 'a' }, { key: 'b' }],
     audio: {},
     playToggleBusy: true,
@@ -259,7 +260,8 @@ function createHandoffHistoryHarness(options = {}) {
     cuefieldTierLabel: () => 'usable',
     startCuefieldPreparedAudio: async () => {
       if (options.cancelled) context.trackSwitchToken += 1;
-      return options.preloadFailed ? null : {};
+      context.preparedMedia = options.preloadFailed ? null : {};
+      return context.preparedMedia;
     },
     stopCuefieldPreparedAudio() {},
     restorePlaybackGain() {},
@@ -267,9 +269,14 @@ function createHandoffHistoryHarness(options = {}) {
     runCuefieldVolumeCurve: () => 0,
     cuefieldFeedbackContextFromPending: () => ({}),
     cuefieldScheduleTimeline: (delay, callback) => callback(),
-    playQueueAt: async () => {
+    playQueueAt: async (index, playOptions) => {
       if (options.playFailed) throw new Error('handoff failed');
-      return true;
+      if (options.resolvedFailure) return undefined;
+      context.currentIdx = index;
+      context.audio = playOptions.preparedAudio;
+      context.trackSwitchToken += options.resolvedStale ? 2 : 1;
+      context.playing = !options.resolvedStale;
+      return undefined;
     },
     showCuefieldFeedbackPrompt() {},
     console: { warn() {} },
@@ -804,7 +811,13 @@ test('successful handoff records the selected recipe while failed paths do not',
   await flushTasks();
   assert.deepEqual(successful.cuefieldRecentRecipes, ['tease-roll-double-drop']);
 
-  for (const options of [{ playFailed: true }, { cancelled: true }, { preloadFailed: true }]) {
+  for (const options of [
+    { playFailed: true },
+    { resolvedFailure: true },
+    { resolvedStale: true },
+    { cancelled: true },
+    { preloadFailed: true },
+  ]) {
     const failed = createHandoffHistoryHarness(options);
     await failed.executeCuefieldSoftHandoff(pending);
     await flushTasks();

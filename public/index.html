@@ -12061,6 +12061,11 @@ async function executeCuefieldSoftHandoff(pending) {
       preparedProxyAudioUrl: pending.audioUrl,
       fade: false,
     })).then(function(){
+      var handoffSucceeded = currentIdx === pending.nextIndex
+        && audio === nextMedia
+        && playing === true
+        && trackSwitchToken === Number(pending.token) + 1;
+      if (!handoffSucceeded) return;
       var recipeCandidate = chosen.recipeCandidate || {};
       rememberCuefieldRecipe(chosen.transitionRecipe || recipeCandidate.recipe || pending.executionMode);
     }).catch(function(error){
