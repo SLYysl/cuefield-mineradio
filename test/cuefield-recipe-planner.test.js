@@ -800,7 +800,7 @@ test('hard-gates the composite impact recipe before applying its preference', as
     ['low compatibility', { toRoot: 1 }, 'musical evidence is not compatible enough'],
     ['unsafe exit', { exitType: 'breakdown' }, 'exit is not a loop-safe phrase'],
     ['severe overlap', { risks: ['vocal collision'] }, 'vocal or style overlap is unsafe'],
-    ['insufficient four-beat runway', { exitTime: 125.8, bpmA: 100, bpmB: 100 }, 'source runway is too short for four beats'],
+    ['insufficient four-beat runway', { exitTime: 1.8 }, 'source runway is too short for four beats'],
   ];
 
   for (const [name, overrides, reason] of cases) {
@@ -811,6 +811,15 @@ test('hard-gates the composite impact recipe before applying its preference', as
       assert.equal(impact.eligibilityReason, reason);
     });
   }
+});
+
+test('keeps a late impact exit eligible when four source beats exist before it', () => {
+  const impact = trustedImpactPlan({ exitTime: 127.5 }).candidates
+    .find((candidate) => candidate.recipe === 'tease-roll-double-drop');
+  const loops = impact.timeline.filter((action) => action.deck === 'A' && action.op === 'loop' && action.enabled);
+
+  assert.equal(impact.eligible, true);
+  assert.equal(loops[0].startAt, 125.5);
 });
 
 test('ranks a qualifying composite impact above the existing showpiece recipes', () => {

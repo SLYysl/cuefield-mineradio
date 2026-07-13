@@ -623,7 +623,8 @@ function safetyAssessment(fromProfile, toProfile, sectionChoice = {}, routePolic
   const exitType = String(exit.type || (exitCandidate && exitCandidate.type) || '');
   const exitConfidence = clamp(exit.confidence ?? (exitCandidate && exitCandidate.confidence));
   const exitTrusted = exitConfidence >= 0.72;
-  const sourceRunway = Math.max(0, toNumber(fromProfile && fromProfile.duration) - toNumber(exit.time, toNumber(exitCandidate && exitCandidate.time)));
+  const sourceDuration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
+  const sourceRunway = Math.max(0, sourceDuration - toNumber(exit.time, toNumber(exitCandidate && exitCandidate.time)));
   const bpmA = Math.max(0, toNumber(fromProfile && fromProfile.bpm));
   const bpmB = Math.max(0, toNumber(toProfile && toProfile.bpm));
   const relativeTempoDelta = bpmA > 0 && bpmB > 0 ? Math.abs(bpmA - bpmB) / Math.max(bpmA, bpmB) : 1;
@@ -875,7 +876,12 @@ function recipeEligibility(candidate, context) {
     if (!assessment.musicalEvidence || assessment.musicalCompatibility < 0.72 || musicalClash) {
       return { eligible: false, reason: 'musical evidence is not compatible enough', preference: 0 };
     }
-    if (assessment.sourceRunway < 240 / Math.max(assessment.bpmA, 1)) return { eligible: false, reason: 'source runway is too short for four beats', preference: 0 };
+    const fourBeatDuration = 240 / Math.max(assessment.bpmA, 1);
+    const sourceExit = toNumber(candidate.anchors.aExit, NaN);
+    const sourceStart = sourceExit - fourBeatDuration;
+    if (!Number.isFinite(sourceStart) || sourceStart < 0 || sourceExit > context.sourceDuration) {
+      return { eligible: false, reason: 'source runway is too short for four beats', preference: 0 };
+    }
     if (severeOverlapRisk) return { eligible: false, reason: 'vocal or style overlap is unsafe', preference: 0 };
     return { eligible: true, reason: '', preference: 0.56 };
   }
@@ -927,6 +933,7 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
       entryType: opts.sectionChoice && opts.sectionChoice.entry && opts.sectionChoice.entry.type,
       entryConfidence: assessment.entryConfidence,
       recentRecipes: Array.isArray(opts.recentRecipes) ? opts.recentRecipes : [],
+      sourceDuration: Math.max(0, toNumber(fromProfile && fromProfile.duration)),
     }),
   }));
   const candidatesWithEligibility = evaluated.map((item) => ({
