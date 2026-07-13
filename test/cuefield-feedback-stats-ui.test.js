@@ -223,3 +223,60 @@ test('Cuefield runtime records the executed window after a volume-only downgrade
   assert.equal(pending.actualAudibleOverlap, 1.964);
   assert.equal(pending.actualPreRollDuration, 0.06);
 });
+
+test('Cuefield late-action helper skips only optional actions strictly past tolerance', () => {
+  const html = readIndexHtml();
+  const runtimeStart = html.indexOf('function cuefieldVolumeOnlyExecution');
+  const runtimeEnd = html.indexOf('function prepareCuefieldPendingAudio', runtimeStart);
+  const runtimeBlock = html.slice(runtimeStart, runtimeEnd);
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(runtimeBlock, context);
+
+  assert.equal(context.shouldSkipCuefieldLateAction({ optionalWhenLate: true, maxLateMs: 60 }, 1000, 1060), false);
+  assert.equal(context.shouldSkipCuefieldLateAction({ optionalWhenLate: true, maxLateMs: 60 }, 1000, 1061), true);
+  assert.equal(context.shouldSkipCuefieldLateAction({ optionalWhenLate: false, maxLateMs: 60 }, 1000, 9999), false);
+  assert.equal(context.shouldSkipCuefieldLateAction({ optionalWhenLate: true, maxLateMs: 60 }, NaN, 1061), false);
+  assert.equal(context.shouldSkipCuefieldLateAction({ optionalWhenLate: true, maxLateMs: 60 }, 1000, undefined), false);
+});
+
+test('Cuefield runtime skips a late optional fake-out without stranding later mandatory actions', () => {
+  const html = readIndexHtml();
+  const runtimeStart = html.indexOf('function cuefieldVolumeOnlyExecution');
+  const runtimeEnd = html.indexOf('function prepareCuefieldPendingAudio', runtimeStart);
+  const runtimeBlock = html.slice(runtimeStart, runtimeEnd);
+  const scheduled = [];
+  const applied = [];
+  let nowMs = 1000;
+  const optionalFakeOut = { delayMs: 10, deck: 'A', op: 'bass', optionalWhenLate: true, maxLateMs: 60 };
+  const mandatoryImpact = { delayMs: 20, deck: 'B', op: 'bass', optionalWhenLate: false, maxLateMs: 0 };
+  const pending = {};
+  const context = {
+    window: {},
+    performance: { now: () => nowMs },
+    cuefieldTimelineExecutionForPending: () => ({
+      requiresSourceLoop: false,
+      requiresBridge: false,
+      requiresBGraph: false,
+      handoffDelayMs: 100,
+      actions: [optionalFakeOut, mandatoryImpact],
+    }),
+    clearCuefieldTimelineTimers() {},
+    cuefieldScheduleTimeline(delayMs, callback) { scheduled.push({ delayMs, callback }); },
+    applyCuefieldTimelineAction(action) { applied.push(action); },
+  };
+  vm.createContext(context);
+  vm.runInContext(runtimeBlock, context);
+
+  assert.match(runtimeBlock, /var dueAt = cuefieldTimelineNow\(\) \+ action\.delayMs;[\s\S]*cuefieldScheduleTimeline\(action\.delayMs/);
+  assert.equal(context.runCuefieldVolumeCurve(pending, {}), 100);
+  assert.deepEqual(scheduled.map((item) => item.delayMs), [10, 20]);
+
+  nowMs = 1071;
+  scheduled[0].callback();
+  nowMs = 5000;
+  scheduled[1].callback();
+
+  assert.equal(pending.runtimeDowngrade, 'late-fake-gap-skipped');
+  assert.deepEqual(applied, [mandatoryImpact]);
+});

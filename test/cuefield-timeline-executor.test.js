@@ -45,6 +45,27 @@ test('builds delayed execution actions from a Cuefield recipe timeline', () => {
   assert.equal(execution.handoffDelayMs, 10600);
 });
 
+test('normalizes late-action metadata for every timeline action', () => {
+  const execution = buildCuefieldTimelineExecution({
+    timeline: [
+      { t: -3, deck: 'A', op: 'bass', optionalWhenLate: true, maxLateMs: 60.8 },
+      { t: -2, deck: 'B', op: 'bass', optionalWhenLate: false, maxLateMs: 999 },
+      { t: -1, deck: 'A', op: 'volume', optionalWhenLate: 'true', maxLateMs: -12 },
+      { t: 0, deck: 'B', op: 'handoff', maxLateMs: 'invalid' },
+    ],
+  });
+
+  assert.deepEqual(execution.actions.map((action) => ({
+    optionalWhenLate: action.optionalWhenLate,
+    maxLateMs: action.maxLateMs,
+  })), [
+    { optionalWhenLate: true, maxLateMs: 61 },
+    { optionalWhenLate: false, maxLateMs: 200 },
+    { optionalWhenLate: false, maxLateMs: 0 },
+    { optionalWhenLate: false, maxLateMs: 0 },
+  ]);
+});
+
 test('uses explicit transition window as the runtime clock without moving the B landing', () => {
   const execution = buildCuefieldTimelineExecution({
     entryTime: 8,

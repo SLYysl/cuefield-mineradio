@@ -97,6 +97,8 @@
       curve: String(action.curve || ''),
       value: value,
       at: Math.max(0, toNumber(action.at, 0)),
+      optionalWhenLate: action.optionalWhenLate === true,
+      maxLateMs: Math.round(clamp(action.maxLateMs, 0, 200)),
     };
     if (normalized.deck === 'B' && normalized.op === 'play' && originT != null && actionTime < originT) {
       normalized.at = round(normalized.at + originT - actionTime);

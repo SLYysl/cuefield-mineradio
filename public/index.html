@@ -11925,6 +11925,22 @@ function cuefieldVolumeOnlyExecution(execution, pending) {
   return execution;
 }
 
+function shouldSkipCuefieldLateAction(action, dueAt, nowMs) {
+  if (!action || action.optionalWhenLate !== true) return false;
+  var due = Number(dueAt);
+  var now = Number(nowMs);
+  if (!isFinite(due) || !isFinite(now)) return false;
+  var maxLateMs = Number(action.maxLateMs);
+  if (!isFinite(maxLateMs)) maxLateMs = 0;
+  return now - due > Math.max(0, maxLateMs);
+}
+
+function cuefieldTimelineNow() {
+  return typeof performance !== 'undefined' && performance && typeof performance.now === 'function'
+    ? performance.now()
+    : NaN;
+}
+
 function runCuefieldVolumeCurve(pending, nextMedia) {
   var execution = cuefieldTimelineExecutionForPending(pending);
   if (!execution) return cuefieldCrossfadeMsForPending(pending);
@@ -11961,7 +11977,12 @@ function runCuefieldVolumeCurve(pending, nextMedia) {
   pending.actualPreRollDuration = execution.preRollDuration;
   for (var i = 0; i < execution.actions.length; i++) {
     (function(action) {
+      var dueAt = cuefieldTimelineNow() + action.delayMs;
       cuefieldScheduleTimeline(action.delayMs, function() {
+        if (shouldSkipCuefieldLateAction(action, dueAt, cuefieldTimelineNow())) {
+          pending.runtimeDowngrade = 'late-fake-gap-skipped';
+          return;
+        }
         applyCuefieldTimelineAction(action, pending, nextMedia);
       });
     })(execution.actions[i]);
