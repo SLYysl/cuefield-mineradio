@@ -3243,6 +3243,15 @@ async function getLoginInfo() {
   }
 }
 
+function normalizeCuefieldRecentRecipes(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(recipe => typeof recipe === 'string')
+    .map(recipe => recipe.trim().slice(0, 80))
+    .filter(Boolean)
+    .slice(-2);
+}
+
 // ====================================================================
 //  HTTP Server
 // ====================================================================
@@ -3351,13 +3360,7 @@ const server = http.createServer(async (req, res) => {
         fromLrc: body.fromLrc,
         toLrc: body.toLrc,
         exitBias: body.exitBias || 'late',
-        recentRecipes: Array.isArray(body.recentRecipes)
-          ? body.recentRecipes
-            .filter(recipe => typeof recipe === 'string')
-            .map(recipe => recipe.trim().slice(0, 80))
-            .filter(Boolean)
-            .slice(-2)
-          : [],
+        recentRecipes: normalizeCuefieldRecentRecipes(body.recentRecipes),
         readBeatMapCache,
       });
       const chosen = result && result.chosen || {};

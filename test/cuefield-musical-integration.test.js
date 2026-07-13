@@ -825,6 +825,35 @@ test('successful handoff records the selected recipe while failed paths do not',
   }
 });
 
+test('legacy chosen recipe records impact and blocks the next pair plan', async () => {
+  const pending = {
+    token: 17,
+    currentIndex: 0,
+    nextIndex: 1,
+    executionMode: 'filtered-pickup',
+    plan: {
+      chosen: {
+        recipe: 'tease-roll-double-drop',
+        evaluation: { tier: 'usable' },
+      },
+    },
+  };
+  const handoff = createHandoffHistoryHarness();
+  await handoff.executeCuefieldSoftHandoff(pending);
+  await flushTasks();
+  assert.deepEqual(handoff.cuefieldRecentRecipes, ['tease-roll-double-drop']);
+
+  const pair = createPairFlowHarness([pairPlanFixture('legacy-impact-blocked')], {
+    recentRecipes: handoff.cuefieldRecentRecipes,
+  });
+  await pair.context.planCuefieldSongPair(pair.songs.from, pair.songs.to, { refineMusical: false });
+
+  assert.deepEqual(JSON.parse(pair.apiCalls[0].options.body).recentRecipes, ['tease-roll-double-drop']);
+  assert.equal(pair.context.cuefieldPairPlanCache.has(
+    'selected-from->selected-to:coarse:impact-blocked',
+  ), true);
+});
+
 test('renderer recipe history is bounded and releases impact after two later successes', () => {
   const context = createHandoffHistoryHarness();
 
@@ -840,16 +869,31 @@ test('renderer recipe history is bounded and releases impact after two later suc
 
 test('server bounds recent recipe identifiers before the bridge call', () => {
   const source = read('server.js');
+  const normalizerSource = sourceBlock(
+    source,
+    'function normalizeCuefieldRecentRecipes',
+    'const server = http.createServer',
+  );
   const route = sourceBlock(
     source,
     "if (pn === '/api/cuefield/transition')",
     "if (pn === '/api/cuefield/feedback')",
   );
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(normalizerSource, context);
 
-  assert.match(route, /recentRecipes:\s*Array\.isArray\(body\.recentRecipes\)/);
-  assert.match(route, /typeof recipe === 'string'/);
-  assert.match(route, /slice\(0, 80\)/);
-  assert.match(route, /slice\(-2\)/);
+  const result = context.normalizeCuefieldRecentRecipes([
+    null,
+    {},
+    '',
+    ' old ',
+    'x'.repeat(120),
+    ' tease-roll-double-drop ',
+  ]);
+
+  assert.deepEqual(Array.from(result), ['x'.repeat(80), 'tease-roll-double-drop']);
+  assert.match(route, /recentRecipes:\s*normalizeCuefieldRecentRecipes\(body\.recentRecipes\)/);
 });
 
 test('thrown refined transition request returns and caches the initial usable plan', async () => {

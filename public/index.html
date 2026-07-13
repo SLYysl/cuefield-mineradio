@@ -12067,7 +12067,7 @@ async function executeCuefieldSoftHandoff(pending) {
         && trackSwitchToken === Number(pending.token) + 1;
       if (!handoffSucceeded) return;
       var recipeCandidate = chosen.recipeCandidate || {};
-      rememberCuefieldRecipe(chosen.transitionRecipe || recipeCandidate.recipe || pending.executionMode);
+      rememberCuefieldRecipe(chosen.transitionRecipe || recipeCandidate.recipe || chosen.recipe || pending.executionMode);
     }).catch(function(error){
       console.warn('[CuefieldAutoMix] handoff failed:', error && (error.message || error));
     }).finally(function(){
