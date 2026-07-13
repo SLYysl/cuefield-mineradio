@@ -50,6 +50,38 @@ function reliableMusicalProfile(root = 0) {
   };
 }
 
+function trustedImpactPlan(overrides = {}) {
+  const exit = {
+    type: overrides.exitType || 'release',
+    role: 'exit',
+    time: overrides.exitTime ?? 112,
+    confidence: 0.9,
+  };
+  const entry = {
+    type: 'hook',
+    role: 'entry',
+    source: overrides.entrySource || 'lyrics',
+    time: 32,
+    landingAt: 32,
+    confidence: overrides.entryConfidence ?? 0.9,
+  };
+  const fromProfile = makeProfile('A', 128, [exit]);
+  const toProfile = makeProfile('B', 120, [entry]);
+  fromProfile.musicalProfile = reliableMusicalProfile(0);
+  toProfile.musicalProfile = reliableMusicalProfile(overrides.toRoot ?? 0);
+  if (overrides.bpmA) fromProfile.bpm = overrides.bpmA;
+  if (overrides.bpmB) toProfile.bpm = overrides.bpmB;
+  return planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: {
+      exit,
+      entry,
+      evaluation: { tier: 'magic', risks: overrides.risks || [] },
+    },
+    routePolicy: { route: overrides.route || 'structure-mix' },
+    recentRecipes: overrides.recentRecipes || [],
+  });
+}
+
 test('builds cue profile bars, cue points, and density windows from beatmap data', () => {
   const profile = buildCueProfile({
     track: { title: 'A', duration: 128 },
@@ -234,8 +266,11 @@ test('plans multiple recipe candidates with timelines and chooses the safest hig
     const play = plays[plays.length - 1];
     const handoffs = candidate.timeline.filter((action) => action.op === 'handoff');
     const handoff = handoffs[handoffs.length - 1];
-    const expected = play && handoff
-      ? play.at + (handoff.t - play.t) - candidate.anchors.bAnchor
+    const landingOffset = Number.isFinite(candidate.anchors.bImpactOffset)
+      ? candidate.anchors.bImpactOffset
+      : handoff && handoff.t;
+    const expected = play && Number.isFinite(landingOffset)
+      ? play.at + (landingOffset - play.t) - candidate.anchors.bAnchor
       : Number.MAX_SAFE_INTEGER;
     return Math.abs(candidate.window.landingError - expected) <= 0.001;
   }), true);
@@ -302,7 +337,9 @@ test('keeps invalid safety runway as explicit degraded output when every candida
     },
   });
 
-  assert.equal(plan.candidates.every((candidate) => candidate.window.runwayAvailable === false), true);
+  assert.equal(plan.candidates
+    .filter((candidate) => candidate.recipe !== 'tease-roll-double-drop')
+    .every((candidate) => candidate.window.runwayAvailable === false), true);
   assert.equal(plan.chosen.recipe, 'safety-long-blend');
   assert.equal(plan.chosen.risks.includes('insufficient B runway'), true);
   assert.equal(plan.chosen.anchors.runwayAvailable, false);
@@ -707,8 +744,85 @@ test('selects a harmonic double drop only for tightly matched tracks', () => {
   const doubleDrop = plan.candidates.find((candidate) => candidate.recipe === 'harmonic-double-drop');
 
   assert.equal(doubleDrop.eligible, true);
-  assert.equal(plan.chosen.recipe, 'harmonic-double-drop');
+  assert.equal(plan.chosen.recipe === 'harmonic-double-drop' || plan.chosen.recipe === 'tease-roll-double-drop', true);
   assert.equal(doubleDrop.timeline.some((action) => action.op === 'duck'), true);
+});
+
+test('lands the composite impact at zero while measuring the later handoff independently', () => {
+  const plan = trustedImpactPlan();
+  const impact = plan.candidates.find((candidate) => candidate.recipe === 'tease-roll-double-drop');
+  const plays = impact.timeline.filter((action) => action.deck === 'B' && action.op === 'play');
+  const finalPlay = plays[plays.length - 1];
+
+  assert.equal(finalPlay.at + (impact.anchors.bImpactOffset - finalPlay.t), impact.anchors.bAnchor);
+  assert.equal(impact.window.landingError, 0);
+  assert.equal(impact.window.handoffOffset, 0.6);
+});
+
+test('builds the composite teaser, source roll, fake-out, and explicit fallback as one timeline', () => {
+  const plan = trustedImpactPlan();
+  const impact = plan.candidates.find((candidate) => candidate.recipe === 'tease-roll-double-drop');
+  const bassFallback = plan.candidates.find((candidate) => candidate.recipe === 'bass-eq-handoff');
+  const plays = impact.timeline.filter((action) => action.deck === 'B' && action.op === 'play');
+  const loops = impact.timeline.filter((action) => action.deck === 'A' && action.op === 'loop' && action.enabled);
+  const optionalResidual = impact.timeline.find((action) => action.deck === 'A' && action.op === 'volume' && action.t === -0.14);
+  const finalPlayIndex = impact.timeline.indexOf(plays[1]);
+
+  assert.equal(plays.length, 2);
+  assert.deepEqual(plays.map((action) => action.t), [-7.2, -1.6]);
+  assert.equal(plays[0].at, impact.anchors.bAnchor);
+  assert.equal(plays[1].volume, 0);
+  assert.equal(impact.timeline.some((action) => action.deck === 'B' && action.op === 'stop'), true);
+  assert.deepEqual(loops.map((action) => action.loopBeats), [4, 2, 1, 0.5]);
+  assert.equal(loops.every((action) => action.slip === true && action.startAt < impact.anchors.aExit), true);
+  assert.equal(impact.anchors.fakeOutMs >= 100 && impact.anchors.fakeOutMs <= 180, true);
+  assert.equal(impact.anchors.fakeOutMs, 140);
+  assert.equal(impact.anchors.teaserUsed, true);
+  assert.equal(impact.anchors.bImpactOffset, 0);
+  assert.deepEqual(optionalResidual, {
+    t: -0.14, deck: 'A', op: 'volume', value: 0.08, duration: 0, optionalWhenLate: true, maxLateMs: 60,
+  });
+  assert.equal(impact.timeline.some((action) => action.t === 0 && action.deck === 'A' && action.op === 'volume' && action.value === 0), true);
+  assert.equal(impact.timeline.some((action) => action.t === 0 && action.deck === 'B' && action.op === 'bass' && action.value === 1), true);
+  assert.equal(impact.timeline.slice(finalPlayIndex).some((action) => action.deck === 'B' && action.op === 'filter' && action.type === 'none'), true);
+  assert.equal(impact.fallbackRecipe, 'bass-eq-handoff');
+  assert.deepEqual(impact.fallbackTimeline, bassFallback.timeline);
+  assert.notEqual(impact.fallbackTimeline, bassFallback.timeline);
+  assert.notEqual(impact.fallbackTimeline[0], bassFallback.timeline[0]);
+});
+
+test('hard-gates the composite impact recipe before applying its preference', async (t) => {
+  const cases = [
+    ['cooldown', { recentRecipes: ['tease-roll-double-drop'] }, 'impact recipe cooldown'],
+    ['fallback source', { entrySource: 'fallback' }, 'landing is not a trusted climax'],
+    ['low entry confidence', { entryConfidence: 0.77 }, 'landing is not a trusted climax'],
+    ['tempo delta', { bpmB: 128 }, 'beat or tempo evidence is unsafe'],
+    ['low compatibility', { toRoot: 1 }, 'musical evidence is not compatible enough'],
+    ['unsafe exit', { exitType: 'breakdown' }, 'exit is not a loop-safe phrase'],
+    ['severe overlap', { risks: ['vocal collision'] }, 'vocal or style overlap is unsafe'],
+    ['insufficient four-beat runway', { exitTime: 125.8, bpmA: 100, bpmB: 100 }, 'source runway is too short for four beats'],
+  ];
+
+  for (const [name, overrides, reason] of cases) {
+    await t.test(name, () => {
+      const impact = trustedImpactPlan(overrides).candidates
+        .find((candidate) => candidate.recipe === 'tease-roll-double-drop');
+      assert.equal(impact.eligible, false);
+      assert.equal(impact.eligibilityReason, reason);
+    });
+  }
+});
+
+test('ranks a qualifying composite impact above the existing showpiece recipes', () => {
+  const plan = trustedImpactPlan();
+  const impact = plan.candidates.find((candidate) => candidate.recipe === 'tease-roll-double-drop');
+  const oldShowpieces = plan.candidates.filter((candidate) => (
+    candidate.recipe === 'hook-teaser' || candidate.recipe === 'harmonic-double-drop'
+  ));
+
+  assert.equal(impact.eligible, true);
+  assert.equal(oldShowpieces.every((candidate) => impact.selectionScore > candidate.selectionScore), true);
+  assert.equal(plan.chosen.recipe, 'tease-roll-double-drop');
 });
 
 test('rejects advanced performance recipes when musical and beat evidence is weak', () => {

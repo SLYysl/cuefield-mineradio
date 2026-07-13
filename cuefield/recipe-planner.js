@@ -124,9 +124,14 @@ function landingDiagnostics(timeline, anchors) {
   ));
   const play = plays[plays.length - 1];
   const requestedLanding = toNumber(anchors && anchors.bAnchor, NaN);
-  const actualLanding = play && handoff
-    ? toNumber(play.at, NaN) + (toNumber(handoff.t, NaN) - toNumber(play.t, NaN))
+  const bImpactOffset = anchors && Number.isFinite(anchors.bImpactOffset)
+    ? anchors.bImpactOffset
     : NaN;
+  const actualLanding = Number.isFinite(bImpactOffset) && play
+    ? toNumber(play.at, NaN) + (bImpactOffset - toNumber(play.t, NaN))
+    : (play && handoff
+      ? toNumber(play.at, NaN) + (toNumber(handoff.t, NaN) - toNumber(play.t, NaN))
+      : NaN);
   if (!Number.isFinite(requestedLanding) || !Number.isFinite(actualLanding)) {
     return { runwayAvailable: false, landingError: INVALID_LANDING_ERROR };
   }
@@ -530,6 +535,63 @@ function makeHarmonicDoubleDrop(anchors, scores, assessment) {
   return candidate;
 }
 
+function makeTeaseRollDoubleDrop(anchors, scores, assessment) {
+  const teaserAt = -7.2;
+  const finalPlayAt = -1.6;
+  const handoffAt = 0.6;
+  const fakeOutMs = 140;
+  const fourBeatDuration = 240 / Math.max(assessment.bpmA, 1);
+  const loopStart = Math.max(0, round(anchors.aExit - fourBeatDuration));
+  const bStart = Math.max(0, round(anchors.bAnchor - (0 - finalPlayAt)));
+  const fallbackTimeline = makeBassHandoff(anchors, scores, assessment).timeline
+    .map((action) => ({ ...action }));
+  const score = 0.44
+    + scores.beatScore * 0.14
+    + scores.energyScore * 0.1
+    + assessment.musicalCompatibility * 0.16;
+  const candidate = baseCandidate(
+    'tease-roll-double-drop',
+    score,
+    Math.min(0.96, score + 0.08),
+    ['B hook teaser previews the impact', 'A source roll tightens into a protected double drop'],
+    ['high impact recipe'],
+    {
+      ...anchors,
+      bStart,
+      lead: 7.2,
+      fakeOutMs,
+      teaserUsed: true,
+      bImpactOffset: 0,
+    },
+    [
+      { t: teaserAt, deck: 'B', op: 'play', at: anchors.bAnchor, volume: 0 },
+      { t: teaserAt, deck: 'B', op: 'filter', type: 'highpass', value: 1200, duration: 0 },
+      { t: teaserAt, deck: 'B', op: 'bass', value: 0.1, duration: 0 },
+      { t: -7, deck: 'B', op: 'volume', value: 0.32, duration: 220 },
+      { t: -6.1, deck: 'B', op: 'volume', value: 0, duration: 180 },
+      { t: -5.8, deck: 'B', op: 'stop' },
+      { t: -4, deck: 'A', op: 'loop', enabled: true, startAt: loopStart, bpm: assessment.bpmA, loopBeats: 4, slip: true },
+      { t: -2, deck: 'A', op: 'loop', enabled: true, startAt: loopStart, bpm: assessment.bpmA, loopBeats: 2, slip: true },
+      { t: finalPlayAt, deck: 'B', op: 'play', at: bStart, volume: 0 },
+      { t: finalPlayAt, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 0 },
+      { t: finalPlayAt, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
+      { t: -1, deck: 'A', op: 'loop', enabled: true, startAt: loopStart, bpm: assessment.bpmA, loopBeats: 1, slip: true },
+      { t: -0.5, deck: 'A', op: 'loop', enabled: true, startAt: loopStart, bpm: assessment.bpmA, loopBeats: 0.5, slip: true },
+      { t: -0.14, deck: 'A', op: 'loop', enabled: false, slip: true },
+      { t: -0.14, deck: 'A', op: 'volume', value: 0.08, duration: 0, optionalWhenLate: true, maxLateMs: 60 },
+      { t: 0, deck: 'A', op: 'volume', value: 0, duration: 0 },
+      { t: 0, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 0 },
+      { t: 0, deck: 'B', op: 'volume', value: 1, duration: 0 },
+      { t: 0, deck: 'B', op: 'bass', value: 1, duration: 0 },
+      { t: handoffAt, deck: 'B', op: 'handoff' },
+    ],
+    { audibleStart: teaserAt, preRollDuration: 0 },
+  );
+  candidate.fallbackTimeline = fallbackTimeline;
+  candidate.fallbackRecipe = 'bass-eq-handoff';
+  return candidate;
+}
+
 function musicalAssessment(fromProfile, toProfile) {
   const first = fromProfile && fromProfile.musicalProfile;
   const second = toProfile && toProfile.musicalProfile;
@@ -547,6 +609,7 @@ function musicalAssessment(fromProfile, toProfile) {
     harmonicSimilarity: musicalEvidence ? toNumber(comparison.harmonicSimilarity) : 0,
     keyCompatibility: musicalEvidence ? toNumber(comparison.keyCompatibility) : 0,
     melodySimilarity: musicalEvidence ? toNumber(comparison.melodySimilarity) : 0,
+    musicalRisks: musicalEvidence && Array.isArray(comparison.risks) ? comparison.risks : [],
   };
 }
 
@@ -797,6 +860,25 @@ function recipeEligibility(candidate, context) {
     if (severeOverlapRisk) return { eligible: false, reason: 'vocal or style overlap is unsafe', preference: 0 };
     return { eligible: true, reason: '', preference: 0.42 };
   }
+  if (candidate.recipe === 'tease-roll-double-drop') {
+    if (context.recentRecipes.includes(candidate.recipe)) return { eligible: false, reason: 'impact recipe cooldown', preference: 0 };
+    if (route !== 'structure-mix') return { eligible: false, reason: 'route does not support the impact recipe', preference: 0 };
+    if (assessment.entrySource === 'fallback' || context.entryConfidence < 0.78 || !['hook', 'chorus', 'drop'].includes(String(context.entryType))) {
+      return { eligible: false, reason: 'landing is not a trusted climax', preference: 0 };
+    }
+    if (!assessment.exitTrusted) return { eligible: false, reason: 'entry or exit evidence is not trusted', preference: 0 };
+    if (!['release', 'phrase-boundary', 'outro', 'natural-tail'].includes(assessment.exitType)) return { eligible: false, reason: 'exit is not a loop-safe phrase', preference: 0 };
+    if (!assessment.beatGridTrusted || assessment.relativeTempoDelta > 0.06) return { eligible: false, reason: 'beat or tempo evidence is unsafe', preference: 0 };
+    const musicalClash = assessment.musicalRisks.some((risk) => (
+      risk === 'harmonic-clash' || risk === 'melody-contour-contrast'
+    ));
+    if (!assessment.musicalEvidence || assessment.musicalCompatibility < 0.72 || musicalClash) {
+      return { eligible: false, reason: 'musical evidence is not compatible enough', preference: 0 };
+    }
+    if (assessment.sourceRunway < 240 / Math.max(assessment.bpmA, 1)) return { eligible: false, reason: 'source runway is too short for four beats', preference: 0 };
+    if (severeOverlapRisk) return { eligible: false, reason: 'vocal or style overlap is unsafe', preference: 0 };
+    return { eligible: true, reason: '', preference: 0.56 };
+  }
   if (candidate.recipe === 'quick-safe-fade') return { eligible: true, reason: '', preference: 0.04 };
   return { eligible: false, reason: 'unsupported recipe', preference: 0 };
 }
@@ -829,6 +911,7 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
     makeSourceLoopRoll(anchors, scores, assessment),
     makeHookTeaser(anchors, scores, assessment),
     makeHarmonicDoubleDrop(anchors, scores, assessment),
+    makeTeaseRollDoubleDrop(anchors, scores, assessment),
   ].map((candidate) => ({
     ...candidate,
     anchors: { ...candidate.anchors, ...assessment },
@@ -842,6 +925,8 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
       severeOverlapRisk,
       sectionTier,
       entryType: opts.sectionChoice && opts.sectionChoice.entry && opts.sectionChoice.entry.type,
+      entryConfidence: assessment.entryConfidence,
+      recentRecipes: Array.isArray(opts.recentRecipes) ? opts.recentRecipes : [],
     }),
   }));
   const candidatesWithEligibility = evaluated.map((item) => ({
