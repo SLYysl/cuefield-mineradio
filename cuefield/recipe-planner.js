@@ -408,12 +408,13 @@ function makeEchoOut(anchors, scores, assessment) {
     [
       { t: playAt, deck: 'B', op: 'play', at: bStart, volume: 0 },
       { t: playAt, deck: 'B', op: 'bass', value: 0.15, duration: 0 },
-      { t: playAt, deck: 'B', op: 'volume', value: 1, duration: 3000, curve: 'equal-power-in' },
+      { t: -1.4, deck: 'B', op: 'volume', value: 1, duration: 1600, curve: 'equal-power-in' },
       { t: -2, deck: 'A', op: 'echo', enabled: true, bpm: assessment.bpmA, delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 180 },
       { t: -1.4, deck: 'A', op: 'bass', value: 0.45, duration: 600 },
-      { t: -1.2, deck: 'A', op: 'volume', value: 0, duration: 1400, curve: 'equal-power-out' },
+      { t: -1.2, deck: 'A', op: 'volume', value: 0.32, duration: 1400, curve: 'equal-power-out' },
       { t: -0.4, deck: 'B', op: 'bass', value: 1, duration: 800 },
-      { t: 0.2, deck: 'A', op: 'echo', enabled: false, bpm: assessment.bpmA, delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 160, tailMs: 1200 },
+      { t: 0.2, deck: 'A', op: 'volume', value: 0, duration: 1400, curve: 'equal-power-out' },
+      { t: 0.7, deck: 'A', op: 'echo', enabled: false, bpm: assessment.bpmA, delayBeats: 0.5, feedback: 0.56, wet: 0.34, duration: 160, tailMs: 1200 },
       { t: handoffAt, deck: 'B', op: 'handoff' },
     ],
   );

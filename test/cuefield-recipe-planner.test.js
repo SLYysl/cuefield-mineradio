@@ -616,8 +616,16 @@ test('selects echo out when a late contrast has unsafe sustained overlap', () =>
   assert.equal(plan.diagnostics.eligibleRecipes.includes('echo-out'), true);
   const release = plan.chosen.timeline.find((action) => action.op === 'echo' && action.enabled === false);
   const handoff = plan.chosen.timeline.find((action) => action.op === 'handoff');
+  const bFade = plan.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'volume');
+  const aFades = plan.chosen.timeline.filter((action) => action.deck === 'A' && action.op === 'volume');
   assert.equal(release.tailMs >= 1000, true);
-  assert.equal(handoff.t - release.t >= 1, true);
+  assert.equal(handoff.t - release.t >= 0.8, true);
+  assert.equal(bFade.t >= -1.5, true);
+  assert.equal(aFades.length, 2);
+  assert.equal(aFades[0].value >= 0.25 && aFades[0].value <= 0.4, true);
+  assert.equal(aFades[1].t >= 0.2, true);
+  assert.equal(aFades[1].t + aFades[1].duration / 1000 >= 1.5, true);
+  assert.equal(plan.chosen.window.audibleOverlap <= 3.2, true);
 });
 
 test('embeds low-band ducking in a trusted bass handoff', () => {
