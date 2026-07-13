@@ -1,29 +1,27 @@
-# CURRENT_STATE - Cuefield local musical windows
-> 更新时间: 2026-07-12 | 线程: Task 6 final regression and checkpoint
+# CURRENT_STATE - Cuefield Impact Combo
+> 更新时间: 2026-07-13 | 线程: Task 6 real-song regression
 
 ## 目标
-- 让局部音乐窗口参与 transition matching，同时服从结构与可执行性约束。
+- 在严格结构/节拍/旋律门槛下执行 teaser + source roll + double drop，并保留自然降级。
 
 ## 已做
-- transition-aware sampling，最多 4 个 4s 窗口；分析上限 <=16s。
-- compact local profiles、pair ranking 与 compact feedback diagnostics。
-- 高置信 clash 会阻止 long overlap 和 harmonic double-drop，但保留短可执行 fallback。
-- old/weak cache 对 local musical scoring 保持 neutral；local evidence 不覆盖 structure/vocal/timing。
-- 回归：`node --test test/*.test.js` = 346/346 tests pass, 0 fail。
-- sampler 聚焦测试 = 11 tests, 11 pass，并确认 <=22050*16 cap。
-- smart candidate evaluation skips Basic Pitch。
-- final selected A/B uses sanitized lyric+beat structure windows, then replans once。
-- upstream queue: one active request, max 4 queued；standard-quality URL lookup 8s；stream 32MiB。
-- fetch/decode/refinement each have bounded timeouts；structured result cannot be overwritten by stale generic。
+- `tease-roll-double-drop`: B Hook teaser、A 4/2/1/0.5 beat roll、140ms fake-out、B Hook/Drop impact。
+- fake-out 超过 60ms 会跳过；运行时降级、成功 handoff 后 cooldown、compact feedback 已接通。
+- Echo Out 保留 A 0.32 bed，B 进入后 A 再延迟淡出。
+- camera beats 继续负责结构/能量；pulse beats 独立提供 grid quality，标准 0.72 confidence 且 timing stability >= 0.85 才可信。
+- 窗口评分按 Impact 的短 teaser overlap 评估，并在总分并列时服从 recipe selection score。
+- 真实规划：`铁血丹心 -> Never Be Like You` 选择 Impact；cooldown 后不再选择 Impact，当前降级 `intro-outro-long-blend`。
+- `Lucifer -> Teenage Dreams` 仍选择 `late-contrast-release + echo-out`。
+- 回归：`node --test test/*.test.js` = 376/376；syntax 与 `git diff --check` 通过。
 
 ## 未做 / 下一步
-- real-song listening，确认局部匹配在真实歌曲上听感成立。
+- 人工试听上述 Impact 配对，重点听 teaser、roll、fake-out 和 B impact 是否自然。
+- 根据 typed feedback 再调动作参数；当前不放宽 Hook/旋律/速度/exit 安全门槛。
 
 ## 关键约束 / 红线
-- <=16s analysis；local evidence cannot override structure/vocal/timing。
-- 保留 `desktop/main.js` 的 local Metal edit；本 checkpoint 不包含它。
+- 保留 `desktop/main.js` 的用户本地 Metal edit；不得提交。
+- 本地 beatmap cache 与 `data/cuefield-feedback.jsonl` 不提交。
 
 ## 关键路径 / 文件
-- `cuefield/musical-profile.js`, `cuefield/transition-window-planner.js`
-- `public/cuefield-musical-sampler.js`, `desktop/cuefield-musical-worker.js`
-- `server.js`, `test/cuefield-musical-sampler.test.js`, `test/*.test.js`
+- `cuefield/adapter-mineradio.js`, `cuefield/cue-profile.js`, `cuefield/recipe-planner.js`
+- `cuefield/transition-window-planner.js`, `public/cuefield-timeline-executor.js`, `test/*.test.js`

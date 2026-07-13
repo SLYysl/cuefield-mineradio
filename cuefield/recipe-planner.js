@@ -628,20 +628,32 @@ function safetyAssessment(fromProfile, toProfile, sectionChoice = {}, routePolic
   const bpmA = Math.max(0, toNumber(fromProfile && fromProfile.bpm));
   const bpmB = Math.max(0, toNumber(toProfile && toProfile.bpm));
   const relativeTempoDelta = bpmA > 0 && bpmB > 0 ? Math.abs(bpmA - bpmB) / Math.max(bpmA, bpmB) : 1;
-  const fromDownbeatConfidence = average((fromProfile && fromProfile.downbeats || []).map((beat) => toNumber(beat.confidence, NaN)));
-  const toDownbeatConfidence = average((toProfile && toProfile.downbeats || []).map((beat) => toNumber(beat.confidence, NaN)));
-  const fromBarStability = average((fromProfile && fromProfile.bars || []).map((bar) => toNumber(bar.beatStability, NaN)));
-  const toBarStability = average((toProfile && toProfile.bars || []).map((bar) => toNumber(bar.beatStability, NaN)));
+  const fromGridQuality = fromProfile && fromProfile.gridQuality || {};
+  const toGridQuality = toProfile && toProfile.gridQuality || {};
+  const fromDownbeatConfidence = toNumber(fromGridQuality.downbeatConfidence,
+    average((fromProfile && fromProfile.downbeats || []).map((beat) => toNumber(beat.confidence, NaN))));
+  const toDownbeatConfidence = toNumber(toGridQuality.downbeatConfidence,
+    average((toProfile && toProfile.downbeats || []).map((beat) => toNumber(beat.confidence, NaN))));
+  const fromBarStability = toNumber(fromGridQuality.beatStability,
+    average((fromProfile && fromProfile.bars || []).map((bar) => toNumber(bar.beatStability, NaN))));
+  const toBarStability = toNumber(toGridQuality.beatStability,
+    average((toProfile && toProfile.bars || []).map((bar) => toNumber(bar.beatStability, NaN))));
+  const fromDownbeatCount = toNumber(fromGridQuality.downbeatCount, (fromProfile && fromProfile.downbeats || []).length);
+  const toDownbeatCount = toNumber(toGridQuality.downbeatCount, (toProfile && toProfile.downbeats || []).length);
+  const fromTimingStability = toNumber(fromGridQuality.timingStability, 1);
+  const toTimingStability = toNumber(toGridQuality.timingStability, 1);
   const beatGridTrusted = !!(
     fromProfile && toProfile
     && toNumber(fromProfile.gridStep) > 0
     && toNumber(toProfile.gridStep) > 0
-    && (fromProfile.downbeats || []).length >= 4
-    && (toProfile.downbeats || []).length >= 4
+    && fromDownbeatCount >= 4
+    && toDownbeatCount >= 4
     && fromDownbeatConfidence >= 0.65
     && toDownbeatConfidence >= 0.65
     && fromBarStability >= 0.35
     && toBarStability >= 0.35
+    && fromTimingStability >= 0.85
+    && toTimingStability >= 0.85
   );
   let overlapClass = 'short';
   if (entryTrusted && beatGridTrusted && relativeTempoDelta <= 0.08) overlapClass = 'long';

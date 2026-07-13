@@ -41,6 +41,7 @@ function normalizedFixture(entry, key) {
       duration: analysis.track.duration,
       gridStep: analysis.analysis.gridStep,
       beats: analysis.analysis.beats,
+      gridBeats: analysis.analysis.gridBeats,
     },
   };
 }

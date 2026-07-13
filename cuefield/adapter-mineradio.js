@@ -3,7 +3,9 @@ function toNumber(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function normalizeBeatEvent(raw, index, gridStep) {
+const PACKED_BEAT_COMBOS = ['', 'downbeat', 'push', 'drop', 'rebound', 'accent'];
+
+function normalizeBeatEvent(raw, index, gridStep, gridEvidence = false) {
   if (Array.isArray(raw)) {
     const time = toNumber(raw[0], 0);
     return {
@@ -15,7 +17,9 @@ function normalizeBeatEvent(raw, index, gridStep) {
       low: toNumber(raw[4], toNumber(raw[9], 0)),
       body: toNumber(raw[5], 0),
       snap: toNumber(raw[6], toNumber(raw[10], 0)),
-      combo: toNumber(raw[7], 0) === 1 || toNumber(raw[8], 0) >= 7 ? 'downbeat' : '',
+      combo: gridEvidence
+        ? (PACKED_BEAT_COMBOS[toNumber(raw[7], 0)] || '')
+        : (toNumber(raw[7], 0) === 1 || toNumber(raw[8], 0) >= 7 ? 'downbeat' : ''),
       step: gridStep || 0,
     };
   }
@@ -48,12 +52,24 @@ function normalizeWindows(windows) {
 function normalizeMineradioBeatMap(track, map, extra = {}) {
   const gridStep = toNumber(map && map.gridStep, 0);
   const rawBeats = (map && (map.cameraBeats || map.beats || map.kicks)) || [];
+  const usesPulseGrid = !!(map && Array.isArray(map.pulseBeats) && map.pulseBeats.length);
+  const rawGridBeats = usesPulseGrid
+    ? map.pulseBeats
+    : ((map && (map.beats || map.cameraBeats || map.kicks)) || []);
   const beats = rawBeats
     .map((beat, index) => normalizeBeatEvent(beat, index, gridStep))
     .filter((beat) => Number.isFinite(beat.time))
     .sort((a, b) => a.time - b.time);
+  const gridBeats = rawGridBeats
+    .map((beat, index) => normalizeBeatEvent(beat, index, gridStep, usesPulseGrid))
+    .filter((beat) => Number.isFinite(beat.time))
+    .sort((a, b) => a.time - b.time);
   const duration = toNumber(track && track.duration, toNumber(map && map.duration, beats.length ? beats[beats.length - 1].time : 0));
   const downbeats = beats.filter((beat, index) => {
+    if (beat.combo === 'downbeat') return true;
+    return gridStep > 0 && index % 16 === 0 && beat.impact >= 0.4;
+  });
+  const gridDownbeats = gridBeats.filter((beat, index) => {
     if (beat.combo === 'downbeat') return true;
     return gridStep > 0 && index % 16 === 0 && beat.impact >= 0.4;
   });
@@ -75,6 +91,8 @@ function normalizeMineradioBeatMap(track, map, extra = {}) {
       source: 'mineradio',
       beats,
       downbeats,
+      gridBeats,
+      gridDownbeats,
       phraseBoundaries,
       energyCurve: beats.map((beat) => ({ time: beat.time, value: Math.max(0, Math.min(1, beat.impact || beat.strength || 0)) })),
       lowBand: beats.map((beat) => ({ time: beat.time, value: beat.low })),

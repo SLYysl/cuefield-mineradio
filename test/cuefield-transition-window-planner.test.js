@@ -857,6 +857,7 @@ test('blocks the composite impact recipe only when its identifier is in recent h
   const blocked = chooseTransitionWindow(from, to, { recentRecipes: ['tease-roll-double-drop'] });
   const unrelated = chooseTransitionWindow(from, to, { recentRecipes: ['quick-safe-fade'] });
 
+  assert.equal(open.chosen.recipeCandidate.recipe, 'tease-roll-double-drop');
   assert.equal(validRecipes(open).includes('tease-roll-double-drop'), true);
   assert.equal(validRecipes(blocked).includes('tease-roll-double-drop'), false);
   assert.notEqual(blocked.chosen.recipeCandidate.recipe, 'tease-roll-double-drop');

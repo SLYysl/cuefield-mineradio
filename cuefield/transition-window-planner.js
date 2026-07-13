@@ -223,8 +223,10 @@ function grooveContinuity(from, to, exit, entry, diagnostics) {
   return round(clamp(1 - differences.reduce((sum, value) => sum + value, 0) / differences.length));
 }
 
-function overlapScore(overlap, relativeTempoDelta) {
-  const target = relativeTempoDelta <= 0.08 ? 8 : (relativeTempoDelta <= 0.15 ? 5 : 3.4);
+function overlapScore(overlap, relativeTempoDelta, recipe = '') {
+  const target = recipe === 'tease-roll-double-drop'
+    ? 1.2
+    : (relativeTempoDelta <= 0.08 ? 8 : (relativeTempoDelta <= 0.15 ? 5 : 3.4));
   return clamp(1 - Math.abs(toNumber(overlap) - target) / target);
 }
 
@@ -328,10 +330,21 @@ function rankWindow({ exit, entry, sectionChoice, recipeCandidate, diagnostics, 
   const localMusicalAdjustment = localMusicalEvidence
     ? Math.max(-0.08, Math.min(0.08, (toNumber(localMusicalEvidence.score, 0.5) - 0.5) * 0.16))
     : 0;
+  const rawRecipeSelectionScore = toNumber(
+    recipeCandidate.selectionScore == null ? recipeCandidate.score : recipeCandidate.selectionScore,
+  );
+  const recipeSelectionScore = Math.max(0, Math.min(
+    recipeCandidate.recipe === 'tease-roll-double-drop' ? 1.7 : 1,
+    rawRecipeSelectionScore,
+  ));
   const score = clamp(clamp(sectionChoice.score) * 0.34
-    + clamp(recipeCandidate.selectionScore == null ? recipeCandidate.score : recipeCandidate.selectionScore) * 0.2
+    + recipeSelectionScore * 0.2
     + ((clamp(exit.confidence) + clamp(entry.confidence)) / 2) * 0.16
-    + overlapScore(recipeCandidate.window.audibleOverlap, toNumber(diagnostics.relativeTempoDelta)) * 0.12
+    + overlapScore(
+      recipeCandidate.window.audibleOverlap,
+      toNumber(diagnostics.relativeTempoDelta),
+      recipeCandidate.recipe,
+    ) * 0.12
     + continuity * 0.18
     - latePenalty
     - routePenalty
@@ -688,7 +701,17 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}, opts = {}) {
       });
     });
   });
-  candidateWindows.sort((a, b) => b.score - a.score || a.exit.time - b.exit.time || a.entry.landingAt - b.entry.landingAt);
+  candidateWindows.sort((a, b) => {
+    const impactSelectionScore = (window) => (
+      window.recipeCandidate && window.recipeCandidate.recipe === 'tease-roll-double-drop'
+        ? toNumber(window.recipeCandidate.selectionScore)
+        : 0
+    );
+    return b.score - a.score
+      || impactSelectionScore(b) - impactSelectionScore(a)
+      || a.exit.time - b.exit.time
+      || a.entry.landingAt - b.entry.landingAt;
+  });
   const selectedPolicy = candidateWindows.length ? policy : terminalRescuePolicy(policy, fromProfile, protectedUntil);
   const chosen = candidateWindows[0] || terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protectedUntil, selectedPolicy, rejected, entries);
   chosen.policy = selectedPolicy;

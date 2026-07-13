@@ -40,6 +40,44 @@ test('normalizes compressed Mineradio beat arrays for Cuefield analysis', () => 
   assert.equal(analysis.analysis.downbeats.length > 2, true);
 });
 
+test('keeps camera beats for structure while decoding pulse beats as independent grid evidence', () => {
+  const packed = (time, combo, flags = 7) => [
+    time, 0.5, 0.72, 0.2, 0.5, 0.2, 0.1, combo, flags, 0.6, 0.1, 0.5,
+  ];
+  const map = {
+    duration: 4,
+    gridStep: 0.5,
+    cameraBeats: [packed(0, 2), packed(1, 2)],
+    pulseBeats: [
+      packed(0, 2),
+      packed(0.5, 1),
+      packed(1, 3),
+      packed(1.5, 4),
+    ],
+  };
+
+  const result = normalizeMineradioBeatMap({ id: 'a', duration: 4 }, map);
+
+  assert.equal(result.analysis.beats.length, 2);
+  assert.deepEqual(result.analysis.downbeats.map((beat) => beat.time), [0, 1]);
+  assert.equal(result.analysis.gridBeats.length, 4);
+  assert.deepEqual(result.analysis.gridBeats.map((beat) => beat.combo), ['push', 'downbeat', 'drop', 'rebound']);
+  assert.deepEqual(result.analysis.gridDownbeats.map((beat) => beat.time), [0.5]);
+});
+
+test('keeps legacy packed downbeat semantics when pulse beats are absent', () => {
+  const packed = (time) => [
+    time, 0.5, 0.72, 0.2, 0.5, 0.2, 0.1, 2, 7, 0.6, 0.1, 0.5,
+  ];
+  const result = normalizeMineradioBeatMap({ id: 'a', duration: 4 }, {
+    duration: 4,
+    gridStep: 0.5,
+    cameraBeats: [packed(0), packed(1)],
+  });
+
+  assert.deepEqual(result.analysis.gridDownbeats.map((beat) => beat.time), [0, 1]);
+});
+
 test('carries a cached musical profile into Cuefield analysis', () => {
   const map = makeCompressedMap();
   map.musicalProfile = { source: 'basic-pitch', confidence: 0.8, noteCount: 40 };

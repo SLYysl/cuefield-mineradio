@@ -63,7 +63,7 @@ function beatsInRange(beats, start, end) {
   return beats.filter((beat) => beat.time >= start && beat.time < end);
 }
 
-function buildBars(beats, downbeats, gridStep, duration) {
+function buildBars(beats, downbeats, gridStep, duration, stableConfidence = 0.75) {
   return downbeats.map((downbeat, index) => {
     const next = downbeats[index + 1];
     const start = downbeat.time;
@@ -77,9 +77,20 @@ function buildBars(beats, downbeats, gridStep, duration) {
       lowDensity: round(average(window.map((beat) => beat.low))),
       bodyDensity: round(average(window.map((beat) => beat.body))),
       snapDensity: round(average(window.map((beat) => beat.snap))),
-      beatStability: round(window.length ? window.filter((beat) => beat.confidence >= 0.75).length / window.length : 0),
+      beatStability: round(window.length ? window.filter((beat) => beat.confidence >= stableConfidence).length / window.length : 0),
     };
   });
+}
+
+function gridTimingStability(beats, gridStep) {
+  if (gridStep <= 0 || beats.length < 2) return 0;
+  let stable = 0;
+  for (let index = 1; index < beats.length; index += 1) {
+    const deltaInBeats = (beats[index].time - beats[index - 1].time) / gridStep;
+    const nearestMultiple = Math.round(deltaInBeats);
+    if (nearestMultiple >= 1 && Math.abs(deltaInBeats - nearestMultiple) <= 0.18) stable += 1;
+  }
+  return round(stable / (beats.length - 1));
 }
 
 function buildPhrases(bars, duration) {
@@ -156,6 +167,11 @@ function buildCueProfile(input = {}) {
     .filter((beat, index) => isDownbeat(beat, index))
     .map((beat) => ({ time: beat.time, confidence: beat.confidence, energy: round(beatEnergy(beat)) }));
   const bars = buildBars(beats, downbeats, gridStep, duration);
+  const gridBeats = normalizeBeats(map.gridBeats && map.gridBeats.length ? map.gridBeats : beats);
+  const gridDownbeats = gridBeats
+    .filter((beat, index) => isDownbeat(beat, index))
+    .map((beat) => ({ time: beat.time, confidence: beat.confidence, energy: round(beatEnergy(beat)) }));
+  const gridBars = buildBars(gridBeats, gridDownbeats, gridStep, duration, 0.7);
 
   return {
     track,
@@ -165,6 +181,12 @@ function buildCueProfile(input = {}) {
     beats,
     downbeats,
     bars,
+    gridQuality: {
+      downbeatCount: gridDownbeats.length,
+      downbeatConfidence: round(average(gridDownbeats.map((beat) => beat.confidence))),
+      beatStability: round(average(gridBars.map((bar) => bar.beatStability))),
+      timingStability: gridTimingStability(gridBeats, gridStep),
+    },
     phrases: buildPhrases(bars, duration),
     cuePoints: buildCuePoints(input.candidates || [], downbeats, bars, duration),
     windows: buildWindows(beats, duration),

@@ -516,6 +516,42 @@ test('does not trust a low-confidence beat grid for long overlap', () => {
   assert.notEqual(plan.chosen.anchors.overlapClass, 'long');
 });
 
+test('trusts the 0.72 confidence emitted by Mineradio pulse beats', () => {
+  const fromMap = makeBeatMap(128, 0.5);
+  const toMap = makeBeatMap(120, 0.52);
+  fromMap.beats.forEach((beat) => { beat.confidence = 0.72; });
+  toMap.beats.forEach((beat) => { beat.confidence = 0.72; });
+  const exit = { type: 'release', role: 'exit', time: 112, confidence: 0.82 };
+  const entry = { type: 'hook', role: 'entry', source: 'lyric+beat', time: 24, confidence: 0.88 };
+  const fromProfile = buildCueProfile({ track: { title: 'A', duration: 128 }, map: fromMap, candidates: [exit] });
+  const toProfile = buildCueProfile({ track: { title: 'B', duration: 120 }, map: toMap, candidates: [entry] });
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit, entry, evaluation: { tier: 'usable', risks: [] } },
+  });
+
+  assert.equal(plan.diagnostics.beatGridTrusted, true);
+});
+
+test('rejects irregular 0.72 confidence pulse timing as an untrusted grid', () => {
+  const fromMap = makeBeatMap(128, 0.5);
+  const toMap = makeBeatMap(120, 0.5);
+  [fromMap, toMap].forEach((map) => {
+    map.beats.forEach((beat, index) => {
+      beat.confidence = 0.72;
+      beat.time += index % 2 ? 0.2 : 0;
+    });
+  });
+  const exit = { type: 'release', role: 'exit', time: 112, confidence: 0.82 };
+  const entry = { type: 'hook', role: 'entry', source: 'lyric+beat', time: 24, confidence: 0.88 };
+  const fromProfile = buildCueProfile({ track: { title: 'A', duration: 128 }, map: fromMap, candidates: [exit] });
+  const toProfile = buildCueProfile({ track: { title: 'B', duration: 120 }, map: toMap, candidates: [entry] });
+  const plan = planRecipeCandidates(fromProfile, toProfile, {
+    sectionChoice: { exit, entry, evaluation: { tier: 'usable', risks: [] } },
+  });
+
+  assert.equal(plan.diagnostics.beatGridTrusted, false);
+});
+
 test('reports planner features for outro completeness, intro aggression, and texture distance', () => {
   const fromProfile = makeProfile('A', 128, [
     { type: 'outro', role: 'exit', time: 112, confidence: 0.86 },
@@ -595,6 +631,8 @@ test('rejects filtered pickup without a trusted beat grid', () => {
   const toProfile = makeProfile('B', 120, [entry]);
   fromProfile.downbeats.forEach((beat) => { beat.confidence = 0.3; });
   fromProfile.bars.forEach((bar) => { bar.beatStability = 0.1; });
+  fromProfile.gridQuality.downbeatConfidence = 0.3;
+  fromProfile.gridQuality.beatStability = 0.1;
   const plan = planRecipeCandidates(fromProfile, toProfile, {
     sectionChoice: { exit: { time: 112 }, entry, evaluation: { tier: 'usable', risks: [] } },
     routePolicy: { route: 'late-contrast-rise', compatibilityClass: 'contrast', contrastDirection: 'rising' },
