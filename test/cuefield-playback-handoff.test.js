@@ -42,6 +42,45 @@ test('Cuefield transition keeps prepared B volume in its WebAudio graph', () => 
   assert.match(html, /preparedAudio && preparedAudio\._cuefieldDeckGraph/);
 });
 
+test('Cuefield prepared audio carries the target song key', () => {
+  const html = readIndexHtml();
+  const start = html.indexOf('function prepareCuefieldPendingAudio');
+  const end = html.indexOf('function fadeCuefieldMediaVolume', start);
+  const context = {
+    Audio: function Audio() {
+      this.src = '';
+      this.load = function() {};
+    },
+    cuefieldAutoMixPreparedAudio: null,
+    stopCuefieldPreparedAudio() {},
+    cuefieldSetAudioTime() {},
+    cuefieldStartTimeForPending() { return 0; },
+  };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+
+  const media = context.prepareCuefieldPendingAudio({ audioUrl: '/audio/b', toKey: 'song:b' });
+
+  assert.equal(media._cuefieldSongKey, 'song:b');
+});
+
+test('Cuefield prepared audio identity rejects B audio for C metadata', () => {
+  const html = readIndexHtml();
+  const start = html.indexOf('function cuefieldPreparedAudioMatchesSong');
+  const end = html.indexOf('async function playQueueAt', start);
+  assert.notEqual(start, -1, 'prepared audio identity helper should exist');
+  assert.notEqual(end, -1, 'prepared audio identity helper should precede playback');
+  const context = {
+    beatMapSongKey: (song) => song && song.key || '',
+  };
+  vm.createContext(context);
+  vm.runInContext(html.slice(start, end), context);
+
+  const media = { _cuefieldSongKey: 'song:b' };
+  assert.equal(context.cuefieldPreparedAudioMatchesSong(media, { key: 'song:b' }, 'song:b'), true);
+  assert.equal(context.cuefieldPreparedAudioMatchesSong(media, { key: 'song:c' }, 'song:b'), false);
+});
+
 test('Cuefield deck graphs keep an echo tail outside the dry gain lifecycle', () => {
   const html = readIndexHtml();
   const start = html.indexOf('function configureCuefieldDeckGraph');

@@ -870,6 +870,36 @@ test('does not reuse a prepared transition after queue token or index changes', 
   assert.equal(automix.shouldTrigger({ token: 4, currentIndex: 2, currentTime: 20 }), true);
 });
 
+test('does not trigger prepared B after its queue slot now points to C', async () => {
+  const automix = createCuefieldAutoMix({
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => true,
+    planTransition: async () => ({
+      ok: true,
+      chosen: {
+        recipe: 'section-jump',
+        score: 0.88,
+        exit: { time: 16 },
+        entry: { time: 8 },
+        evaluation: { tier: 'usable', risks: [] },
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+
+  automix.setEnabled(true);
+  await automix.prepare({
+    token: 4,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+  });
+
+  assert.equal(automix.shouldTrigger({ token: 4, currentIndex: 0, currentTime: 20, nextKey: 'c' }), false);
+  assert.equal(automix.shouldTrigger({ token: 4, currentIndex: 0, currentTime: 20, nextKey: 'b' }), true);
+});
+
 test('preserves a selected bridge plan in pending runtime state', async () => {
   const bridgePlan = { template: 'drum-build', bars: 8, climax: { time: 64, type: 'hook', confidence: 0.88 } };
   const plan = {

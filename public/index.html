@@ -11997,12 +11997,18 @@ function runCuefieldVolumeCurve(pending, nextMedia) {
 
 function prepareCuefieldPendingAudio(pending) {
   if (!pending || !pending.audioUrl) return null;
-  if (pending.preparedAudio && pending.preparedAudio.src) return pending.preparedAudio;
+  var targetKey = String(pending.toKey || '');
+  if (pending.preparedAudio && pending.preparedAudio.src) {
+    if (pending.preparedAudio._cuefieldSongKey === targetKey) return pending.preparedAudio;
+    stopCuefieldPreparedAudio(pending.preparedAudio);
+    pending.preparedAudio = null;
+  }
   stopCuefieldPreparedAudio();
   var media = new Audio();
   media.crossOrigin = 'anonymous';
   media.preload = 'auto';
   media.volume = 0;
+  media._cuefieldSongKey = targetKey;
   media.src = pending.audioUrl;
   cuefieldSetAudioTime(media, cuefieldStartTimeForPending(pending));
   try { media.load(); } catch (e) {}
@@ -12044,17 +12050,49 @@ async function startCuefieldPreparedAudio(pending) {
   }
 }
 
+function cuefieldPendingQueueSlotMatches(pending) {
+  if (!pending || !pending.toKey) return false;
+  var nextIndex = Number(pending.nextIndex);
+  if (!isFinite(nextIndex) || nextIndex < 0 || nextIndex >= playQueue.length) return false;
+  return beatMapSongKey(playQueue[nextIndex]) === String(pending.toKey);
+}
+
+function cuefieldPendingTargetIndex(pending) {
+  if (!pending || !pending.toKey) return -1;
+  var targetKey = String(pending.toKey);
+  var nextIndex = Number(pending.nextIndex);
+  if (isFinite(nextIndex) && nextIndex >= 0 && nextIndex < playQueue.length
+      && beatMapSongKey(playQueue[nextIndex]) === targetKey) return nextIndex;
+  for (var i = 0; i < playQueue.length; i++) {
+    if (beatMapSongKey(playQueue[i]) === targetKey) return i;
+  }
+  return -1;
+}
+
 function tickCuefieldAutoMix() {
   if (!cuefieldAutoMixEnabled || !cuefieldAutoMix || cuefieldAutoMixExecuting || !audio) return;
-  if (!cuefieldAutoMix.shouldTrigger({ token: trackSwitchToken, currentIndex: currentIdx, currentTime: audio.currentTime || 0 })) return;
-  var pending = cuefieldAutoMix.consumePending();
-  if (pending) executeCuefieldSoftHandoff(pending);
+  var snapshot = cuefieldAutoMix.snapshot();
+  var pending = snapshot && snapshot.pending;
+  if (pending && !cuefieldPendingQueueSlotMatches(pending)) {
+    resetCuefieldAutoMix('queue-target-changed');
+    scheduleCuefieldAutoMixPrepare(trackSwitchToken, currentIdx, 0, 0);
+    return;
+  }
+  var nextKey = pending ? beatMapSongKey(playQueue[pending.nextIndex]) : null;
+  if (!cuefieldAutoMix.shouldTrigger({ token: trackSwitchToken, currentIndex: currentIdx, currentTime: audio.currentTime || 0, nextKey: nextKey })) return;
+  var readyPending = cuefieldAutoMix.consumePending();
+  if (readyPending) executeCuefieldSoftHandoff(readyPending);
 }
 
 async function executeCuefieldSoftHandoff(pending) {
   if (!pending || cuefieldAutoMixExecuting) return;
   if (pending.token !== trackSwitchToken || pending.currentIndex !== currentIdx) return;
   if (pending.nextIndex < 0 || pending.nextIndex >= playQueue.length) return;
+  if (!cuefieldPendingQueueSlotMatches(pending)) {
+    resetCuefieldAutoMix('queue-target-changed');
+    scheduleCuefieldAutoMixPrepare(trackSwitchToken, currentIdx, 0, 0);
+    return;
+  }
   cuefieldAutoMixExecuting = true;
   updateCuefieldAutoMixUi('handoff');
   var chosen = pending.plan && pending.plan.chosen || {};
@@ -12064,6 +12102,13 @@ async function executeCuefieldSoftHandoff(pending) {
     stopCuefieldPreparedAudio(nextMedia);
     cuefieldAutoMixExecuting = false;
     restorePlaybackGain();
+    return;
+  }
+  if (!cuefieldPendingQueueSlotMatches(pending)) {
+    stopCuefieldPreparedAudio(nextMedia);
+    restorePlaybackGain();
+    resetCuefieldAutoMix('queue-target-changed');
+    scheduleCuefieldAutoMixPrepare(trackSwitchToken, currentIdx, 0, 0);
     return;
   }
   if (!nextMedia) {
@@ -12079,15 +12124,24 @@ async function executeCuefieldSoftHandoff(pending) {
       if (nextMedia !== audio) stopCuefieldPreparedAudio(nextMedia);
       return;
     }
+    var handoffIndex = cuefieldPendingTargetIndex(pending);
+    if (handoffIndex < 0) {
+      if (nextMedia !== audio) stopCuefieldPreparedAudio(nextMedia);
+      restorePlaybackGain();
+      resetCuefieldAutoMix('queue-target-missing');
+      scheduleCuefieldAutoMixPrepare(trackSwitchToken, currentIdx, 0, 0);
+      return;
+    }
     playToggleBusy = false;
-    Promise.resolve(playQueueAt(pending.nextIndex, {
+    Promise.resolve(playQueueAt(handoffIndex, {
       preserveHomeState: true,
       cuefieldAutoMix: true,
       preparedAudio: nextMedia,
       preparedProxyAudioUrl: pending.audioUrl,
+      expectedSongKey: pending.toKey,
       fade: false,
     })).then(function(){
-      var handoffSucceeded = currentIdx === pending.nextIndex
+      var handoffSucceeded = currentIdx === handoffIndex
         && audio === nextMedia
         && playing === true
         && trackSwitchToken === Number(pending.token) + 1;
@@ -20349,9 +20403,27 @@ function scheduleAudioResumePosition(media, seconds, token) {
   applyResume();
 }
 
+function cuefieldPreparedAudioMatchesSong(media, song, expectedKey) {
+  if (!media) return true;
+  var preparedKey = String(media._cuefieldSongKey || '');
+  var targetKey = String(beatMapSongKey(song) || '');
+  var lockedKey = String(expectedKey || preparedKey);
+  return !!lockedKey && preparedKey === lockedKey && targetKey === lockedKey;
+}
+
 async function playQueueAt(idx, opts) {
   opts = opts || {};
   if (idx < 0 || idx >= playQueue.length) return;
+  if (opts.preparedAudio && !cuefieldPreparedAudioMatchesSong(opts.preparedAudio, playQueue[idx], opts.expectedSongKey)) {
+    debugPlaybackLog('prepared-audio-key-mismatch', {
+      targetIdx: idx,
+      expectedSongKey: opts.expectedSongKey || '',
+      preparedSongKey: opts.preparedAudio._cuefieldSongKey || '',
+      targetSongKey: beatMapSongKey(playQueue[idx]),
+    });
+    stopCuefieldPreparedAudio(opts.preparedAudio);
+    return false;
+  }
   debugPlaybackLog('playQueueAt:start', {
     targetIdx: idx,
     manual: !!opts.manual,

@@ -277,6 +277,7 @@
       if (!state.enabled || !pending) return false;
       if (pending.token !== ctx.token) return false;
       if (pending.currentIndex !== ctx.currentIndex) return false;
+      if (ctx.nextKey != null && String(pending.toKey) !== String(ctx.nextKey)) return false;
       return toNumber(ctx.currentTime, 0) >= pending.triggerAt;
     }
 

@@ -246,19 +246,24 @@ function createHandoffHistoryHarness(options = {}) {
     'async function executeCuefieldSoftHandoff',
     'function scheduleQueueBeatPrefetch',
   );
+  const startCalls = [];
+  const playCalls = [];
+  const resetCalls = [];
+  const prepareCalls = [];
   const context = {
     cuefieldRecentRecipes: [],
     cuefieldAutoMixExecuting: false,
     trackSwitchToken: 17,
     currentIdx: 0,
     playing: true,
-    playQueue: [{ key: 'a' }, { key: 'b' }],
+    playQueue: options.playQueue || [{ key: 'a' }, { key: 'b' }],
     audio: {},
     playToggleBusy: true,
     updateCuefieldAutoMixUi() {},
     showSourceFallbackNotice() {},
     cuefieldTierLabel: () => 'usable',
     startCuefieldPreparedAudio: async () => {
+      startCalls.push(true);
       if (options.cancelled) context.trackSwitchToken += 1;
       context.preparedMedia = options.preloadFailed ? null : {};
       return context.preparedMedia;
@@ -266,10 +271,14 @@ function createHandoffHistoryHarness(options = {}) {
     stopCuefieldPreparedAudio() {},
     restorePlaybackGain() {},
     showToast() {},
-    runCuefieldVolumeCurve: () => 0,
+    runCuefieldVolumeCurve: () => {
+      if (options.playQueueDuringCurve) context.playQueue = options.playQueueDuringCurve;
+      return 0;
+    },
     cuefieldFeedbackContextFromPending: () => ({}),
     cuefieldScheduleTimeline: (delay, callback) => callback(),
     playQueueAt: async (index, playOptions) => {
+      playCalls.push({ index, playOptions });
       if (options.playFailed) throw new Error('handoff failed');
       if (options.resolvedFailure) return undefined;
       context.currentIdx = index;
@@ -278,12 +287,29 @@ function createHandoffHistoryHarness(options = {}) {
       context.playing = !options.resolvedStale;
       return undefined;
     },
+    beatMapSongKey: (song) => song && song.key || '',
+    cuefieldPendingQueueSlotMatches: (pending) => (
+      !!pending
+      && context.beatMapSongKey(context.playQueue[pending.nextIndex]) === pending.toKey
+    ),
+    cuefieldPendingTargetIndex: (pending) => context.playQueue.findIndex(
+      (song) => context.beatMapSongKey(song) === pending.toKey,
+    ),
+    resetCuefieldAutoMix: (reason) => {
+      resetCalls.push(reason);
+      context.cuefieldAutoMixExecuting = false;
+    },
+    scheduleCuefieldAutoMixPrepare: (...args) => prepareCalls.push(args),
     showCuefieldFeedbackPrompt() {},
     console: { warn() {} },
     Promise,
   };
   vm.createContext(context);
   vm.runInContext(`${historySource}\n${handoffSource}`, context);
+  context.startCalls = startCalls;
+  context.playCalls = playCalls;
+  context.resetCalls = resetCalls;
+  context.prepareCalls = prepareCalls;
   return context;
 }
 
@@ -797,6 +823,8 @@ test('successful handoff records the selected recipe while failed paths do not',
     token: 17,
     currentIndex: 0,
     nextIndex: 1,
+    fromKey: 'a',
+    toKey: 'b',
     executionMode: 'filtered-pickup',
     plan: {
       chosen: {
@@ -825,11 +853,59 @@ test('successful handoff records the selected recipe while failed paths do not',
   }
 });
 
+test('handoff discards prepared B before playback when its queue slot now contains C', async () => {
+  const handoff = createHandoffHistoryHarness({
+    playQueue: [{ key: 'a' }, { key: 'c' }, { key: 'b' }],
+  });
+  const pending = {
+    token: 17,
+    currentIndex: 0,
+    nextIndex: 1,
+    fromKey: 'a',
+    toKey: 'b',
+    executionMode: 'filtered-pickup',
+    plan: { chosen: { evaluation: { tier: 'usable' } } },
+  };
+
+  await handoff.executeCuefieldSoftHandoff(pending);
+  await flushTasks();
+
+  assert.equal(handoff.startCalls.length, 0);
+  assert.equal(handoff.playCalls.length, 0);
+  assert.deepEqual(handoff.resetCalls, ['queue-target-changed']);
+  assert.equal(handoff.prepareCalls.length, 1);
+});
+
+test('handoff follows B by song key when the queue moves during the active blend', async () => {
+  const handoff = createHandoffHistoryHarness({
+    playQueueDuringCurve: [{ key: 'a' }, { key: 'c' }, { key: 'b' }],
+  });
+  const pending = {
+    token: 17,
+    currentIndex: 0,
+    nextIndex: 1,
+    fromKey: 'a',
+    toKey: 'b',
+    executionMode: 'filtered-pickup',
+    plan: { chosen: { evaluation: { tier: 'usable' } } },
+  };
+
+  await handoff.executeCuefieldSoftHandoff(pending);
+  await flushTasks();
+
+  assert.equal(handoff.startCalls.length, 1);
+  assert.equal(handoff.playCalls.length, 1);
+  assert.equal(handoff.playCalls[0].index, 2);
+  assert.equal(handoff.playCalls[0].playOptions.expectedSongKey, 'b');
+});
+
 test('legacy chosen recipe records impact and blocks the next pair plan', async () => {
   const pending = {
     token: 17,
     currentIndex: 0,
     nextIndex: 1,
+    fromKey: 'a',
+    toKey: 'b',
     executionMode: 'filtered-pickup',
     plan: {
       chosen: {
