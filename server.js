@@ -3351,6 +3351,13 @@ const server = http.createServer(async (req, res) => {
         fromLrc: body.fromLrc,
         toLrc: body.toLrc,
         exitBias: body.exitBias || 'late',
+        recentRecipes: Array.isArray(body.recentRecipes)
+          ? body.recentRecipes
+            .filter(recipe => typeof recipe === 'string')
+            .map(recipe => recipe.trim().slice(0, 80))
+            .filter(Boolean)
+            .slice(-2)
+          : [],
         readBeatMapCache,
       });
       const chosen = result && result.chosen || {};

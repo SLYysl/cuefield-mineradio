@@ -166,6 +166,7 @@ function createPairFlowHarness(responses, options = {}) {
   const context = {
     CUEFIELD_PAIR_PLAN_TTL_MS: 300000,
     cuefieldPairPlanCache: new Map(),
+    cuefieldRecentRecipes: (options.recentRecipes || []).slice(),
     beatMapCache: maps,
     beatMapSongKey: (song) => song && song.key || '',
     songProviderKey: () => 'test',
@@ -231,6 +232,52 @@ function queueMap(starts = [0, 20]) {
 
 function flushTasks() {
   return new Promise((resolve) => setImmediate(resolve));
+}
+
+function createHandoffHistoryHarness(options = {}) {
+  const source = read('public/index.html');
+  const historySource = sourceBlock(
+    source,
+    'function rememberCuefieldRecipe',
+    'function readCuefieldSetModePreference',
+  );
+  const handoffSource = sourceBlock(
+    source,
+    'async function executeCuefieldSoftHandoff',
+    'function scheduleQueueBeatPrefetch',
+  );
+  const context = {
+    cuefieldRecentRecipes: [],
+    cuefieldAutoMixExecuting: false,
+    trackSwitchToken: 17,
+    currentIdx: 0,
+    playQueue: [{ key: 'a' }, { key: 'b' }],
+    audio: {},
+    playToggleBusy: true,
+    updateCuefieldAutoMixUi() {},
+    showSourceFallbackNotice() {},
+    cuefieldTierLabel: () => 'usable',
+    startCuefieldPreparedAudio: async () => {
+      if (options.cancelled) context.trackSwitchToken += 1;
+      return options.preloadFailed ? null : {};
+    },
+    stopCuefieldPreparedAudio() {},
+    restorePlaybackGain() {},
+    showToast() {},
+    runCuefieldVolumeCurve: () => 0,
+    cuefieldFeedbackContextFromPending: () => ({}),
+    cuefieldScheduleTimeline: (delay, callback) => callback(),
+    playQueueAt: async () => {
+      if (options.playFailed) throw new Error('handoff failed');
+      return true;
+    },
+    showCuefieldFeedbackPrompt() {},
+    console: { warn() {} },
+    Promise,
+  };
+  vm.createContext(context);
+  vm.runInContext(`${historySource}\n${handoffSource}`, context);
+  return context;
 }
 
 test('desktop bridge exposes the bounded musical analysis IPC', () => {
@@ -669,6 +716,7 @@ test('failed refined transition response returns and caches the initial usable p
     CUEFIELD_PAIR_PLAN_TTL_MS: 300000,
     CUEFIELD_MUSICAL_REFINEMENT_TIMEOUT_MS: 35000,
     cuefieldPairPlanCache: new Map([['a->b:coarse', { createdAt: Date.now(), plan: coarsePlan }]]),
+    cuefieldRecentRecipes: [],
     beatMapCache: { a: queueMap(), b: queueMap() },
     beatMapSongKey: (song) => song.key,
     songProviderKey: () => 'test',
@@ -689,8 +737,106 @@ test('failed refined transition response returns and caches the initial usable p
   const result = await context.planCuefieldSongPair({ key: 'a' }, { key: 'b' }, { refineMusical: true });
 
   assert.equal(result, initialPlan);
-  assert.equal(context.cuefieldPairPlanCache.get('a->b:refined').plan, initialPlan);
+  assert.equal(context.cuefieldPairPlanCache.get('a->b:refined:impact-open').plan, initialPlan);
   assert.equal(context.cuefieldPairPlanCache.get('a->b:coarse').plan, coarsePlan);
+});
+
+test('transition requests snapshot and bound recent recipes across refinement', async () => {
+  const initialPlan = pairPlanFixture('initial-history');
+  const refinedPlan = pairPlanFixture('refined-history');
+  const harness = createPairFlowHarness([initialPlan, refinedPlan], {
+    recentRecipes: ['older', 'tease-roll-double-drop'],
+    schedule: async () => {
+      harness.context.cuefieldRecentRecipes.splice(0, 2, 'normal-a', 'normal-b');
+      return { noteCount: 4 };
+    },
+  });
+
+  await harness.context.planCuefieldSongPair(
+    harness.songs.from,
+    harness.songs.to,
+    { refineMusical: true },
+  );
+
+  assert.equal(harness.apiCalls.length, 2);
+  harness.apiCalls.forEach((call) => {
+    const body = JSON.parse(call.options.body);
+    assert.deepEqual(body.recentRecipes, ['older', 'tease-roll-double-drop']);
+    assert.equal(body.recentRecipes.length <= 2, true);
+  });
+  assert.equal(
+    harness.context.cuefieldPairPlanCache.has('selected-from->selected-to:refined:impact-blocked'),
+    true,
+  );
+});
+
+test('pair plan cache separates impact-open and impact-blocked results', async () => {
+  const harness = createPairFlowHarness([
+    pairPlanFixture('impact-open'),
+    pairPlanFixture('impact-blocked'),
+  ]);
+
+  await harness.context.planCuefieldSongPair(harness.songs.from, harness.songs.to, { refineMusical: false });
+  harness.context.cuefieldRecentRecipes.push('tease-roll-double-drop');
+  await harness.context.planCuefieldSongPair(harness.songs.from, harness.songs.to, { refineMusical: false });
+
+  assert.equal(harness.apiCalls.length, 2);
+  assert.equal(harness.context.cuefieldPairPlanCache.has('selected-from->selected-to:coarse:impact-open'), true);
+  assert.equal(harness.context.cuefieldPairPlanCache.has('selected-from->selected-to:coarse:impact-blocked'), true);
+});
+
+test('successful handoff records the selected recipe while failed paths do not', async () => {
+  const pending = {
+    token: 17,
+    currentIndex: 0,
+    nextIndex: 1,
+    executionMode: 'filtered-pickup',
+    plan: {
+      chosen: {
+        transitionRecipe: 'tease-roll-double-drop',
+        recipeCandidate: { recipe: 'fallback-recipe' },
+        evaluation: { tier: 'usable' },
+      },
+    },
+  };
+  const successful = createHandoffHistoryHarness();
+  await successful.executeCuefieldSoftHandoff(pending);
+  await flushTasks();
+  assert.deepEqual(successful.cuefieldRecentRecipes, ['tease-roll-double-drop']);
+
+  for (const options of [{ playFailed: true }, { cancelled: true }, { preloadFailed: true }]) {
+    const failed = createHandoffHistoryHarness(options);
+    await failed.executeCuefieldSoftHandoff(pending);
+    await flushTasks();
+    assert.deepEqual(failed.cuefieldRecentRecipes, []);
+  }
+});
+
+test('renderer recipe history is bounded and releases impact after two later successes', () => {
+  const context = createHandoffHistoryHarness();
+
+  context.rememberCuefieldRecipe('tease-roll-double-drop');
+  assert.equal(context.cuefieldRecentRecipes.includes('tease-roll-double-drop'), true);
+  context.rememberCuefieldRecipe('normal-a');
+  assert.equal(context.cuefieldRecentRecipes.includes('tease-roll-double-drop'), true);
+  context.rememberCuefieldRecipe('x'.repeat(120));
+
+  assert.deepEqual(context.cuefieldRecentRecipes, ['normal-a', 'x'.repeat(80)]);
+  assert.equal(context.cuefieldRecentRecipes.includes('tease-roll-double-drop'), false);
+});
+
+test('server bounds recent recipe identifiers before the bridge call', () => {
+  const source = read('server.js');
+  const route = sourceBlock(
+    source,
+    "if (pn === '/api/cuefield/transition')",
+    "if (pn === '/api/cuefield/feedback')",
+  );
+
+  assert.match(route, /recentRecipes:\s*Array\.isArray\(body\.recentRecipes\)/);
+  assert.match(route, /typeof recipe === 'string'/);
+  assert.match(route, /slice\(0, 80\)/);
+  assert.match(route, /slice\(-2\)/);
 });
 
 test('thrown refined transition request returns and caches the initial usable plan', async () => {
@@ -716,7 +862,7 @@ test('thrown refined transition request returns and caches the initial usable pl
   assert.equal(result, initialPlan);
   assert.equal(harness.apiCalls.length, 2);
   assert.equal(
-    harness.context.cuefieldPairPlanCache.get('selected-from->selected-to:refined').plan,
+    harness.context.cuefieldPairPlanCache.get('selected-from->selected-to:refined:impact-open').plan,
     initialPlan,
   );
 });
@@ -725,6 +871,7 @@ test('refinement timeout returns the initial plan without populating refined cac
   const initialPlan = pairPlanFixture('initial-before-refine-timeout');
   const harness = createPairFlowHarness([initialPlan], {
     refinementTimeoutMs: 5,
+    recentRecipes: ['tease-roll-double-drop'],
     schedule: async () => new Promise(() => {}),
   });
 
@@ -736,9 +883,9 @@ test('refinement timeout returns the initial plan without populating refined cac
 
   assert.equal(result, initialPlan);
   assert.equal(harness.apiCalls.length, 1);
-  assert.equal(harness.context.cuefieldPairPlanCache.has('selected-from->selected-to:refined'), false);
+  assert.equal(harness.context.cuefieldPairPlanCache.has('selected-from->selected-to:refined:impact-blocked'), false);
   assert.equal(
-    harness.context.cuefieldPairPlanCache.get('selected-from->selected-to:coarse').plan,
+    harness.context.cuefieldPairPlanCache.get('selected-from->selected-to:coarse:impact-blocked').plan,
     initialPlan,
   );
 });
@@ -758,7 +905,7 @@ test('smart candidate evaluation executes ensure with musical profiling skipped 
   assert.equal(harness.apiCalls.length, 1);
   assert.equal(harness.apiCalls[0].url, '/api/cuefield/transition');
   assert.deepEqual(harness.structuredJobs, []);
-  assert.equal(harness.context.cuefieldPairPlanCache.get('selected-from->selected-to:coarse').plan, initialPlan);
+  assert.equal(harness.context.cuefieldPairPlanCache.get('selected-from->selected-to:coarse:impact-open').plan, initialPlan);
 });
 
 test('final AutoMix plan schedules only selected structured pair and replans exactly once', async () => {

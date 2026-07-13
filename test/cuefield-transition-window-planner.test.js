@@ -123,6 +123,49 @@ function musicalWindow(start, root, extra = {}) {
   };
 }
 
+function impactWindowFixture() {
+  const hookEvidence = {
+    repeatedLineCount: 2,
+    repeatedBlockCount: 2,
+    energyLift: 0.2,
+    sustainedEnergy: true,
+  };
+  const from = profile({
+    duration: 128,
+    exits: [exit(96, 0.92, {
+      text: 'Help me to break through',
+      energyBefore: 0.6,
+      energyAfter: 0.543,
+      lowDensity: 0.543,
+    })],
+  });
+  const to = profile({
+    duration: 120,
+    entries: [entry('hook', 32, {
+      source: 'lyric+beat',
+      confidence: 0.92,
+      text: 'Take me to...',
+      playFrom: 32,
+      landingAt: 32,
+      landingType: 'hook',
+      resolvesTo: { type: 'chorus', time: 32, text: 'the moon where we both fell in love...' },
+      energyBefore: 0.3,
+      energyAfter: 0.538,
+      lowDensity: 0.538,
+      evidence: hookEvidence,
+    })],
+  });
+  from.musicalProfile = musicalProfile(0);
+  to.musicalProfile = musicalProfile(0);
+  return { from, to };
+}
+
+function validRecipes(plan) {
+  return [plan.chosen, ...plan.candidates]
+    .map((candidate) => candidate.recipeCandidate && candidate.recipeCandidate.recipe || candidate.recipe)
+    .filter(Boolean);
+}
+
 test('prefers usable early exit at .44 over similar .94 emergency exit', () => {
   const from = profile({
     duration: 200,
@@ -805,4 +848,17 @@ test('compact transition windows expose local diagnostics without raw musical pr
   assert.equal(compactJson.includes('pitchClassProfile'), false);
   assert.equal(compactJson.includes('intervalProfile'), false);
   assert.equal(compactJson.includes('melodyContour'), false);
+});
+
+test('blocks the composite impact recipe only when its identifier is in recent history', () => {
+  const { from, to } = impactWindowFixture();
+
+  const open = chooseTransitionWindow(from, to, { recentRecipes: [] });
+  const blocked = chooseTransitionWindow(from, to, { recentRecipes: ['tease-roll-double-drop'] });
+  const unrelated = chooseTransitionWindow(from, to, { recentRecipes: ['quick-safe-fade'] });
+
+  assert.equal(validRecipes(open).includes('tease-roll-double-drop'), true);
+  assert.equal(validRecipes(blocked).includes('tease-roll-double-drop'), false);
+  assert.notEqual(blocked.chosen.recipeCandidate.recipe, 'tease-roll-double-drop');
+  assert.equal(validRecipes(unrelated).includes('tease-roll-double-drop'), true);
 });

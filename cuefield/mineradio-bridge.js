@@ -101,6 +101,15 @@ function compactCount(value) {
   return Number.isFinite(number) ? Math.max(0, Math.min(24, Math.round(number))) : 0;
 }
 
+function normalizeRecentRecipes(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((recipe) => typeof recipe === 'string')
+    .map((recipe) => compactString(recipe, 80))
+    .filter(Boolean)
+    .slice(-2);
+}
+
 function compactTrack(track = {}) {
   return {
     id: compactString(track.id, 120),
@@ -267,7 +276,8 @@ function planCuefieldTransitionFromCache(opts = {}) {
   const toEntry = entryFromCache(readBeatMapCache, toKey);
   const from = analyzeCacheEntry(fromEntry, fromKey, opts.fromLrc);
   const to = analyzeCacheEntry(toEntry, toKey, opts.toLrc);
-  const windowPlan = chooseTransitionWindow(from, to);
+  const recentRecipes = normalizeRecentRecipes(opts.recentRecipes);
+  const windowPlan = chooseTransitionWindow(from, to, { recentRecipes });
   const selected = windowPlan.chosen || {};
   const sectionChoice = selected.sectionChoice || {};
   const recipeCandidate = selected.recipeCandidate || {};

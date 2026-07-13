@@ -2844,6 +2844,7 @@ var cuefieldAutoMixPreparedAudio = null;
 var cuefieldBridgeEngine = null;
 var cuefieldManualNextKey = '';
 var cuefieldPairPlanCache = new Map();
+var cuefieldRecentRecipes = [];
 var customCoverMap = readCustomCoverMap();
 var customLyricMap = readCustomLyricMap();
 var customLyricPrefs = readCustomLyricPrefs();
@@ -10442,6 +10443,13 @@ async function fetchBeatPrefetchAudioUrl(song, qualityOrOptions) {
   return '/api/audio?url=' + encodeURIComponent(data.url);
 }
 
+function rememberCuefieldRecipe(recipe) {
+  recipe = String(recipe == null ? '' : recipe).trim().slice(0, 80);
+  if (!recipe) return;
+  cuefieldRecentRecipes.push(recipe);
+  cuefieldRecentRecipes = cuefieldRecentRecipes.slice(-2);
+}
+
 function readCuefieldSetModePreference() {
   try {
     var mode = localStorage.getItem(CUEFIELD_SET_MODE_STORE_KEY);
@@ -10519,8 +10527,12 @@ async function planCuefieldSongPair(fromSong, toSong, ctx) {
   var fromKey = beatMapSongKey(fromSong);
   var toKey = beatMapSongKey(toSong);
   if (!fromKey || !toKey) throw new Error('CUEFIELD_PAIR_KEYS_REQUIRED');
+  var recentRecipes = cuefieldRecentRecipes.slice(-2);
+  var cooldownKey = recentRecipes.indexOf('tease-roll-double-drop') >= 0
+    ? ':impact-blocked'
+    : ':impact-open';
   var cacheKind = ctx.refineMusical ? 'refined' : 'coarse';
-  var cacheKey = fromKey + '->' + toKey + ':' + cacheKind;
+  var cacheKey = fromKey + '->' + toKey + ':' + cacheKind + cooldownKey;
   var cached = cuefieldPairPlanCache.get(cacheKey);
   if (cached && Date.now() - cached.createdAt < CUEFIELD_PAIR_PLAN_TTL_MS) return cached.plan;
   var lyricSource = window.CuefieldLyricSource;
@@ -10537,6 +10549,7 @@ async function planCuefieldSongPair(fromSong, toSong, ctx) {
       fromLrc: lyrics[0],
       toLrc: lyrics[1],
       exitBias: ctx.exitBias || 'late',
+      recentRecipes: recentRecipes.slice(),
     })
   }); };
   var plan = await postCuefieldTransition();
@@ -10583,7 +10596,7 @@ async function planCuefieldSongPair(fromSong, toSong, ctx) {
       }
     }
   }
-  var storedCacheKey = refinementTimedOut ? fromKey + '->' + toKey + ':coarse' : cacheKey;
+  var storedCacheKey = refinementTimedOut ? fromKey + '->' + toKey + ':coarse' + cooldownKey : cacheKey;
   cuefieldPairPlanCache.set(storedCacheKey, { createdAt: Date.now(), plan: plan });
   if (cuefieldPairPlanCache.size > 96) cuefieldPairPlanCache.delete(cuefieldPairPlanCache.keys().next().value);
   return plan;
@@ -12047,7 +12060,12 @@ async function executeCuefieldSoftHandoff(pending) {
       preparedAudio: nextMedia,
       preparedProxyAudioUrl: pending.audioUrl,
       fade: false,
-    })).finally(function(){
+    })).then(function(){
+      var recipeCandidate = chosen.recipeCandidate || {};
+      rememberCuefieldRecipe(chosen.transitionRecipe || recipeCandidate.recipe || pending.executionMode);
+    }).catch(function(error){
+      console.warn('[CuefieldAutoMix] handoff failed:', error && (error.message || error));
+    }).finally(function(){
       cuefieldAutoMixExecuting = false;
       updateCuefieldAutoMixUi('handoff-complete');
       showCuefieldFeedbackPrompt(feedbackContext);

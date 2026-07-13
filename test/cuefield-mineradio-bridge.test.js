@@ -489,3 +489,61 @@ test('keeps the direct transition when B has no trusted climax', () => {
   assert.equal(result.chosen.bridgePlan, undefined);
   assert.equal(result.diagnostics.bridgeSelected, false);
 });
+
+test('bounds recent recipe history before passing it into window planning', () => {
+  const plannerPath = require.resolve('../cuefield/transition-window-planner');
+  const bridgePath = require.resolve('../cuefield/mineradio-bridge');
+  const plannerModule = require.cache[plannerPath];
+  const originalChoose = plannerModule.exports.chooseTransitionWindow;
+  const received = [];
+  plannerModule.exports.chooseTransitionWindow = (from, to, opts) => {
+    received.push(opts.recentRecipes);
+    const blocked = opts.recentRecipes.includes('tease-roll-double-drop');
+    const recipe = blocked ? 'quick-safe-fade' : 'tease-roll-double-drop';
+    return {
+      chosen: {
+        exit: { type: 'release', role: 'exit', time: 80 },
+        entry: { type: 'hook', role: 'entry', time: 16, landingAt: 16 },
+        sectionChoice: { evaluation: { score: 0.8, tier: 'usable', risks: [] } },
+        recipeCandidate: { recipe, timeline: [{ op: 'handoff', t: 0 }] },
+        timeline: [{ op: 'handoff', t: 0 }],
+      },
+      candidates: [],
+      rejected: [],
+      diagnostics: {},
+      policy: { route: 'structure-mix' },
+    };
+  };
+  delete require.cache[bridgePath];
+
+  try {
+    const { planCuefieldTransitionFromCache: planWithCapture } = require('../cuefield/mineradio-bridge');
+    const cache = {
+      a: { key: 'a', map: makeCompressedMap(96) },
+      b: { key: 'b', map: makeCompressedMap(96) },
+    };
+    const malformed = [null, {}, '', ' old ', 'x'.repeat(120), ' tease-roll-double-drop '];
+    const blocked = planWithCapture({
+      fromKey: 'a',
+      toKey: 'b',
+      recentRecipes: malformed,
+      readBeatMapCache: (key) => cache[key],
+    });
+    const open = planWithCapture({
+      fromKey: 'a',
+      toKey: 'b',
+      recentRecipes: ['quick-safe-fade'],
+      readBeatMapCache: (key) => cache[key],
+    });
+
+    assert.deepEqual(received[0], ['x'.repeat(80), 'tease-roll-double-drop']);
+    assert.deepEqual(received[1], ['quick-safe-fade']);
+    assert.equal(blocked.chosen.transitionRecipe, 'quick-safe-fade');
+    assert.equal(open.chosen.transitionRecipe, 'tease-roll-double-drop');
+    assert.equal(JSON.stringify(blocked).includes('x'.repeat(81)), false);
+  } finally {
+    plannerModule.exports.chooseTransitionWindow = originalChoose;
+    delete require.cache[bridgePath];
+    require('../cuefield/mineradio-bridge');
+  }
+});

@@ -17,6 +17,15 @@ function normalizePenalty(value) {
   return Math.min(1, value);
 }
 
+function normalizeRecentRecipes(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((recipe) => typeof recipe === 'string')
+    .map((recipe) => recipe.trim().slice(0, 80))
+    .filter(Boolean)
+    .slice(-2);
+}
+
 function profileOf(analysis) {
   return analysis && analysis.cueProfile || analysis || {};
 }
@@ -599,9 +608,10 @@ function representativeRelationshipRisks(fromAnalysis, toAnalysis, exits, entrie
     .filter((risk) => typeof risk === 'string' && risk))).slice(0, 4);
 }
 
-function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
+function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}, opts = {}) {
   const fromProfile = profileOf(fromAnalysis);
   const toProfile = profileOf(toAnalysis);
+  const recentRecipes = normalizeRecentRecipes(opts.recentRecipes);
   const protectedUntil = toNumber(fromAnalysis.structureMap && fromAnalysis.structureMap.protectedUntil);
   const sourceExitOptions = sourceExits(fromAnalysis, protectedUntil);
   const entries = landingOptions(toAnalysis);
@@ -656,6 +666,7 @@ function chooseTransitionWindow(fromAnalysis = {}, toAnalysis = {}) {
       const recipePlan = planRecipeCandidates(fromProfile, toProfile, {
         sectionChoice: { ...sectionChoice, entry: recipeSectionEntry(entry) },
         routePolicy: policy,
+        recentRecipes,
       });
       (recipePlan.candidates || []).filter((candidate) => recipeCandidateAllowedByRoute(candidate, policy)).forEach((candidate) => {
         const recipeCandidate = { ...candidate, score: clamp(candidate.score) };
