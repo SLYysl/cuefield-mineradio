@@ -36,6 +36,50 @@ test('keeps compact musical evidence and listening-floor diagnostics', () => {
   });
 });
 
+test('sanitizes compact impact execution diagnostics without retaining bulk transition data', () => {
+  const record = buildCuefieldFeedbackRecord({
+    rating: 1,
+    transition: {
+      impactEligible: true,
+      teaserUsed: true,
+      fakeOutMs: 139.6,
+      impactFallbackRecipe: 'bass-eq-handoff' + 'x'.repeat(100),
+      runtimeDowngrade: 'late-fake-gap-skipped',
+      timeline: [{ at: 1, op: 'mix' }],
+      actions: [{ op: 'drop' }],
+      audioUrl: 'https://example.com/private.mp3',
+      lyrics: 'private lyric sentinel',
+      profile: [1, 2, 3],
+      pitchClassProfile: [4, 5, 6],
+    },
+  });
+
+  assert.equal(record.transition.impactEligible, true);
+  assert.equal(record.transition.teaserUsed, true);
+  assert.equal(record.transition.fakeOutMs, 140);
+  assert.equal(record.transition.impactFallbackRecipe.length, 80);
+  assert.equal(record.transition.runtimeDowngrade, 'late-fake-gap-skipped');
+  const serialized = JSON.stringify(record);
+  ['timeline', 'actions', 'audioUrl', 'private.mp3', 'lyrics', 'private lyric sentinel', 'profile', 'pitchClassProfile'].forEach((sentinel) => {
+    assert.equal(serialized.includes(sentinel), false, sentinel);
+  });
+
+  const malformed = [-10, 250, 27.4, NaN, undefined].map((fakeOutMs) => buildCuefieldFeedbackRecord({
+    rating: 1,
+    transition: {
+      impactEligible: 'true',
+      teaserUsed: 1,
+      fakeOutMs,
+    },
+  }).transition);
+  assert.deepEqual(malformed.map((transition) => transition.fakeOutMs), [0, 200, 27, null, null]);
+  malformed.forEach((transition) => {
+    assert.equal(transition.impactEligible, false);
+    assert.equal(transition.teaserUsed, false);
+    assert.equal(transition.impactFallbackRecipe, '');
+  });
+});
+
 test('keeps sanitized local musical diagnostics with rounded window metadata', () => {
   const record = buildCuefieldFeedbackRecord({
     rating: 1,
@@ -462,6 +506,10 @@ test('keeps older feedback records readable without adaptive diagnostics', () =>
   assert.equal(record.transition.overlapClass, '');
   assert.equal(record.transition.overlapDuration, null);
   assert.equal(record.transition.beatGridTrusted, false);
+  assert.equal(record.transition.impactEligible, false);
+  assert.equal(record.transition.teaserUsed, false);
+  assert.equal(record.transition.fakeOutMs, null);
+  assert.equal(record.transition.impactFallbackRecipe, '');
   assert.deepEqual(record.transition.window, {
     firstHookStart: null,
     firstHookEnd: null,

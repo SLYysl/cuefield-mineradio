@@ -60,6 +60,12 @@ function compactPreferredExitRange(value) {
   return [Math.min(...bounded), Math.max(...bounded)];
 }
 
+function compactFakeOutMs(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(Math.max(0, Math.min(200, number))) : null;
+}
+
 function compactWindow(window = {}) {
   return {
     firstHookStart: roundNumber(window.firstHookStart),
@@ -194,6 +200,10 @@ function compactTransition(transition = {}) {
     bpmB: roundNumber(transition.bpmB),
     relativeTempoDelta: roundNumber(transition.relativeTempoDelta),
     beatGridTrusted: transition.beatGridTrusted === true,
+    impactEligible: transition.impactEligible === true,
+    teaserUsed: transition.teaserUsed === true,
+    fakeOutMs: compactFakeOutMs(transition.fakeOutMs),
+    impactFallbackRecipe: compactString(transition.impactFallbackRecipe, 80),
     runtimeDowngrade: compactString(transition.runtimeDowngrade, 40),
     setMode: ['sequential', 'smart'].includes(transition.setMode) ? transition.setMode : '',
     minimumListenUntil: roundNumber(transition.minimumListenUntil),

@@ -10659,6 +10659,7 @@ function cuefieldFeedbackContextFromPending(pending) {
   var fromMeta = cuefieldFeedbackSongMeta(fromSong);
   var toMeta = cuefieldFeedbackSongMeta(toSong);
   var chosen = pending.plan && pending.plan.chosen || {};
+  var candidate = chosen.recipeCandidate || {};
   var evaluation = chosen.evaluation || {};
   var plannerDiagnostics = pending.plan && pending.plan.diagnostics || {};
   return {
@@ -10706,6 +10707,10 @@ function cuefieldFeedbackContextFromPending(pending) {
       localAWindowDistance: plannerDiagnostics.localAWindowDistance,
       localBWindowDistance: plannerDiagnostics.localBWindowDistance,
       localMusicalRisks: plannerDiagnostics.localMusicalRisks || [],
+      impactEligible: candidate.recipe === 'tease-roll-double-drop' && candidate.eligible !== false,
+      teaserUsed: candidate.anchors && candidate.anchors.teaserUsed === true,
+      fakeOutMs: candidate.anchors && candidate.anchors.fakeOutMs,
+      impactFallbackRecipe: candidate.fallbackRecipe || '',
       runtimeDowngrade: pending.runtimeDowngrade || '',
       setMode: cuefieldSetMode,
       bridgeSelected: plannerDiagnostics.bridgeSelected === true,

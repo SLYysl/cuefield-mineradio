@@ -154,6 +154,42 @@ test('Cuefield feedback context propagates local musical diagnostics at runtime'
   assert.deepEqual(result.transition.localMusicalRisks, ['harmonic-clash', 'late']);
 });
 
+test('Cuefield feedback context records impact execution diagnostics from the chosen recipe candidate', () => {
+  const html = readIndexHtml();
+  const contextStart = html.indexOf('function cuefieldFeedbackSongMeta');
+  const contextEnd = html.indexOf('function hideCuefieldFeedbackPrompt', contextStart);
+  const contextBlock = html.slice(contextStart, contextEnd);
+  const context = {
+    playQueue: [{ id: 'song:a' }, { id: 'song:b' }],
+    beatMapSongKey: (song) => song.id,
+    cuefieldSetMode: 'smart',
+  };
+  vm.createContext(context);
+  vm.runInContext(contextBlock, context);
+
+  const result = context.cuefieldFeedbackContextFromPending({
+    currentIndex: 0,
+    nextIndex: 1,
+    runtimeDowngrade: 'late-fake-gap-skipped',
+    plan: {
+      chosen: {
+        recipeCandidate: {
+          recipe: 'tease-roll-double-drop',
+          eligible: true,
+          fallbackRecipe: 'bass-eq-handoff',
+          anchors: { teaserUsed: true, fakeOutMs: 140 },
+        },
+      },
+    },
+  });
+
+  assert.equal(result.transition.impactEligible, true);
+  assert.equal(result.transition.teaserUsed, true);
+  assert.equal(result.transition.fakeOutMs, 140);
+  assert.equal(result.transition.impactFallbackRecipe, 'bass-eq-handoff');
+  assert.equal(result.transition.runtimeDowngrade, 'late-fake-gap-skipped');
+});
+
 test('Cuefield separates terminal fallback from musical rescue status', () => {
   const html = readIndexHtml();
   const statusStart = html.indexOf('function cuefieldAutoMixStatusText');
