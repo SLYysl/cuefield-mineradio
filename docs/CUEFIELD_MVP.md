@@ -36,19 +36,19 @@ By default, feedback stays on each tester's machine. Test builds can also mirror
 Recommended tester app config:
 
 ```bash
-CUEFIELD_FEEDBACK_REMOTE_URL="https://brahma-technologies.com/api/cuefield" \
+CUEFIELD_FEEDBACK_REMOTE_URL="https://your-domain.example/api/cuefield" \
 CUEFIELD_FEEDBACK_REMOTE_TOKEN="change-me" \
 CUEFIELD_FEEDBACK_SOURCE="tester-name-or-build-id" \
 npm start
 ```
 
-The recommended public endpoint is `https://brahma-technologies.com/api/cuefield`. It is a token-protected Brahma proxy named for Cuefield; it sanitizes the payload and writes the small feedback record to the maintainer's Supabase feedback store.
+Use a maintainer-operated HTTPS endpoint protected by a dedicated test token. The endpoint should sanitize the payload and write the compact feedback record to storage controlled by the maintainer.
 
 The remote payload is intentionally small: rating, note, pair title/key metadata, recipe/tier/score/risk metadata, and transition timing. It does not include cookies, audio URLs, music files, or raw beatmap caches.
 
 If the remote endpoint is not configured, unavailable, or times out, local feedback still succeeds.
 
-`scripts/cuefield-feedback-collector.js` remains available for local-only experiments, but public test builds should use the Brahma endpoint above.
+`scripts/cuefield-feedback-collector.js` remains available for local-only experiments. Public test builds should use the configured HTTPS endpoint above.
 
 ## Local Verification
 

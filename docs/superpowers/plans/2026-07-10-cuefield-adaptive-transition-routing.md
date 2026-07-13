@@ -350,7 +350,7 @@ Review the complete range from `89284c6` to HEAD for route correctness, false-Ho
 Stop only the existing Electron process whose command points to this worktree. Restart via macOS LaunchServices:
 
 ```bash
-open -na "/Users/sly/Documents/Codex/2026-07-08/Mineradio/node_modules/electron/dist/Electron.app" --args "/Users/sly/Documents/Codex/2026-07-08/Mineradio/.worktrees/cuefield-structure-map-foundation"
+open -na "$REPO_ROOT/node_modules/electron/dist/Electron.app" --args "$REPO_ROOT"
 ```
 
 Verify the process command points to the feature worktree and `http://127.0.0.1:3000/` returns `200`.
