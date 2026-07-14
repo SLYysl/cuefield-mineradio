@@ -829,6 +829,21 @@ test('builds the composite teaser, source roll, fake-out, and explicit fallback 
   assert.notEqual(impact.fallbackTimeline[0], bassFallback.timeline[0]);
 });
 
+test('long blend fades A gradually before applying a mild tonal handoff', () => {
+  const plan = trustedImpactPlan({ recentRecipes: ['tease-roll-double-drop'] });
+  const longBlend = plan.candidates.find((candidate) => candidate.recipe === 'intro-outro-long-blend');
+  const fade = longBlend.timeline.find((action) => action.deck === 'A' && action.op === 'volume');
+  const bass = longBlend.timeline.find((action) => action.deck === 'A' && action.op === 'bass');
+  const handoff = longBlend.timeline.find((action) => action.op === 'handoff');
+
+  assert.equal(fade.curve, 'equal-power-out');
+  assert.equal(fade.t <= -2.4, true);
+  assert.equal(fade.duration >= 4800, true);
+  assert.equal(fade.t + fade.duration / 1000 <= handoff.t, true);
+  assert.equal(bass.t >= fade.t, true);
+  assert.equal(bass.value >= 0.7, true);
+});
+
 test('hard-gates the composite impact recipe before applying its preference', async (t) => {
   const cases = [
     ['cooldown', { recentRecipes: ['tease-roll-double-drop'] }, 'impact recipe cooldown'],

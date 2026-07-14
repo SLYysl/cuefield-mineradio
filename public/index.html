@@ -3164,8 +3164,10 @@ var djBeatAnalysisTimer = null;
 var beatAnalysisConfig = {
   delayMs: 1600,
   minPlaybackSec: 1.2,
+  minBufferedAheadSec: 24,
+  bufferRetryMs: 1500,
   idleTimeout: 1400,
-  skipMusicTempoWhilePlaying: false
+  skipMusicTempoWhilePlaying: true
 };
 var beatCam = {
   nextIdx: 0,
@@ -10250,6 +10252,24 @@ async function analyzeMusicTempoInWorker(buffer, token) {
   }
 }
 
+function cuefieldBufferedPlaybackAhead(media) {
+  if (!media || !media.buffered || !media.buffered.length) return 0;
+  var current = Math.max(0, Number(media.currentTime) || 0);
+  for (var i = 0; i < media.buffered.length; i++) {
+    var start = Number(media.buffered.start(i));
+    var end = Number(media.buffered.end(i));
+    if (isFinite(start) && isFinite(end) && current >= start - 0.15 && current <= end + 0.15) {
+      return Math.max(0, end - current);
+    }
+  }
+  return 0;
+}
+
+function cuefieldCanRunBackgroundAnalysis(media, minAheadSec) {
+  if (!media || media.paused || media.ended || Number(media.readyState) < 3) return false;
+  return cuefieldBufferedPlaybackAhead(media) >= Math.max(1, Number(minAheadSec) || 1);
+}
+
 function scheduleBeatAnalysis(songId, audioUrl, token, song) {
   if (!songId || !audioUrl) return;
   if (djMode.active) {
@@ -10269,6 +10289,10 @@ function scheduleBeatAnalysis(songId, audioUrl, token, song) {
       beatAnalysisTimer = setTimeout(waitForQuietStart, Math.max(500, (beatAnalysisConfig.minPlaybackSec - current) * 1000));
       return;
     }
+    if (!cuefieldCanRunBackgroundAnalysis(audio, beatAnalysisConfig.minBufferedAheadSec)) {
+      beatAnalysisTimer = setTimeout(waitForQuietStart, beatAnalysisConfig.bufferRetryMs);
+      return;
+    }
     var startAnalysis = async function(){
       if (token !== beatMapToken || !audio || audio.paused || beatMapCache[songId]) return;
       var diskMap = await readBeatDiskCache(songId);
@@ -10285,7 +10309,12 @@ function scheduleBeatAnalysis(songId, audioUrl, token, song) {
         return;
       }
       beatAnalysisStartedAt = performance.now();
-      analyzeAudioBeats(audioUrl, null, token, {
+      var analysisAudioUrl = song ? await fetchBeatPrefetchAudioUrl(song, {
+        quality: 'standard',
+        timeoutMs: 6000,
+      }) : audioUrl;
+      if (token !== beatMapToken || !analysisAudioUrl) return;
+      analyzeAudioBeats(analysisAudioUrl, null, token, {
         skipMusicTempo: beatAnalysisConfig.skipMusicTempoWhilePlaying && !audio.paused,
         background: true,
         song: song || null
@@ -10935,7 +10964,11 @@ async function ensureCuefieldAutoMixBeatMap(song, key, ctx) {
     return true;
   }
   if (!isBeatPrefetchCandidate(song) || beatMapBusy) return false;
-  var audioUrl = await fetchBeatPrefetchAudioUrl(song);
+  if (audio && !audio.paused && !cuefieldCanRunBackgroundAnalysis(audio, beatAnalysisConfig.minBufferedAheadSec)) return false;
+  var audioUrl = await fetchBeatPrefetchAudioUrl(song, {
+    quality: 'standard',
+    timeoutMs: 6000,
+  });
   if (!audioUrl || beatMapCache[key]) return !!beatMapCache[key];
   var map = await analyzeAudioBeats(audioUrl, null, beatMapToken, {
     background: true,
@@ -12230,6 +12263,10 @@ function scheduleQueueBeatPrefetch(fromIdx, delayMs, state) {
 async function runQueueBeatPrefetch(fromIdx, token, seq, state) {
   if (token !== beatMapToken || seq !== beatPrefetchToken || beatPrefetchBusy || !playQueue.length) return;
   if (audio && audio.paused) return;
+  if (audio && !cuefieldCanRunBackgroundAnalysis(audio, beatAnalysisConfig.minBufferedAheadSec)) {
+    scheduleQueueBeatPrefetch(fromIdx, beatAnalysisConfig.bufferRetryMs, state);
+    return;
+  }
   state = normalizeBeatPrefetchState(state);
   if (state.count >= BEAT_PREFETCH_LIMIT) return;
   var idx = findNextBeatPrefetchIndex(fromIdx, state.keys);
@@ -12248,7 +12285,10 @@ async function runQueueBeatPrefetch(fromIdx, token, seq, state) {
       console.log('队列节奏D盘缓存命中:', song.name || key, diskMap.visualBeatCount || 0);
       return;
     }
-    var audioUrl = await fetchBeatPrefetchAudioUrl(song);
+    var audioUrl = await fetchBeatPrefetchAudioUrl(song, {
+      quality: 'standard',
+      timeoutMs: 6000,
+    });
     if (token !== beatMapToken || seq !== beatPrefetchToken || !audioUrl || beatMapCache[key]) return;
     while (typeof isRenderInteractionActive === 'function' && isRenderInteractionActive() && token === beatMapToken && seq === beatPrefetchToken) {
       await yieldToIdle(isHiddenForBackgroundOptimization() ? 30 : 320);

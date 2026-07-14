@@ -1,5 +1,5 @@
-# CURRENT_STATE - Cuefield transition execution safety
-> 更新时间: 2026-07-14 | 线程: 铁血丹心 source-loop 回退修复
+# CURRENT_STATE - Cuefield playback and outro continuity
+> 更新时间: 2026-07-14 | 线程: 未缓存卡顿与长混合 A 退出修复
 
 ## 目标
 - 让合适的 A release -> B climax 过渡通过分层频谱浮现，减少鼓点突然变薄或突然回来的听感。
@@ -13,10 +13,13 @@
 - 速率参与 B 落点和被裁剪预滚的 seek 补偿。
 - `directionality mismatch` 不再允许 `tease-roll-double-drop` 循环 A 的旋律/人声片段。
 - 铁血丹心 -> Never Be Like You 真实歌词复现已改走 `intro-outro-long-blend`，timeline 无 A loop/seek。
-- `node --test test/*.test.js` = 388/388；syntax、`git diff --check`、HTTP 200 通过。
+- 长混合 A 改为切点前 2.4 秒开始、持续 4.8 秒的 equal-power 淡出；bass 只在淡出中缓降到 0.72。
+- 未缓存歌曲的后台 beatmap 分析需先有 24 秒播放缓冲，并统一使用 128 kbps 标准音质，避免与 Hi-Res 播放抢带宽。
+- 播放中跳过额外 music-tempo worker；队列预热同样受缓冲门槛保护。
+- `node --test test/*.test.js` = 391/391；syntax、`git diff --check`、HTTP 200 通过。
 
 ## 未做 / 下一步
-- 用户复听 铁血丹心 -> Never Be Like You，确认不再回退或中间卡住。
+- 用户复听 铁血丹心 -> Never Be Like You 的 A 淡出，并用一首无 beatmap 缓存歌曲验证播放连续性。
 - 后续再加入局部音色/人声采样相似度；当前共同点仍以调性、旋律和结构证据为主。
 
 ## 关键约束 / 红线
@@ -25,4 +28,4 @@
 
 ## 关键路径 / 文件
 - `cuefield/recipe-planner.js`, `public/cuefield-timeline-executor.js`, `public/index.html`
-- `test/cuefield-recipe-planner.test.js`, `test/cuefield-timeline-executor.test.js`, `test/cuefield-playback-handoff.test.js`
+- `test/cuefield-recipe-planner.test.js`, `test/cuefield-playback-buffering.test.js`

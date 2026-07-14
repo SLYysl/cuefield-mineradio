@@ -351,10 +351,10 @@ function makeLongBlend(anchors, scores) {
       { t: -lead, deck: 'B', op: 'play', at: bStart, volume: 0 },
       { t: -lead, deck: 'B', op: 'volume', value: 0.58, duration: 5200 },
       { t: -4.5, deck: 'B', op: 'filter', type: 'highpass', value: 650, duration: 2600 },
-      { t: -3.2, deck: 'A', op: 'bass', value: 0.38, duration: 2200 },
+      { t: -2.4, deck: 'A', op: 'volume', value: 0, duration: 4800, curve: 'equal-power-out' },
+      { t: -2, deck: 'A', op: 'bass', value: 0.72, duration: 3000 },
       { t: -1.2, deck: 'B', op: 'bass', value: 0.82, duration: 1400 },
       { t: 0, deck: 'B', op: 'filter', type: 'none', value: 0, duration: 900 },
-      { t: 0.8, deck: 'A', op: 'volume', value: 0, duration: 1600 },
       { t: handoffAt, deck: 'B', op: 'handoff' },
     ],
   );
