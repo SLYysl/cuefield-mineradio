@@ -989,6 +989,9 @@ function recipeEligibility(candidate, context) {
   if (candidate.recipe === 'tease-roll-double-drop') {
     if (context.recentRecipes.includes(candidate.recipe)) return { eligible: false, reason: 'impact recipe cooldown', preference: 0 };
     if (route !== 'structure-mix') return { eligible: false, reason: 'route does not support the impact recipe', preference: 0 };
+    if (context.sectionRisks.includes('directionality mismatch')) {
+      return { eligible: false, reason: 'outgoing phrase direction is not loop-safe', preference: 0 };
+    }
     if (assessment.entrySource === 'fallback' || context.entryConfidence < 0.78 || !['hook', 'chorus', 'drop'].includes(String(context.entryType))) {
       return { eligible: false, reason: 'landing is not a trusted climax', preference: 0 };
     }
@@ -1056,6 +1059,7 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
       scores,
       severeOverlapRisk,
       sectionTier,
+      sectionRisks,
       entryType: opts.sectionChoice && opts.sectionChoice.entry && opts.sectionChoice.entry.type,
       entryConfidence: assessment.entryConfidence,
       recentRecipes: Array.isArray(opts.recentRecipes) ? opts.recentRecipes : [],

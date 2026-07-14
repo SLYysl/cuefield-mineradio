@@ -837,6 +837,7 @@ test('hard-gates the composite impact recipe before applying its preference', as
     ['tempo delta', { bpmB: 128 }, 'beat or tempo evidence is unsafe'],
     ['low compatibility', { toRoot: 1 }, 'musical evidence is not compatible enough'],
     ['unsafe exit', { exitType: 'breakdown' }, 'exit is not a loop-safe phrase'],
+    ['directionality mismatch', { risks: ['directionality mismatch'] }, 'outgoing phrase direction is not loop-safe'],
     ['severe overlap', { risks: ['vocal collision'] }, 'vocal or style overlap is unsafe'],
     ['insufficient four-beat runway', { exitTime: 1.8 }, 'source runway is too short for four beats'],
   ];
