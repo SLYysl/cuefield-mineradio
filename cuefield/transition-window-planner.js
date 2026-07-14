@@ -515,13 +515,14 @@ function terminalRescueTimeline(mode, opts) {
     bStart,
     landingOffset,
     overlapDuration,
+    aFadeAt = 0,
   } = opts;
   const handoff = { t: overlapDuration, deck: 'B', op: 'handoff' };
   const play = { t: 0, deck: 'B', op: 'play', at: bStart, volume: 0 };
 
   if (mode.rescueClass === 'A') {
-    const aFadeDuration = Math.round(Math.min(0.72, overlapDuration) * 1000);
-    const bRiseAt = round(Math.min(0.55, Math.max(0, landingOffset - 0.8)));
+    const aFadeDuration = Math.round(Math.min(1.35, overlapDuration) * 1000);
+    const bRiseAt = round(Math.min(0.65, Math.max(0, landingOffset - 0.8)));
     const bRiseDuration = Math.round(Math.max(0.8, landingOffset - bRiseAt) * 1000);
     return {
       aFadeDuration,
@@ -529,7 +530,7 @@ function terminalRescueTimeline(mode, opts) {
       bRiseDuration,
       timeline: [
         play,
-        { t: 0, deck: 'A', op: 'volume', value: 0, duration: aFadeDuration, curve: 'equal-power-out' },
+        { t: aFadeAt, deck: 'A', op: 'volume', value: 0, duration: aFadeDuration, curve: 'equal-power-out' },
         { t: bRiseAt, deck: 'B', op: 'volume', value: 1, duration: bRiseDuration, curve: 'equal-power-in' },
         handoff,
       ],
@@ -540,23 +541,23 @@ function terminalRescueTimeline(mode, opts) {
     const aFadeDuration = Math.round(overlapDuration * 1000);
     const bRiseAt = round(Math.min(0.35, landingOffset * 0.14));
     const bRiseDuration = Math.round(Math.max(0.8, landingOffset - bRiseAt) * 1000);
-    const stageAt = round(Math.min(0.45, landingOffset * 0.2));
-    const finalAt = round(Math.max(stageAt + 0.55, landingOffset - 0.65));
+    const stageAt = round(Math.min(0.35, landingOffset * 0.16));
+    const finalAt = round(Math.max(stageAt + 0.9, overlapDuration * 0.5));
     const stageDuration = Math.round(Math.max(0.2, finalAt - stageAt) * 1000);
-    const finalDuration = Math.round(Math.max(0.2, landingOffset - finalAt) * 1000);
+    const finalDuration = Math.round(Math.max(0.2, overlapDuration - finalAt) * 1000);
     return {
       aFadeDuration,
       bRiseAt,
       bRiseDuration,
       timeline: [
         play,
-        { t: 0, deck: 'B', op: 'bass', value: 0.08, duration: 0 },
-        { t: 0, deck: 'B', op: 'filter', type: 'highpass', value: 1400, duration: 0 },
-        { t: 0, deck: 'A', op: 'bass', value: 0.72, duration: Math.round(landingOffset * 1000) },
-        { t: 0, deck: 'A', op: 'volume', value: 0, duration: aFadeDuration, curve: 'equal-power-out' },
+        { t: 0, deck: 'B', op: 'bass', value: 0.25, duration: 0 },
+        { t: 0, deck: 'B', op: 'filter', type: 'highpass', value: 900, duration: 0 },
+        { t: 0, deck: 'A', op: 'bass', value: 0.82, duration: Math.round(overlapDuration * 1000) },
+        { t: aFadeAt, deck: 'A', op: 'volume', value: 0, duration: aFadeDuration, curve: 'equal-power-out' },
         { t: bRiseAt, deck: 'B', op: 'volume', value: 1, duration: bRiseDuration, curve: 'equal-power-in' },
-        { t: stageAt, deck: 'B', op: 'filter', type: 'highpass', value: 700, duration: stageDuration },
-        { t: stageAt, deck: 'B', op: 'bass', value: 0.4, duration: stageDuration },
+        { t: stageAt, deck: 'B', op: 'filter', type: 'highpass', value: 450, duration: stageDuration },
+        { t: stageAt, deck: 'B', op: 'bass', value: 0.55, duration: stageDuration },
         { t: finalAt, deck: 'B', op: 'filter', type: 'none', value: 0, duration: finalDuration },
         { t: finalAt, deck: 'B', op: 'bass', value: 1, duration: finalDuration },
         handoff,
@@ -564,7 +565,7 @@ function terminalRescueTimeline(mode, opts) {
     };
   }
 
-  const aFadeDuration = Math.round(overlapDuration * 1000);
+  const aFadeDuration = Math.round(Math.max(0.2, overlapDuration - aFadeAt) * 1000);
   const bRiseAt = 0;
   const bRiseDuration = Math.round(landingOffset * 1000);
   return {
@@ -573,7 +574,7 @@ function terminalRescueTimeline(mode, opts) {
     bRiseDuration,
     timeline: [
       play,
-      { t: 0, deck: 'A', op: 'volume', value: 0, duration: aFadeDuration, curve: 'equal-power-out' },
+      { t: aFadeAt, deck: 'A', op: 'volume', value: 0, duration: aFadeDuration, curve: 'equal-power-out' },
       { t: bRiseAt, deck: 'B', op: 'volume', value: 1, duration: bRiseDuration, curve: 'equal-power-in' },
       handoff,
     ],
@@ -613,12 +614,26 @@ function terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protec
       protectedBoundary,
       Math.min(duration - MINIMUM_TERMINAL_OVERLAP, preferredStart),
     ));
-  const mixStart = terminalStartAfterVocal(
+  const safeMixStart = terminalStartAfterVocal(
     fromAnalysis && fromAnalysis.structureMap && fromAnalysis.structureMap.vocalWindows,
     requestedMixStart,
     duration,
   );
-  const overlapDuration = round(Math.max(0, Math.min(3.4, duration - mixStart, targetDuration)));
+  const safeOverlapDuration = round(Math.max(0, Math.min(3.4, duration - safeMixStart, targetDuration)));
+  const mode = terminalRescueMode(
+    fromAnalysis && fromAnalysis.structureMap && fromAnalysis.structureMap.vocalWindows,
+    safeMixStart,
+    safeOverlapDuration,
+    policy,
+  );
+  const vocalBedLead = round(Math.max(0, safeMixStart - requestedMixStart));
+  const useVocalBed = mode.rescueClass === 'C'
+    && vocalBedLead >= 0.5
+    && duration - requestedMixStart >= 4.6
+    && targetDuration >= 4.6;
+  const mixStart = useVocalBed ? requestedMixStart : safeMixStart;
+  const overlapDuration = round(Math.max(0, Math.min(useVocalBed ? 5.8 : 3.4, duration - mixStart, targetDuration)));
+  const aFadeAt = useVocalBed ? vocalBedLead : 0;
   const landingOffset = round(Math.max(1.65, Math.min(overlapDuration - 0.35, overlapDuration * 0.72)));
   const trustedEntry = entries.find((candidate) => (
     ['hook', 'drop'].includes(landingKind(candidate))
@@ -643,26 +658,21 @@ function terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protec
     landingType: 'start',
     confidence: 0.35,
   };
-  const mode = terminalRescueMode(
-    fromAnalysis && fromAnalysis.structureMap && fromAnalysis.structureMap.vocalWindows,
-    mixStart,
-    overlapDuration,
-    policy,
-  );
   const execution = terminalRescueTimeline(mode, {
     bStart,
     landingOffset,
     overlapDuration,
+    aFadeAt,
   });
   const { aFadeDuration, bRiseAt, bRiseDuration, timeline } = execution;
   const fallbackTimeline = [
     { t: 0, deck: 'B', op: 'play', at: bStart, volume: 0 },
-    { t: 0, deck: 'A', op: 'volume', value: 0, duration: aFadeDuration, curve: 'equal-power-out' },
+    { t: aFadeAt, deck: 'A', op: 'volume', value: 0, duration: aFadeDuration, curve: 'equal-power-out' },
     { t: bRiseAt, deck: 'B', op: 'volume', value: 1, duration: bRiseDuration, curve: 'equal-power-in' },
     { t: overlapDuration, deck: 'B', op: 'handoff' },
   ];
   const audibleStart = bRiseAt + (bRiseDuration / 1000) * (Math.asin(0.08) / (Math.PI / 2));
-  const audibleEnd = (aFadeDuration / 1000) * (Math.acos(0.08) / (Math.PI / 2));
+  const audibleEnd = aFadeAt + (aFadeDuration / 1000) * (Math.acos(0.08) / (Math.PI / 2));
   const audibleOverlap = round(Math.max(0, audibleEnd - audibleStart));
   const exit = selectedExit ? { ...selectedExit, time: mixStart } : {
     type: 'terminal-boundary',

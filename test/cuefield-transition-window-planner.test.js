@@ -455,8 +455,9 @@ test('terminal rescue class A clears outgoing vocals before B becomes audible', 
 
   assert.equal(result.chosen.rescueClass, 'A');
   assert.equal(result.chosen.recipeCandidate.variant, 'vocal-release');
-  assert.equal(aFade.duration <= 800, true);
-  assert.equal(bFade.t >= 0.5, true);
+  assert.equal(aFade.duration >= 1200 && aFade.duration <= 1500, true);
+  assert.equal(bFade.t >= 0.6, true);
+  assert.equal(result.chosen.audibleOverlap >= 0.45, true);
   assert.equal(result.chosen.timeline.some((action) => action.op === 'echo'), false);
   assert.equal(result.chosen.timeline.some((action) => action.op === 'filter'), false);
 });
@@ -479,20 +480,30 @@ test('terminal rescue class B stages an energy contrast instead of cutting both 
   assert.equal(result.chosen.recipeCandidate.variant, 'staged-energy-bridge');
   assert.equal(bFilters.length >= 3, true);
   assert.equal(bBass.length >= 3, true);
+  assert.equal(bFilters[0].value <= 900, true);
+  assert.equal(bBass[0].value >= 0.2, true);
+  assert.equal(Math.abs(bFilters.at(-1).t + bFilters.at(-1).duration / 1000 - (result.chosen.handoffAt - result.chosen.mixStart)) <= 0.001, true);
+  assert.equal(Math.abs(bBass.at(-1).t + bBass.at(-1).duration / 1000 - (result.chosen.handoffAt - result.chosen.mixStart)) <= 0.001, true);
   assert.equal(aBass.value >= 0.7, true);
   assert.equal(result.chosen.timeline.some((action) => action.op === 'echo'), false);
 });
 
-test('terminal rescue waits for an outgoing vocal window to clear when runway remains', () => {
+test('terminal rescue class C beds B under the last vocal before fading A', () => {
   const from = profile({ duration: 128, exits: [] });
   from.structureMap.structureSource = 'lyric+beat';
   from.structureMap.vocalWindows = [{ start: 116, end: 121 }];
   const to = profile({ duration: 96, entries: [entry('intro', 8, { source: 'energy' })] });
 
   const result = chooseTransitionWindow(from, to);
+  const aFade = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'volume');
+  const bFade = result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'volume');
 
   assert.equal(result.chosen.recipeCandidate.recipe, 'terminal-rescue');
-  assert.equal(result.chosen.mixStart >= 121, true);
+  assert.equal(result.chosen.rescueClass, 'C');
+  assert.equal(result.chosen.mixStart < 121, true);
+  assert.equal(aFade.t >= 121 - result.chosen.mixStart, true);
+  assert.equal(bFade.t, 0);
+  assert.equal(result.chosen.handoffAt - result.chosen.mixStart > 3.4, true);
   assert.equal(result.chosen.handoffAt <= 128, true);
 });
 
