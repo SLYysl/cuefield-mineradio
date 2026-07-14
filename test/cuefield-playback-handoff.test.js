@@ -92,7 +92,7 @@ test('Cuefield deck graphs keep an echo tail outside the dry gain lifecycle', ()
   assert.match(cuefieldRuntime, /echoDelay/);
   assert.match(cuefieldRuntime, /echoFeedback/);
   assert.match(cuefieldRuntime, /echoWet/);
-  assert.match(cuefieldRuntime, /graph\.bass\.connect\(graph\.echoSend\)/);
+  assert.match(cuefieldRuntime, /graph\.high\.connect\(graph\.echoSend\)/);
   assert.match(cuefieldRuntime, /graph\.echoDelay\.connect\(graph\.echoFeedback\)/);
   assert.match(cuefieldRuntime, /graph\.echoFeedback\.connect\(graph\.echoDelay\)/);
   assert.match(cuefieldRuntime, /graph\.echoWet\.connect\(graph\.ctx\.destination\)/);
@@ -102,6 +102,20 @@ test('Cuefield deck graphs keep an echo tail outside the dry gain lifecycle', ()
   assert.match(cuefieldRuntime, /graph\.echoWet\.disconnect\(\)/);
   assert.match(cuefieldRuntime, /action\.op === 'echo'/);
   assert.match(cuefieldRuntime, /rampCuefieldGraphEcho\(/);
+});
+
+test('Cuefield deck graphs execute three-band spectrum reveals and bounded tempo ramps', () => {
+  const html = readIndexHtml();
+  const start = html.indexOf('function configureCuefieldDeckGraph');
+  const end = html.indexOf('function cuefieldVolumeOnlyExecution', start);
+  const cuefieldRuntime = html.slice(start, end);
+
+  assert.match(cuefieldRuntime, /graph\.mid\.type = 'peaking'/);
+  assert.match(cuefieldRuntime, /graph\.high\.type = 'highshelf'/);
+  assert.match(cuefieldRuntime, /action\.op === 'spectrum'/);
+  assert.match(cuefieldRuntime, /rampCuefieldGraphSpectrum\(bGraph,/);
+  assert.match(cuefieldRuntime, /action\.op === 'rate'/);
+  assert.match(cuefieldRuntime, /rampCuefieldMediaPlaybackRate\(nextMedia,/);
 });
 
 test('Cuefield bridge runtime starts on the shared context and stops on every reset', () => {

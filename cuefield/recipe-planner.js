@@ -127,8 +127,18 @@ function landingDiagnostics(timeline, anchors) {
   const bImpactOffset = anchors && Number.isFinite(anchors.bImpactOffset)
     ? anchors.bImpactOffset
     : NaN;
-  const actualLanding = Number.isFinite(bImpactOffset) && play
-    ? toNumber(play.at, NaN) + (bImpactOffset - toNumber(play.t, NaN))
+  const landingOffset = Number.isFinite(bImpactOffset)
+    ? bImpactOffset
+    : toNumber(handoff && handoff.t, NaN);
+  const rate = actions
+    .filter((action) => (
+      action && action.deck === 'B' && action.op === 'rate'
+      && toNumber(action.t, Infinity) <= toNumber(play && play.t, -Infinity)
+    ))
+    .map((action) => toNumber(action.value, 1))
+    .at(-1) || 1;
+  const actualLanding = Number.isFinite(landingOffset) && play
+    ? toNumber(play.at, NaN) + (landingOffset - toNumber(play.t, NaN)) * rate
     : (play && handoff
       ? toNumber(play.at, NaN) + (toNumber(handoff.t, NaN) - toNumber(play.t, NaN))
       : NaN);
@@ -222,7 +232,10 @@ function commonScores(fromProfile, toProfile, anchors) {
   const bEnergy = densityAt(toProfile.windows && toProfile.windows.energy, anchors.bAnchor);
   const aBass = densityAt(fromProfile.windows && fromProfile.windows.bass, anchors.aExit);
   const bBass = densityAt(toProfile.windows && toProfile.windows.bass, anchors.bStart);
-  const bpmDiff = Math.abs(toNumber(fromProfile.bpm) - toNumber(toProfile.bpm));
+  const tempo = tempoFamilyAssessment(fromProfile.bpm, toProfile.bpm);
+  const bpmDiff = tempo.passiveTempoDelta === tempo.tempoFamilyDelta
+    ? Math.abs(tempo.bpmA - tempo.normalizedBpmB)
+    : Math.abs(tempo.bpmA - tempo.bpmB);
   const beatScore = 1 - Math.min(1, anchors.downbeatOffset / Math.max(anchors.barLength / 2, 0.001));
   const energyScore = 1 - Math.min(1, Math.abs(aEnergy - bEnergy) / 0.65);
   const bassScore = 1 - Math.min(1, Math.max(0, aBass + bBass - 0.88) / 0.7);
@@ -253,6 +266,52 @@ function commonScores(fromProfile, toProfile, anchors) {
     outroCompleteness,
     bIntroAggression,
     styleTextureDistance,
+  };
+}
+
+function tempoFamilyAssessment(firstBpm, secondBpm) {
+  const bpmA = Math.max(0, toNumber(firstBpm));
+  const bpmB = Math.max(0, toNumber(secondBpm));
+  if (!(bpmA > 0) || !(bpmB > 0)) {
+    return {
+      bpmA,
+      bpmB,
+      normalizedBpmB: bpmB,
+      tempoScale: 1,
+      tempoFamilyDelta: 1,
+      passiveTempoDelta: 1,
+      relativeTempoDelta: 1,
+      targetPlaybackRate: 1,
+      tempoLockAvailable: false,
+    };
+  }
+  const match = [1, 0.5, 2]
+    .map((scale) => {
+      const normalizedBpmB = bpmB * scale;
+      return {
+        scale,
+        normalizedBpmB,
+        delta: Math.abs(bpmA - normalizedBpmB) / Math.max(bpmA, normalizedBpmB),
+      };
+    })
+    .sort((a, b) => a.delta - b.delta || Math.abs(1 - a.scale) - Math.abs(1 - b.scale))[0];
+  const requestedRate = bpmA / Math.max(match.normalizedBpmB, 1);
+  const tempoLockAvailable = requestedRate >= 0.94 && requestedRate <= 1.06;
+  const targetPlaybackRate = tempoLockAvailable ? round(requestedRate) : 1;
+  const directTempoDelta = Math.abs(bpmA - bpmB) / Math.max(bpmA, bpmB);
+  const passiveTempoDelta = match.scale === 1 || Math.abs(targetPlaybackRate - 1) <= 0.001
+    ? match.delta
+    : directTempoDelta;
+  return {
+    bpmA,
+    bpmB,
+    normalizedBpmB: round(match.normalizedBpmB),
+    tempoScale: match.scale,
+    tempoFamilyDelta: round(match.delta),
+    passiveTempoDelta: round(passiveTempoDelta),
+    relativeTempoDelta: round(passiveTempoDelta),
+    targetPlaybackRate,
+    tempoLockAvailable,
   };
 }
 
@@ -365,6 +424,45 @@ function makeBassHandoff(anchors, scores, assessment) {
       { t: handoffAt, deck: 'B', op: 'handoff' },
     ],
   );
+}
+
+function makeSpectralEmergence(anchors, scores, assessment) {
+  const playAt = -7.2;
+  const handoffAt = 1;
+  const rate = assessment.targetPlaybackRate;
+  const bStart = Math.max(0, round(anchors.bAnchor - (handoffAt - playAt) * rate));
+  const score = 0.44
+    + scores.beatScore * 0.12
+    + scores.energyScore * 0.08
+    + scores.bassScore * 0.08
+    + scores.outroCompleteness * 0.08
+    + assessment.musicalCompatibility * 0.14
+    - scores.styleTextureDistance * 0.05;
+  const timeline = [
+    { t: playAt, deck: 'B', op: 'rate', value: rate, duration: 0 },
+    { t: playAt, deck: 'B', op: 'play', at: bStart, volume: 0 },
+    { t: playAt, deck: 'B', op: 'spectrum', low: 0.82, mid: 0.18, high: 0.12, duration: 0 },
+    { t: playAt + 0.2, deck: 'B', op: 'volume', value: 0.58, duration: 2400, curve: 'equal-power-in' },
+    { t: -4.8, deck: 'B', op: 'spectrum', low: 0.86, mid: 0.58, high: 0.42, duration: 1900 },
+    { t: -3.2, deck: 'B', op: 'volume', value: 0.82, duration: 1800, curve: 'equal-power-in' },
+    { t: -2.2, deck: 'A', op: 'bass', value: 0.18, duration: 1400 },
+    { t: -2, deck: 'A', op: 'duck', bpm: assessment.bpmA, depth: 0.26, pulses: 4, beats: 1, attack: 18, hold: 65, release: 140 },
+    { t: -0.8, deck: 'B', op: 'spectrum', low: 1, mid: 1, high: 1, duration: 900 },
+    { t: -1.8, deck: 'A', op: 'volume', value: 0, duration: 2800, curve: 'equal-power-out' },
+    { t: handoffAt, deck: 'B', op: 'rate', value: 1, duration: 2400 },
+    { t: handoffAt, deck: 'B', op: 'handoff' },
+  ];
+  const candidate = baseCandidate(
+    'spectral-emergence',
+    score,
+    Math.min(0.94, score + 0.06),
+    ['B groove emerges before its melody', 'three spectrum stages preserve body before the full reveal'],
+    [],
+    { ...anchors, ...assessment, bStart, lead: -playAt },
+    timeline,
+  );
+  candidate.fallbackTimeline = safetyFallback(anchors);
+  return candidate;
 }
 
 function makeQuickFade(anchors, scores) {
@@ -625,9 +723,8 @@ function safetyAssessment(fromProfile, toProfile, sectionChoice = {}, routePolic
   const exitTrusted = exitConfidence >= 0.72;
   const sourceDuration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
   const sourceRunway = Math.max(0, sourceDuration - toNumber(exit.time, toNumber(exitCandidate && exitCandidate.time)));
-  const bpmA = Math.max(0, toNumber(fromProfile && fromProfile.bpm));
-  const bpmB = Math.max(0, toNumber(toProfile && toProfile.bpm));
-  const relativeTempoDelta = bpmA > 0 && bpmB > 0 ? Math.abs(bpmA - bpmB) / Math.max(bpmA, bpmB) : 1;
+  const tempo = tempoFamilyAssessment(fromProfile && fromProfile.bpm, toProfile && toProfile.bpm);
+  const { bpmA, bpmB, relativeTempoDelta } = tempo;
   const fromGridQuality = fromProfile && fromProfile.gridQuality || {};
   const toGridQuality = toProfile && toProfile.gridQuality || {};
   const fromDownbeatConfidence = toNumber(fromGridQuality.downbeatConfidence,
@@ -673,6 +770,12 @@ function safetyAssessment(fromProfile, toProfile, sectionChoice = {}, routePolic
     bpmA: round(bpmA),
     bpmB: round(bpmB),
     relativeTempoDelta: round(relativeTempoDelta),
+    normalizedBpmB: tempo.normalizedBpmB,
+    tempoScale: tempo.tempoScale,
+    tempoFamilyDelta: tempo.tempoFamilyDelta,
+    passiveTempoDelta: tempo.passiveTempoDelta,
+    targetPlaybackRate: tempo.targetPlaybackRate,
+    tempoLockAvailable: tempo.tempoLockAvailable,
     beatGridTrusted,
     overlapClass,
     overlapDuration,
@@ -829,6 +932,16 @@ function recipeEligibility(candidate, context) {
     if (assessment.overlapClass === 'short') return { eligible: false, reason: 'bass handoff needs medium runway', preference: 0 };
     return { eligible: true, reason: '', preference: route === 'late-contrast-release' ? 0.28 : 0.18 };
   }
+  if (candidate.recipe === 'spectral-emergence') {
+    if (route !== 'structure-mix') return { eligible: false, reason: 'route does not support a staged spectrum reveal', preference: 0 };
+    if (!assessment.entryTrusted || !assessment.exitTrusted) return { eligible: false, reason: 'entry or exit evidence is not trusted', preference: 0 };
+    if (!['release', 'phrase-boundary', 'outro', 'natural-tail'].includes(assessment.exitType)) return { eligible: false, reason: 'exit is not a spectrum-safe release', preference: 0 };
+    if (!assessment.beatGridTrusted || assessment.tempoFamilyDelta > 0.06 || !assessment.tempoLockAvailable) return { eligible: false, reason: 'beat or tempo evidence is unsafe', preference: 0 };
+    if (!assessment.musicalEvidence || assessment.musicalCompatibility < 0.68 || assessment.keyCompatibility < 0.58) return { eligible: false, reason: 'musical commonality is not strong enough', preference: 0 };
+    if (scores.aBass > 0.5 || scores.bBass < 0.25) return { eligible: false, reason: 'low-first reveal would cause weak or stacked bass', preference: 0 };
+    if (severeOverlapRisk) return { eligible: false, reason: 'vocal or style overlap is unsafe', preference: 0 };
+    return { eligible: true, reason: '', preference: 0.4 };
+  }
   if (candidate.recipe === 'filtered-pickup') {
     if (!assessment.entryTrusted) return { eligible: false, reason: 'entry evidence is not trusted', preference: 0 };
     if (route === 'terminal-rescue' || route === 'late-contrast-release') return { eligible: false, reason: 'route does not support an energy pickup', preference: 0 };
@@ -924,6 +1037,7 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
     makeLongBlend(anchors, scores),
     makeFilteredPickup(anchors, scores, route, assessment),
     makeBassHandoff(anchors, scores, assessment),
+    makeSpectralEmergence(anchors, scores, assessment),
     makeQuickFade(anchors, scores),
     makeEchoOut(anchors, scores, assessment),
     makeSourceLoopRoll(anchors, scores, assessment),
@@ -995,6 +1109,12 @@ function planRecipeCandidates(fromProfile, toProfile, opts = {}) {
       bpmA: safety.anchors.bpmA,
       bpmB: safety.anchors.bpmB,
       relativeTempoDelta: safety.anchors.relativeTempoDelta,
+      normalizedBpmB: safety.anchors.normalizedBpmB,
+      tempoScale: safety.anchors.tempoScale,
+      tempoFamilyDelta: safety.anchors.tempoFamilyDelta,
+      passiveTempoDelta: safety.anchors.passiveTempoDelta,
+      targetPlaybackRate: safety.anchors.targetPlaybackRate,
+      tempoLockAvailable: safety.anchors.tempoLockAvailable,
       beatGridTrusted: safety.anchors.beatGridTrusted,
       musicalEvidence: assessment.musicalEvidence,
       musicalCompatibility: round(assessment.musicalCompatibility),

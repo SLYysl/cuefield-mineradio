@@ -11616,6 +11616,13 @@ function configureCuefieldDeckGraph(graph) {
   graph.bass.type = 'lowshelf';
   graph.bass.frequency.setValueAtTime(180, now);
   graph.bass.gain.setValueAtTime(0, now);
+  graph.mid.type = 'peaking';
+  graph.mid.frequency.setValueAtTime(1100, now);
+  graph.mid.Q.setValueAtTime(0.72, now);
+  graph.mid.gain.setValueAtTime(0, now);
+  graph.high.type = 'highshelf';
+  graph.high.frequency.setValueAtTime(4200, now);
+  graph.high.gain.setValueAtTime(0, now);
   graph.gain.gain.setValueAtTime(1, now);
   resetCuefieldGraphEcho(graph, 0);
   return graph;
@@ -11650,10 +11657,12 @@ function connectCuefieldDeckGraph(graph) {
   graph.source.connect(graph.beatAnalyser);
   graph.analyser.connect(graph.filter);
   graph.filter.connect(graph.bass);
-  graph.bass.connect(graph.gain);
+  graph.bass.connect(graph.mid);
+  graph.mid.connect(graph.high);
+  graph.high.connect(graph.gain);
   graph.gain.connect(graph.ctx.destination);
   if (cuefieldGraphHasEcho(graph)) {
-    graph.bass.connect(graph.echoSend);
+    graph.high.connect(graph.echoSend);
     graph.echoSend.connect(graph.echoDelay);
     graph.echoDelay.connect(graph.echoWet);
     graph.echoDelay.connect(graph.echoFeedback);
@@ -11683,6 +11692,8 @@ function ensureCuefieldBDeckGraph(media) {
       beatAnalyser: audioCtx.createAnalyser(),
       filter: audioCtx.createBiquadFilter(),
       bass: audioCtx.createBiquadFilter(),
+      mid: audioCtx.createBiquadFilter(),
+      high: audioCtx.createBiquadFilter(),
       gain: audioCtx.createGain(),
       echoSend: echoNodes.echoSend,
       echoDelay: echoNodes.echoDelay,
@@ -11717,6 +11728,8 @@ function releaseCuefieldBDeckGraph(media) {
   try { graph.beatAnalyser.disconnect(); } catch (e) {}
   try { graph.filter.disconnect(); } catch (e) {}
   try { graph.bass.disconnect(); } catch (e) {}
+  try { graph.mid.disconnect(); } catch (e) {}
+  try { graph.high.disconnect(); } catch (e) {}
   try { graph.gain.disconnect(); } catch (e) {}
   try { graph.echoSend.disconnect(); } catch (e) {}
   try { graph.echoDelay.disconnect(); } catch (e) {}
@@ -11738,6 +11751,42 @@ function rampCuefieldGraphBass(graph, value, durationMs) {
   if (!graph || !graph.bass || !graph.bass.gain) return;
   value = clampRange(Number(value), 0, 1);
   rampCuefieldParamInContext(graph.ctx, graph.bass.gain, (value - 1) * 18, durationMs);
+}
+
+function rampCuefieldGraphSpectrum(graph, action) {
+  if (!graph || !action || !graph.bass || !graph.mid || !graph.high) return false;
+  var durationMs = Math.max(0, Number(action.durationMs) || 0);
+  var low = clampRange(Number(action.low), 0, 1);
+  var mid = clampRange(Number(action.mid), 0, 1);
+  var high = clampRange(Number(action.high), 0, 1);
+  rampCuefieldParamInContext(graph.ctx, graph.bass.gain, (low - 1) * 18, durationMs);
+  rampCuefieldParamInContext(graph.ctx, graph.mid.gain, (mid - 1) * 18, durationMs);
+  rampCuefieldParamInContext(graph.ctx, graph.high.gain, (high - 1) * 18, durationMs);
+  return true;
+}
+
+function rampCuefieldMediaPlaybackRate(media, value, durationMs) {
+  if (!media) return false;
+  var target = clampRange(Number(value) || 1, 0.94, 1.06);
+  var from = clampRange(Number(media.playbackRate) || 1, 0.94, 1.06);
+  var duration = Math.max(0, Number(durationMs) || 0);
+  try {
+    media.preservesPitch = true;
+    media.mozPreservesPitch = true;
+    media.webkitPreservesPitch = true;
+  } catch (e) {}
+  if (!duration || typeof requestAnimationFrame !== 'function') {
+    try { media.playbackRate = target; } catch (e) {}
+    return true;
+  }
+  var started = performance.now();
+  function tick(nowMs) {
+    var progress = clampRange((nowMs - started) / duration, 0, 1);
+    try { media.playbackRate = from + (target - from) * progress; } catch (e) {}
+    if (progress < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+  return true;
 }
 
 function rampCuefieldGraphGain(graph, value, durationMs, curve) {
@@ -11882,6 +11931,10 @@ function applyCuefieldTimelineAction(action, pending, nextMedia) {
       rampCuefieldGraphHighpass(bGraph, action.type, action.value, action.durationMs);
     } else if (action.op === 'bass') {
       rampCuefieldGraphBass(bGraph, action.value, action.durationMs);
+    } else if (action.op === 'spectrum') {
+      rampCuefieldGraphSpectrum(bGraph, action);
+    } else if (action.op === 'rate') {
+      rampCuefieldMediaPlaybackRate(nextMedia, action.value, action.durationMs);
     } else if (action.op === 'echo') {
       rampCuefieldGraphEcho(bGraph, action);
     } else if (action.op === 'duck') {

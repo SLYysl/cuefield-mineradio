@@ -83,7 +83,7 @@
     };
   }
 
-  function normalizeAction(action, offsetSec, targetVolume, originT) {
+  function normalizeAction(action, offsetSec, targetVolume, originT, playbackRate) {
     action = action || {};
     var actionTime = toNumber(action.t, 0);
     var value = clamp(action.value == null ? 1 : action.value, 0, 1);
@@ -101,7 +101,7 @@
       maxLateMs: Math.round(clamp(action.maxLateMs, 0, 200)),
     };
     if (normalized.deck === 'B' && normalized.op === 'play' && originT != null && actionTime < originT) {
-      normalized.at = round(normalized.at + originT - actionTime);
+      normalized.at = round(normalized.at + (originT - actionTime) * clamp(playbackRate, 0.94, 1.06));
     }
     if (normalized.op === 'volume') normalized.target = round(targetVolume * value);
     if (normalized.op === 'echo') {
@@ -120,6 +120,14 @@
       normalized.attack = Math.round(clamp(toNumber(action.attack, 24), 5, 120));
       normalized.hold = Math.round(clamp(toNumber(action.hold, 70), 10, 180));
       normalized.release = Math.round(clamp(toNumber(action.release, 180), 40, 320));
+    }
+    if (normalized.op === 'spectrum') {
+      normalized.low = round(clamp(toNumber(action.low, 1), 0, 1));
+      normalized.mid = round(clamp(toNumber(action.mid, 1), 0, 1));
+      normalized.high = round(clamp(toNumber(action.high, 1), 0, 1));
+    }
+    if (normalized.op === 'rate') {
+      normalized.value = round(clamp(toNumber(action.value, 1), 0.94, 1.06));
     }
     if (normalized.op === 'loop') {
       normalized.enabled = action.enabled !== false;
@@ -213,8 +221,19 @@
       : null;
     var offsetSec = explicitWindow ? -originT : leadSec;
     var entryTime = Math.max(0, toNumber(opts.entryTime, 0));
+    var rateActions = timeline.filter(function(action) {
+      return action && action.deck === 'B' && action.op === 'rate';
+    }).sort(function(a, b) { return toNumber(a.t, 0) - toNumber(b.t, 0); });
+    function rateAt(time) {
+      var value = 1;
+      for (var index = 0; index < rateActions.length; index++) {
+        if (toNumber(rateActions[index].t, 0) > time) break;
+        value = clamp(toNumber(rateActions[index].value, 1), 0.94, 1.06);
+      }
+      return value;
+    }
     var actions = timeline
-      .map(function(action) { return normalizeAction(action, offsetSec, targetVolume, originT); })
+      .map(function(action) { return normalizeAction(action, offsetSec, targetVolume, originT, rateAt(toNumber(action && action.t, 0))); })
       .filter(function(action) { return !!action.op; })
       .sort(function(a, b) {
         return a.delayMs - b.delayMs || a.t - b.t;
@@ -225,6 +244,7 @@
       return action.deck === 'B' && (
         action.op === 'filter'
         || action.op === 'bass'
+        || action.op === 'spectrum'
         || action.op === 'echo'
         || action.op === 'duck'
         || (action.op === 'volume' && action.curve.indexOf('equal-power-') === 0)

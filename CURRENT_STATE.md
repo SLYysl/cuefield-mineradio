@@ -1,25 +1,26 @@
-# CURRENT_STATE - Cuefield track identity lock
-> 更新时间: 2026-07-13 | 线程: B audio / C cover mismatch
+# CURRENT_STATE - Cuefield staged spectral emergence
+> 更新时间: 2026-07-14 | 线程: Camelot / DJ frequency-layer reveal
 
 ## 目标
-- 保证 Cuefield 预载音频、队列歌曲元数据和封面始终属于同一首歌。
+- 让合适的 A release -> B climax 过渡通过分层频谱浮现，减少鼓点突然变薄或突然回来的听感。
 
 ## 已做
-- AutoMix 触发前用 `pending.toKey` 校验当前 next slot；失配时丢弃旧预载并重新规划。
-- 预载媒体写入 `_cuefieldSongKey`，`playQueueAt` 在修改播放状态前拒绝身份不匹配的媒体。
-- 过渡开始后若 B 在队列中移动，最终交接按歌曲 key 找回 B；B 已移除则停止交接并重新准备。
-- 新增 A -> B 预载后 next slot 变 C、过渡中 B 被移动、B 音频/C 元数据拒绝等回归。
-- `node --test test/*.test.js` = 381/381；syntax、`git diff --check`、HTTP 200 通过。
+- 新增 `spectral-emergence`：B 先露中低频律动，再分三段恢复中高频，A 同步 bass duck 和 equal-power fade。
+- 仅在可信 release、可信 beat grid、局部音乐兼容、A 低频已释放且 B 低频足够时启用；不会覆盖更强的 impact recipe。
+- BPM 支持半拍/双拍节拍族；只有带 `rate` timeline 的新路线可使用需要微调的跨节拍族匹配。
+- playback rate 限制在 0.94-1.06，保持音高，并在交接后 2.4 秒回到 1。
+- B deck WebAudio 增加 low/mid/high 三频段，echo 从完整 EQ 链后取样。
+- 速率参与 B 落点和被裁剪预滚的 seek 补偿。
+- `node --test test/*.test.js` = 387/387；syntax、`git diff --check`、HTTP 200 通过。
 
 ## 未做 / 下一步
-- 用户继续正常试听，观察是否还会出现声音与封面不一致。
+- 用户实际试听新路线，重点反馈鼓的身体感、B 人声出现时机和回速是否可察觉。
+- 后续再加入局部音色/人声采样相似度；当前共同点仍以调性、旋律和结构证据为主。
 
 ## 关键约束 / 红线
-- 未修改选歌、切歌时间、recipe 或音频过渡参数。
+- `spectral-emergence` 不是全局默认；bass collision 或人声重叠风险存在时必须回退。
 - 保留 `desktop/main.js` 的用户本地 Metal edit；不得提交。
-- 本地 beatmap cache 与 `data/cuefield-feedback.jsonl` 不提交。
 
 ## 关键路径 / 文件
-- `public/cuefield-automix.js`, `public/index.html`
-- `test/cuefield-automix.test.js`, `test/cuefield-musical-integration.test.js`
-- `test/cuefield-playback-handoff.test.js`
+- `cuefield/recipe-planner.js`, `public/cuefield-timeline-executor.js`, `public/index.html`
+- `test/cuefield-recipe-planner.test.js`, `test/cuefield-timeline-executor.test.js`, `test/cuefield-playback-handoff.test.js`

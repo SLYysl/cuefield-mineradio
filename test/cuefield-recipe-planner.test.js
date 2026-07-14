@@ -851,6 +851,57 @@ test('hard-gates the composite impact recipe before applying its preference', as
   }
 });
 
+test('treats half and double BPM readings as the same tempo family', () => {
+  const plan = trustedImpactPlan({
+    bpmA: 93,
+    bpmB: 186,
+    recentRecipes: ['tease-roll-double-drop'],
+  });
+
+  assert.equal(plan.diagnostics.relativeTempoDelta, 0);
+  assert.equal(plan.diagnostics.tempoScale, 0.5);
+  assert.equal(plan.diagnostics.targetPlaybackRate, 1);
+});
+
+test('builds a staged low-first spectrum reveal for a compatible release', () => {
+  const plan = trustedImpactPlan({
+    bpmA: 120,
+    bpmB: 123,
+    recentRecipes: ['tease-roll-double-drop'],
+  });
+  const reveal = plan.candidates.find((candidate) => candidate.recipe === 'spectral-emergence');
+  const spectrum = reveal.timeline.filter((action) => action.deck === 'B' && action.op === 'spectrum');
+  const rates = reveal.timeline.filter((action) => action.deck === 'B' && action.op === 'rate');
+
+  assert.equal(reveal.eligible, true);
+  assert.equal(spectrum.length, 3);
+  assert.equal(spectrum[0].low > spectrum[0].mid, true);
+  assert.equal(spectrum[0].low > spectrum[0].high, true);
+  assert.deepEqual(spectrum.at(-1), {
+    t: -0.8, deck: 'B', op: 'spectrum', low: 1, mid: 1, high: 1, duration: 900,
+  });
+  assert.equal(rates[0].value, Number((120 / 123).toFixed(3)));
+  assert.equal(rates.at(-1).value, 1);
+  assert.equal(plan.chosen.recipe, 'spectral-emergence');
+});
+
+test('keeps near-double BPM tempo locking exclusive to recipes that execute rate actions', () => {
+  const plan = trustedImpactPlan({
+    bpmA: 100,
+    bpmB: 190,
+    recentRecipes: ['tease-roll-double-drop'],
+  });
+  const reveal = plan.candidates.find((candidate) => candidate.recipe === 'spectral-emergence');
+  const longBlend = plan.candidates.find((candidate) => candidate.recipe === 'intro-outro-long-blend');
+
+  assert.equal(plan.diagnostics.tempoFamilyDelta, 0.05);
+  assert.equal(plan.diagnostics.relativeTempoDelta > 0.4, true);
+  assert.equal(plan.diagnostics.passiveTempoDelta > 0.4, true);
+  assert.equal(reveal.eligible, true);
+  assert.equal(longBlend.eligible, false);
+  assert.equal(plan.chosen.recipe, 'spectral-emergence');
+});
+
 test('keeps a late impact exit eligible when four source beats exist before it', () => {
   const impact = trustedImpactPlan({ exitTime: 127.5 }).candidates
     .find((candidate) => candidate.recipe === 'tease-roll-double-drop');

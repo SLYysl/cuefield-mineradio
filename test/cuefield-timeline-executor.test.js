@@ -88,6 +88,21 @@ test('uses explicit transition window as the runtime clock without moving the B 
   assert.equal(Math.abs((play.at + execution.handoffDelayMs / 1000) - 18.6) <= 0.001, true);
 });
 
+test('rate-scales a clipped B pre-roll so its landing remains aligned', () => {
+  const execution = buildCuefieldTimelineExecution({
+    mixStart: 100,
+    handoffAt: 102,
+    timeline: [
+      { t: -4, deck: 'B', op: 'rate', value: 0.98 },
+      { t: -4, deck: 'B', op: 'play', at: 10, volume: 0 },
+      { t: 0, deck: 'B', op: 'handoff' },
+    ],
+  });
+  const play = execution.actions.find((action) => action.op === 'play');
+
+  assert.equal(play.at, 11.96);
+});
+
 test('falls back to legacy timing for an empty explicit transition window', () => {
   const execution = buildCuefieldTimelineExecution({
     mixStart: 50,
@@ -220,6 +235,27 @@ test('marks B-deck echo as a B graph requirement', () => {
 
   assert.equal(execution.requiresBGraph, true);
   assert.equal(execution.requiresAGraph, false);
+});
+
+test('normalizes staged spectrum and bounded playback-rate actions', () => {
+  const execution = buildCuefieldTimelineExecution({
+    timeline: [
+      { t: -4, deck: 'B', op: 'rate', value: 0.2 },
+      { t: -4, deck: 'B', op: 'spectrum', low: -1, mid: 0.45, high: 9, duration: 1200 },
+      { t: 0, deck: 'B', op: 'rate', value: 1, duration: 2400 },
+      { t: 0, deck: 'B', op: 'handoff' },
+    ],
+  });
+  const spectrum = execution.actions.find((action) => action.op === 'spectrum');
+  const rates = execution.actions.filter((action) => action.op === 'rate');
+
+  assert.deepEqual({ low: spectrum.low, mid: spectrum.mid, high: spectrum.high }, {
+    low: 0,
+    mid: 0.45,
+    high: 1,
+  });
+  assert.deepEqual(rates.map((action) => action.value), [0.94, 1]);
+  assert.equal(execution.requiresBGraph, true);
 });
 
 test('normalizes a bounded bridge action and marks bridge runtime as required', () => {
