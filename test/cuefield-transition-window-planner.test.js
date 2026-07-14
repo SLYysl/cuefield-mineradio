@@ -426,22 +426,61 @@ test('terminal rescue returns an executable late timeline when structural window
   assert.equal(result.chosen.mixStart < result.chosen.handoffAt, true);
   assert.equal(result.chosen.handoffAt <= from.duration, true);
   assert.equal(result.chosen.timeline.some((action) => action.op === 'handoff'), true);
-  assert.equal(result.chosen.timeline.some((action) => action.op === 'echo' && action.enabled === true), true);
-  assert.equal(result.chosen.timeline.some((action) => action.op === 'echo' && action.enabled === false && action.tailMs >= 900), true);
+  assert.equal(result.chosen.rescueClass, 'C');
+  assert.equal(result.chosen.recipeCandidate.variant, 'limited-window-crossfade');
+  assert.equal(result.chosen.timeline.some((action) => action.op === 'echo'), false);
+  assert.equal(result.chosen.timeline.some((action) => action.op === 'bass'), false);
+  assert.equal(result.chosen.timeline.some((action) => action.op === 'filter'), false);
   assert.equal(Array.isArray(result.chosen.recipeCandidate.fallbackTimeline), true);
   assert.equal(result.chosen.recipeCandidate.fallbackTimeline.some((action) => action.op === 'echo'), false);
   const aFade = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'volume');
   const bFade = result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'volume');
-  const aBassCut = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'bass');
-  const aFilter = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'filter');
   assert.equal(aFade.t, 0);
-  assert.equal(aFade.duration >= 2000, true);
-  assert.equal(bFade.t > aFade.t, true);
+  assert.equal(aFade.duration, 3400);
+  assert.equal(bFade.t, 0);
   assert.equal(bFade.duration >= 1800, true);
-  assert.equal(aBassCut.t, aFade.t);
-  assert.equal(aFilter, undefined);
   assert.equal(result.chosen.audibleOverlap >= 1.8, true);
   assert.equal(result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'play').at, 0);
+});
+
+test('terminal rescue class A clears outgoing vocals before B becomes audible', () => {
+  const from = profile({ duration: 128, exits: [] });
+  from.structureMap.structureSource = 'lyric+beat';
+  from.structureMap.vocalWindows = [{ start: 118, end: 127.5 }];
+  const to = profile({ duration: 96, entries: [entry('intro', 8, { source: 'energy' })] });
+
+  const result = chooseTransitionWindow(from, to);
+  const aFade = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'volume');
+  const bFade = result.chosen.timeline.find((action) => action.deck === 'B' && action.op === 'volume');
+
+  assert.equal(result.chosen.rescueClass, 'A');
+  assert.equal(result.chosen.recipeCandidate.variant, 'vocal-release');
+  assert.equal(aFade.duration <= 800, true);
+  assert.equal(bFade.t >= 0.5, true);
+  assert.equal(result.chosen.timeline.some((action) => action.op === 'echo'), false);
+  assert.equal(result.chosen.timeline.some((action) => action.op === 'filter'), false);
+});
+
+test('terminal rescue class B stages an energy contrast instead of cutting both drums at once', () => {
+  const from = setBarMetrics(profile({
+    duration: 200,
+    exits: [exit(92, 0.99, { exitRatio: 0.46 })],
+  }), 92, { energy: 0.36, snapDensity: 0.16 });
+  const to = setBarMetrics(profile({
+    entries: [entry('intro', 12, { playFrom: 0, landingAt: 12, landingType: 'intro' })],
+  }), 12, { energy: 0.82, snapDensity: 0.58 });
+
+  const result = chooseTransitionWindow(from, to);
+  const bFilters = result.chosen.timeline.filter((action) => action.deck === 'B' && action.op === 'filter');
+  const bBass = result.chosen.timeline.filter((action) => action.deck === 'B' && action.op === 'bass');
+  const aBass = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'bass');
+
+  assert.equal(result.chosen.rescueClass, 'B');
+  assert.equal(result.chosen.recipeCandidate.variant, 'staged-energy-bridge');
+  assert.equal(bFilters.length >= 3, true);
+  assert.equal(bBass.length >= 3, true);
+  assert.equal(aBass.value >= 0.7, true);
+  assert.equal(result.chosen.timeline.some((action) => action.op === 'echo'), false);
 });
 
 test('terminal rescue waits for an outgoing vocal window to clear when runway remains', () => {

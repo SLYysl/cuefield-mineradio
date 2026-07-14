@@ -200,6 +200,10 @@ test('plans a Cuefield transition directly from Mineradio beatmap cache keys', (
   assert.equal(Array.isArray(result.candidates), true);
   assert.equal(result.diagnostics.route, 'terminal-rescue');
   assert.deepEqual(result.diagnostics.routeReasons, ['missing-structure']);
+  assert.equal(result.chosen.rescueClass, 'C');
+  assert.equal(result.chosen.rescueReason, 'limited-transition-window');
+  assert.equal(result.diagnostics.terminalRescueClass, 'C');
+  assert.equal(result.diagnostics.terminalRescueReason, 'limited-transition-window');
   assert.equal(result.candidates.length, 0);
   assert.equal(Array.isArray(result.chosen.timeline), true);
   assert.equal(result.chosen.timeline.length > 0, true);

@@ -1,31 +1,24 @@
-# CURRENT_STATE - Cuefield playback and outro continuity
-> 更新时间: 2026-07-14 | 线程: 未缓存卡顿与长混合 A 退出修复
+# CURRENT_STATE - Cuefield adaptive terminal rescue
+> 更新时间: 2026-07-14 | 线程: A/B/C 保底过渡执行分型
 
 ## 目标
-- 让合适的 A release -> B climax 过渡通过分层频谱浮现，减少鼓点突然变薄或突然回来的听感。
+- 不再让所有 terminal-rescue 共用同一条回声/EQ 时间线；按失败原因执行不同的过渡。
 
 ## 已做
-- 新增 `spectral-emergence`：B 先露中低频律动，再分三段恢复中高频，A 同步 bass duck 和 equal-power fade。
-- 仅在可信 release、可信 beat grid、局部音乐兼容、A 低频已释放且 B 低频足够时启用；不会覆盖更强的 impact recipe。
-- BPM 支持半拍/双拍节拍族；只有带 `rate` timeline 的新路线可使用需要微调的跨节拍族匹配。
-- playback rate 限制在 0.94-1.06，保持音高，并在交接后 2.4 秒回到 1。
-- B deck WebAudio 增加 low/mid/high 三频段，echo 从完整 EQ 链后取样。
-- 速率参与 B 落点和被裁剪预滚的 seek 补偿。
-- `directionality mismatch` 不再允许 `tease-roll-double-drop` 循环 A 的旋律/人声片段。
-- 铁血丹心 -> Never Be Like You 真实歌词复现已改走 `intro-outro-long-blend`，timeline 无 A loop/seek。
-- 长混合 A 改为切点前 2.4 秒开始、持续 4.8 秒的 equal-power 淡出；bass 只在淡出中缓降到 0.72。
-- 未缓存歌曲的后台 beatmap 分析需先有 24 秒播放缓冲，并统一使用 128 kbps 标准音质，避免与 Hi-Res 播放抢带宽。
-- 播放中跳过额外 music-tempo worker；队列预热同样受缓冲门槛保护。
-- `node --test test/*.test.js` = 391/391；syntax、`git diff --check`、HTTP 200 通过。
+- A 人声冲突：最终窗口仍有人声时，先用 720ms equal-power 退出 A，再让 B 浮现，取消回声和滤波。
+- B 能量差异：依据原 route 的 snap/energy contrast 信号，分三段恢复 B 的高通和低频；A 低频只缓降到 0.72。
+- C 可用时间窗不足：无回声、无 EQ 戏法，只做 3.4 秒 clean equal-power crossfade。
+- 保留可信 Hook/Drop 预滚与落点约束；真实样本 Bubble Gum -> Riot Call、Killing Me -> Fortress、USA Today -> Believe In Me 分别命中 A/B/C。
+- API、播放器评分上下文、本地/远端反馈记录均透传 `terminalRescueClass` 和原因。
+- 三段 14.4 秒试听输出在 `/tmp/cuefield-previews/`；切换发生在第 5 秒。
+- 完整测试、syntax、diff check、HTTP/API 真实计划验证通过。
 
 ## 未做 / 下一步
-- 用户复听 铁血丹心 -> Never Be Like You 的 A 淡出，并用一首无 beatmap 缓存歌曲验证播放连续性。
-- 后续再加入局部音色/人声采样相似度；当前共同点仍以调性、旋律和结构证据为主。
+- 用户试听 A/B/C 样本并分别评分；根据听感优先微调 A 的退出间隔和 B 的三段 EQ 斜率。
 
 ## 关键约束 / 红线
-- `spectral-emergence` 不是全局默认；bass collision 或人声重叠风险存在时必须回退。
+- A 优先级高于 B；C 不能因“曾等待过歌词”误判为 A。
 - 保留 `desktop/main.js` 的用户本地 Metal edit；不得提交。
 
 ## 关键路径 / 文件
-- `cuefield/recipe-planner.js`, `public/cuefield-timeline-executor.js`, `public/index.html`
-- `test/cuefield-recipe-planner.test.js`, `test/cuefield-playback-buffering.test.js`
+- `cuefield/transition-window-planner.js`, `cuefield/mineradio-bridge.js`, `cuefield/feedback-log.js`, `public/index.html`

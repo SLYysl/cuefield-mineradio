@@ -88,7 +88,7 @@ test('Cuefield feedback captures adaptive planner and runtime diagnostics', () =
     'audibleOverlap', 'preRollDuration', 'energyContinuity',
     'grooveContinuity', 'tempoCompatibility', 'windowRejectionReasons',
     'route', 'compatibilityClass', 'contrastDirection', 'preferredExitRange',
-    'routeReasons', 'routeFallbackUsed',
+    'routeReasons', 'routeFallbackUsed', 'terminalRescueClass', 'terminalRescueReason',
     'localMusicalEvidence', 'localMusicalCompatibility', 'localHarmonicSimilarity',
     'localKeyCompatibility', 'localMelodySimilarity', 'localMusicalConfidence',
     'localAWindowStart', 'localBWindowStart', 'localAWindowDistance',

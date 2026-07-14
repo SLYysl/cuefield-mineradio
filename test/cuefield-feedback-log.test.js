@@ -301,6 +301,8 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
       preferredExitRange: [0.75, 0.9],
       routeReasons: ['snap rise'],
       routeFallbackUsed: false,
+      terminalRescueClass: 'B',
+      terminalRescueReason: 'energy-contrast',
     },
   }, new Date('2026-07-09T02:00:00.000Z'));
 
@@ -354,6 +356,8 @@ test('builds a compact Cuefield feedback record without audio urls', () => {
   assert.deepEqual(record.transition.preferredExitRange, [0.75, 0.9]);
   assert.deepEqual(record.transition.routeReasons, ['snap rise']);
   assert.equal(record.transition.routeFallbackUsed, false);
+  assert.equal(record.transition.terminalRescueClass, 'B');
+  assert.equal(record.transition.terminalRescueReason, 'energy-contrast');
   assert.equal(Object.prototype.hasOwnProperty.call(record.transition, 'audioUrl'), false);
   assert.equal(JSON.stringify(record).includes('must not persist'), false);
   assert.deepEqual(record.transition.window, {
@@ -453,6 +457,8 @@ test('sanitizes route diagnostics to compact bounded values', () => {
       preferredExitRange: [1.4, -0.2],
       routeReasons: ['same', 'same', 'x'.repeat(120), 'reason 2', 'reason 3', 'reason 4'],
       routeFallbackUsed: true,
+      terminalRescueClass: 'A',
+      terminalRescueReason: 'r'.repeat(120),
     },
   });
 
@@ -463,16 +469,20 @@ test('sanitizes route diagnostics to compact bounded values', () => {
   assert.deepEqual(record.transition.preferredExitRange, [0, 1]);
   assert.deepEqual(record.transition.routeReasons, ['same', 'x'.repeat(96), 'reason 2', 'reason 3']);
   assert.equal(record.transition.routeFallbackUsed, true);
+  assert.equal(record.transition.terminalRescueClass, 'A');
+  assert.equal(record.transition.terminalRescueReason, 'r'.repeat(40));
 
   const malformed = buildCuefieldFeedbackRecord({
     rating: 3,
     transition: {
       preferredExitRange: [0.75, Infinity],
       routeFallbackUsed: 'true',
+      terminalRescueClass: 'unknown',
     },
   });
   assert.deepEqual(malformed.transition.preferredExitRange, []);
   assert.equal(malformed.transition.routeFallbackUsed, false);
+  assert.equal(malformed.transition.terminalRescueClass, '');
 });
 
 test('rejects ratings outside the 1 to 3 scoring scale', () => {

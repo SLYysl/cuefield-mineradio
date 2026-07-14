@@ -10756,6 +10756,8 @@ function cuefieldFeedbackContextFromPending(pending) {
       preferredExitRange: plannerDiagnostics.preferredExitRange || [],
       routeReasons: plannerDiagnostics.routeReasons || [],
       routeFallbackUsed: plannerDiagnostics.routeFallbackUsed === true,
+      terminalRescueClass: plannerDiagnostics.terminalRescueClass || '',
+      terminalRescueReason: plannerDiagnostics.terminalRescueReason || '',
       structureSource: plannerDiagnostics.structureSource || '',
       structureConfidence: plannerDiagnostics.structureConfidence,
       protectedUntil: plannerDiagnostics.protectedUntil,

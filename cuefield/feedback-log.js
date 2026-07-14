@@ -52,6 +52,11 @@ function compactRouteReasons(value) {
   return Array.from(new Set(value.map((reason) => compactString(reason, 96)).filter(Boolean))).slice(0, 4);
 }
 
+function compactTerminalRescueClass(value) {
+  const normalized = compactString(value, 1).toUpperCase();
+  return ['A', 'B', 'C'].includes(normalized) ? normalized : '';
+}
+
 function compactPreferredExitRange(value) {
   if (!Array.isArray(value) || value.length !== 2) return [];
   const range = value.map(Number);
@@ -216,6 +221,8 @@ function compactTransition(transition = {}) {
     preferredExitRange: compactPreferredExitRange(transition.preferredExitRange),
     routeReasons: compactRouteReasons(transition.routeReasons),
     routeFallbackUsed: transition.routeFallbackUsed === true,
+    terminalRescueClass: compactTerminalRescueClass(transition.terminalRescueClass),
+    terminalRescueReason: compactString(transition.terminalRescueReason, 40),
     diagnostics: compactDiagnostics(transition.diagnostics),
     structure: compactStructure(structure),
     risks: compactList(transition.risks),
