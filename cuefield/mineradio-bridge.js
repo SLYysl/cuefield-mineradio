@@ -220,6 +220,7 @@ function transitionDiagnostics(from, to, windowPlan, chosen, structureSource) {
     entrySource: entry.source || '',
     entryConfidence: finiteOrNull(entry.confidence),
     landingAt: finiteOrNull(entry.landingAt),
+    effectiveSourceEnd: finiteOrNull(chosen.effectiveSourceEnd),
     mixStart: finiteOrNull(chosen.mixStart),
     handoffAt: finiteOrNull(chosen.handoffAt),
     audibleOverlap: finiteOrNull(chosen.audibleOverlap),
@@ -279,6 +280,14 @@ function planCuefieldTransitionFromCache(opts = {}) {
   const toEntry = entryFromCache(readBeatMapCache, toKey);
   const from = analyzeCacheEntry(fromEntry, fromKey, opts.fromLrc);
   const to = analyzeCacheEntry(toEntry, toKey, opts.toLrc);
+  const requestedListenFloor = finiteOrNull(opts.minimumListenUntil);
+  if (requestedListenFloor !== null) {
+    const duration = Math.max(0, Number(from.cueProfile && from.cueProfile.duration) || 0);
+    const listenFloor = Math.max(0, Math.min(duration, requestedListenFloor));
+    if (listenFloor > Number(from.structureMap.protectedUntil || 0)) {
+      from.structureMap.protectedUntil = listenFloor;
+    }
+  }
   const recentRecipes = normalizeRecentRecipes(opts.recentRecipes);
   const windowPlan = chooseTransitionWindow(from, to, { recentRecipes });
   const selected = windowPlan.chosen || {};
@@ -301,6 +310,7 @@ function planCuefieldTransitionFromCache(opts = {}) {
     transitionRecipe: recipeCandidate.recipe,
     timeline: selected.timeline,
     recipeCandidate,
+    effectiveSourceEnd: selected.effectiveSourceEnd,
     mixStart: selected.mixStart,
     handoffAt: selected.handoffAt,
     audibleOverlap: selected.audibleOverlap,

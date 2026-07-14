@@ -10561,7 +10561,9 @@ async function planCuefieldSongPair(fromSong, toSong, ctx) {
     ? ':impact-blocked'
     : ':impact-open';
   var cacheKind = ctx.refineMusical ? 'refined' : 'coarse';
-  var cacheKey = fromKey + '->' + toKey + ':' + cacheKind + cooldownKey;
+  var minimumListenUntil = Math.max(0, Number(ctx.minimumListenUntil) || 0);
+  var floorKey = minimumListenUntil > 0 ? ':floor-' + Math.round(minimumListenUntil * 1000) : '';
+  var cacheKey = fromKey + '->' + toKey + ':' + cacheKind + cooldownKey + floorKey;
   var cached = cuefieldPairPlanCache.get(cacheKey);
   if (cached && Date.now() - cached.createdAt < CUEFIELD_PAIR_PLAN_TTL_MS) return cached.plan;
   var lyricSource = window.CuefieldLyricSource;
@@ -10579,6 +10581,7 @@ async function planCuefieldSongPair(fromSong, toSong, ctx) {
       toLrc: lyrics[1],
       exitBias: ctx.exitBias || 'late',
       recentRecipes: recentRecipes.slice(),
+      minimumListenUntil: minimumListenUntil,
     })
   }); };
   var plan = await postCuefieldTransition();
@@ -10663,7 +10666,11 @@ function initCuefieldAutoMix() {
       ctx = ctx || {};
       var fromSong = ctx.currentSong || {};
       var toSong = ctx.nextSong || {};
-      return planCuefieldSongPair(fromSong, toSong, { exitBias: 'late', refineMusical: true });
+      return planCuefieldSongPair(fromSong, toSong, {
+        exitBias: 'late',
+        refineMusical: true,
+        minimumListenUntil: ctx.minimumListenUntil,
+      });
     },
     prepareAudioUrl: function(song) { return fetchBeatPrefetchAudioUrl(song); },
   });
@@ -10771,6 +10778,7 @@ function cuefieldFeedbackContextFromPending(pending) {
       hookConfidence: plannerDiagnostics.hookConfidence,
       hookEvidence: plannerDiagnostics.hookEvidence,
       exitRatio: plannerDiagnostics.exitRatio,
+      effectiveSourceEnd: plannerDiagnostics.effectiveSourceEnd,
       mixStart: pending.actualMixStart != null && isFinite(Number(pending.actualMixStart)) ? Number(pending.actualMixStart) : plannerDiagnostics.mixStart,
       handoffAt: pending.actualHandoffAt != null && isFinite(Number(pending.actualHandoffAt)) ? Number(pending.actualHandoffAt) : plannerDiagnostics.handoffAt,
       landingAt: plannerDiagnostics.landingAt,

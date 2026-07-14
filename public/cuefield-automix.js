@@ -174,6 +174,8 @@
         return { status: 'missing-queue' };
       }
       var getKey = deps.getKey || function(song) { return song && song.key || ''; };
+      var listenFloor = minimumListenUntil(ctx.durationSec);
+      ctx.minimumListenUntil = listenFloor;
       var fromKey = getKey(currentSong);
       var toKey = getKey(nextSong);
       if (!fromKey || !toKey || fromKey === toKey) {
@@ -224,7 +226,6 @@
           : toNumber(ctx.leadSec, 1);
         var leadSec = timelineLeadSec(timeline, fallbackLeadSec);
         var protectedUntil = Math.max(0, toNumber(chosen.protectedUntil, 0));
-        var listenFloor = minimumListenUntil(ctx.durationSec);
         var explicitMixStart = chosen.mixStart != null ? Number(chosen.mixStart) : NaN;
         var explicitHandoffAt = chosen.handoffAt != null ? Number(chosen.handoffAt) : NaN;
         var hasExplicitWindow = Number.isFinite(explicitMixStart)

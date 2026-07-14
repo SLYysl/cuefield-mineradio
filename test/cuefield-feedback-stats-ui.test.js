@@ -84,7 +84,7 @@ test('Cuefield feedback captures adaptive planner and runtime diagnostics', () =
   assert.match(contextBlock, /plannerDiagnostics\.exitCandidateCount/);
   [
     'firstHookStart', 'firstHookEnd', 'hookConfidence', 'hookEvidence',
-    'exitRatio', 'mixStart', 'handoffAt', 'landingAt',
+    'exitRatio', 'effectiveSourceEnd', 'mixStart', 'handoffAt', 'landingAt',
     'audibleOverlap', 'preRollDuration', 'energyContinuity',
     'grooveContinuity', 'tempoCompatibility', 'windowRejectionReasons',
     'route', 'compatibilityClass', 'contrastDirection', 'preferredExitRange',
@@ -137,6 +137,7 @@ test('Cuefield feedback context propagates local musical diagnostics at runtime'
         localAWindowDistance: 0.005,
         localBWindowDistance: 1.235,
         localMusicalRisks: ['harmonic-clash', 'late'],
+        effectiveSourceEnd: 120.457,
       },
     },
   });
@@ -152,6 +153,7 @@ test('Cuefield feedback context propagates local musical diagnostics at runtime'
   assert.equal(result.transition.localAWindowDistance, 0.005);
   assert.equal(result.transition.localBWindowDistance, 1.235);
   assert.deepEqual(result.transition.localMusicalRisks, ['harmonic-clash', 'late']);
+  assert.equal(result.transition.effectiveSourceEnd, 120.457);
 });
 
 test('Cuefield feedback context records impact execution diagnostics from the chosen recipe candidate', () => {

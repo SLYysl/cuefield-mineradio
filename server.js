@@ -3361,6 +3361,7 @@ const server = http.createServer(async (req, res) => {
         toLrc: body.toLrc,
         exitBias: body.exitBias || 'late',
         recentRecipes: normalizeCuefieldRecentRecipes(body.recentRecipes),
+        minimumListenUntil: body.minimumListenUntil,
         readBeatMapCache,
       });
       const chosen = result && result.chosen || {};

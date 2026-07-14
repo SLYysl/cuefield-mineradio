@@ -83,6 +83,7 @@ function compactWindow(window = {}) {
       sustainedEnergy: normalizeSustainedEnergy(window.hookEvidence && window.hookEvidence.sustainedEnergy),
     },
     exitRatio: roundNumber(window.exitRatio),
+    effectiveSourceEnd: roundNumber(window.effectiveSourceEnd),
     mixStart: roundNumber(window.mixStart),
     handoffAt: roundNumber(window.handoffAt),
     landingAt: roundNumber(window.landingAt),

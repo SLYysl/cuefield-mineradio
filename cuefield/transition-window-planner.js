@@ -10,6 +10,14 @@ function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, toNumber(value)));
 }
 
+function ceilMillisecond(value) {
+  return Math.ceil(toNumber(value) * 1000 - 0.000001) / 1000;
+}
+
+function floorMillisecond(value) {
+  return Math.floor(toNumber(value) * 1000 + 0.000001) / 1000;
+}
+
 // Neutral policy: absent, NaN, null, and negative infinity mean no penalty.
 function normalizePenalty(value) {
   if (value === Infinity) return 1;
@@ -482,7 +490,32 @@ function terminalStartAfterVocal(windows, requested, duration) {
       candidate = end + 0.12;
     }
   });
-  return duration - candidate >= MINIMUM_TERMINAL_OVERLAP ? round(candidate) : round(requested);
+  return duration - candidate >= MINIMUM_TERMINAL_OVERLAP
+    ? ceilMillisecond(candidate)
+    : ceilMillisecond(requested);
+}
+
+function effectiveSourceEnd(profile) {
+  const duration = Math.max(0, toNumber(profile && profile.duration));
+  const energy = (profile && profile.windows && profile.windows.energy || [])
+    .map((window) => ({
+      start: toNumber(window && window.start, NaN),
+      end: toNumber(window && window.end, NaN),
+      value: toNumber(window && window.value, NaN),
+    }))
+    .filter((window) => Number.isFinite(window.start)
+      && Number.isFinite(window.end)
+      && Number.isFinite(window.value)
+      && window.end > window.start)
+    .sort((a, b) => a.start - b.start);
+  if (!energy.length || energy.at(-1).end < duration - 0.25) return duration;
+
+  let lastAudibleIndex = energy.length - 1;
+  while (lastAudibleIndex >= 0 && energy[lastAudibleIndex].value <= 0.001) lastAudibleIndex -= 1;
+  if (lastAudibleIndex < 0 || lastAudibleIndex === energy.length - 1) return duration;
+
+  const trailingStart = energy[lastAudibleIndex + 1].start;
+  return duration - trailingStart >= MINIMUM_TERMINAL_OVERLAP ? floorMillisecond(trailingStart) : duration;
 }
 
 function terminalRescueMode(windows, mixStart, overlapDuration, policy) {
@@ -583,6 +616,7 @@ function terminalRescueTimeline(mode, opts) {
 
 function terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protectedUntil, policy, rejected, entries = []) {
   const duration = Math.max(0, toNumber(fromProfile && fromProfile.duration));
+  const sourceEnd = effectiveSourceEnd(fromProfile);
   const targetDuration = Math.max(0, toNumber(toProfile && toProfile.duration));
   const protectedBoundary = toNumber(protectedUntil);
   if (!(duration > 0)) return technicalFailure('TERMINAL_RESCUE_INVALID_DURATION', rejected);
@@ -590,7 +624,7 @@ function terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protec
   if (targetDuration < MINIMUM_TERMINAL_OVERLAP - 0.000001) {
     return technicalFailure('TERMINAL_RESCUE_INSUFFICIENT_TARGET_RUNWAY', rejected);
   }
-  if (duration - protectedBoundary < MINIMUM_TERMINAL_OVERLAP - 0.000001) {
+  if (sourceEnd - protectedBoundary < MINIMUM_TERMINAL_OVERLAP - 0.000001) {
     return technicalFailure('TERMINAL_RESCUE_INSUFFICIENT_POST_PROTECTION_RUNWAY', rejected);
   }
   const [minRatio, maxRatio] = policy.preferredExitRange || [];
@@ -601,25 +635,25 @@ function terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protec
       return Number.isFinite(time)
         && ratio >= minRatio
         && ratio <= maxRatio
-        && duration - time >= MINIMUM_TERMINAL_OVERLAP - 0.000001;
+        && sourceEnd - time >= MINIMUM_TERMINAL_OVERLAP - 0.000001;
     })
     .sort((a, b) => toNumber(b.time) - toNumber(a.time));
   const selectedExit = rangeExits[0] || null;
   const preferredStart = selectedExit
     ? toNumber(selectedExit.time)
-    : Math.max(toNumber(protectedUntil), Math.min(duration - 3.6, duration * 0.92));
+    : Math.max(toNumber(protectedUntil), Math.min(sourceEnd - 3.6, duration * 0.92));
   const requestedMixStart = selectedExit
-    ? round(toNumber(selectedExit.time))
-    : round(Math.max(
+    ? ceilMillisecond(Math.max(protectedBoundary, toNumber(selectedExit.time)))
+    : ceilMillisecond(Math.max(
       protectedBoundary,
-      Math.min(duration - MINIMUM_TERMINAL_OVERLAP, preferredStart),
+      Math.min(sourceEnd - MINIMUM_TERMINAL_OVERLAP, preferredStart),
     ));
   const safeMixStart = terminalStartAfterVocal(
     fromAnalysis && fromAnalysis.structureMap && fromAnalysis.structureMap.vocalWindows,
     requestedMixStart,
     duration,
   );
-  const safeOverlapDuration = round(Math.max(0, Math.min(3.4, duration - safeMixStart, targetDuration)));
+  const safeOverlapDuration = floorMillisecond(Math.max(0, Math.min(3.4, sourceEnd - safeMixStart, targetDuration)));
   const mode = terminalRescueMode(
     fromAnalysis && fromAnalysis.structureMap && fromAnalysis.structureMap.vocalWindows,
     safeMixStart,
@@ -629,10 +663,10 @@ function terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protec
   const vocalBedLead = round(Math.max(0, safeMixStart - requestedMixStart));
   const useVocalBed = mode.rescueClass === 'C'
     && vocalBedLead >= 0.5
-    && duration - requestedMixStart >= 4.6
+    && sourceEnd - requestedMixStart >= 4.6
     && targetDuration >= 4.6;
   const mixStart = useVocalBed ? requestedMixStart : safeMixStart;
-  const overlapDuration = round(Math.max(0, Math.min(useVocalBed ? 5.8 : 3.4, duration - mixStart, targetDuration)));
+  const overlapDuration = floorMillisecond(Math.max(0, Math.min(useVocalBed ? 5.8 : 3.4, sourceEnd - mixStart, targetDuration)));
   const aFadeAt = useVocalBed ? vocalBedLead : 0;
   const landingOffset = round(Math.max(1.65, Math.min(overlapDuration - 0.35, overlapDuration * 0.72)));
   const trustedEntry = entries.find((candidate) => (
@@ -697,6 +731,7 @@ function terminalRescue(fromAnalysis, toAnalysis, fromProfile, toProfile, protec
     timeline,
     rescueClass: mode.rescueClass,
     rescueReason: mode.reason,
+    effectiveSourceEnd: sourceEnd,
     mixStart,
     handoffAt: round(mixStart + overlapDuration),
     audibleOverlap,

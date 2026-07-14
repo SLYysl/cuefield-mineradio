@@ -52,10 +52,13 @@ test('prepares a transition for the current and next queue items before playback
 });
 
 test('holds automatic transitions until a dynamic minimum listening floor', async () => {
+  let planningContext = null;
   const automix = createCuefieldAutoMix({
     getKey: (song) => song.key,
     ensureBeatMap: async () => true,
-    planTransition: async () => ({
+    planTransition: async (fromKey, toKey, ctx) => {
+      planningContext = ctx;
+      return ({
       ok: true,
       chosen: {
         recipe: 'section-jump',
@@ -63,7 +66,8 @@ test('holds automatic transitions until a dynamic minimum listening floor', asyn
         exit: { time: 30 },
         evaluation: { tier: 'usable', risks: [] },
       },
-    }),
+      });
+    },
     prepareAudioUrl: async () => '/api/audio?url=b',
   });
 
@@ -78,6 +82,7 @@ test('holds automatic transitions until a dynamic minimum listening floor', asyn
   });
 
   assert.equal(result.pending.minimumListenUntil, 100.8);
+  assert.equal(planningContext.minimumListenUntil, 100.8);
   assert.equal(result.pending.triggerAt, 100.8);
   assert.equal(automix.shouldTrigger({ token: 31, currentIndex: 0, currentTime: 100.7 }), false);
   assert.equal(automix.shouldTrigger({ token: 31, currentIndex: 0, currentTime: 100.8 }), true);

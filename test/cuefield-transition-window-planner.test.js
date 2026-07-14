@@ -507,6 +507,54 @@ test('terminal rescue class C beds B under the last vocal before fading A', () =
   assert.equal(result.chosen.handoffAt <= 128, true);
 });
 
+test('terminal rescue caps class C at the effective end before a zero-energy file tail', () => {
+  const from = profile({
+    duration: 245.705,
+    exits: [exit(235.23, 0.58, { exitRatio: 0.957 })],
+  });
+  from.windows.energy = [
+    { start: 0, end: 240, value: 0.55 },
+    { start: 240, end: 245.705, value: 0 },
+  ];
+  from.structureMap.structureSource = 'lyric+beat';
+  from.structureMap.vocalWindows = [{ start: 234.551, end: 239.051 }];
+  const to = profile({ duration: 180 });
+
+  const result = chooseTransitionWindow(from, to);
+  const aFade = result.chosen.timeline.find((action) => action.deck === 'A' && action.op === 'volume');
+
+  assert.equal(result.chosen.rescueClass, 'C');
+  assert.equal(result.chosen.effectiveSourceEnd, 240);
+  assert.equal(result.chosen.mixStart, 235.23);
+  assert.equal(result.chosen.handoffAt <= 240, true);
+  assert.equal(aFade.t >= 3.8, true);
+});
+
+test('terminal rescue keeps metadata duration when the final energy window is not silent', () => {
+  const from = profile({ duration: 128 });
+  from.windows.energy = [
+    { start: 0, end: 120, value: 0.5 },
+    { start: 120, end: 128, value: 0.02 },
+  ];
+
+  const result = chooseTransitionWindow(from, profile({ duration: 96 }));
+
+  assert.equal(result.chosen.effectiveSourceEnd, 128);
+});
+
+test('terminal rescue millisecond rounding never starts before protection or hands off after source end', () => {
+  const from = profile({
+    duration: 46.66404849117999,
+    protectedUntil: 43.37641786050503,
+  });
+
+  const result = chooseTransitionWindow(from, profile({ duration: 96 }));
+
+  assert.equal(result.chosen.technicalFailure, undefined);
+  assert.equal(result.chosen.mixStart >= from.structureMap.protectedUntil, true);
+  assert.equal(result.chosen.handoffAt <= from.duration, true);
+});
+
 test('terminal rescue prerolls a trusted hook and reaches full volume on its landing', () => {
   const from = profile({ duration: 128, bpm: 122, exits: [exit(80)] });
   const to = profile({

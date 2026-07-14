@@ -1,24 +1,23 @@
-# CURRENT_STATE - Cuefield adaptive terminal rescue
-> 更新时间: 2026-07-14 | 线程: A/B/C 首轮反馈修正
+# CURRENT_STATE - Cuefield transition hardening
+> 更新时间: 2026-07-15 | 线程: 反馈小修与全功能红蓝对抗
 
 ## 目标
-- 不再让所有 terminal-rescue 共用同一条回声/EQ 时间线；按失败原因执行不同的过渡。
+- 让规划时间和实际执行位置一致，并避开歌曲文件末尾的无声区域。
 
 ## 已做
-- A 首轮反馈“像硬切”：A fade 改为 1.35 秒，B 从 0.65 秒进入，可听重叠由 0.037 秒增至 0.54 秒。
-- B 首轮反馈“能量突然进来”：初始高通降至 900Hz、bass 提至 0.25，最终频谱恢复延长到完整 handoff。
-- C 首轮反馈“A 结束后 B 才进”：B 从 A 尾句下方提前铺底，A 等人声结束再淡出；窗口由 3.4 秒增至 5.8 秒。
-- 保留可信 Hook/Drop 预滚与落点约束；真实样本 Bubble Gum -> Riot Call、Killing Me -> Fortress、USA Today -> Believe In Me 分别命中 A/B/C。
-- API、播放器评分上下文、本地/远端反馈记录均透传 `terminalRescueClass` 和原因。
-- v2 三段试听输出在 `/tmp/cuefield-previews/`；切换发生在第 5 秒。
-- 完整测试、syntax、diff check、HTTP/API 真实计划验证通过。
+- terminal rescue 从能量窗口识别 `effectiveSourceEnd`；仅裁掉至少 2.2 秒的连续零能量尾部，正常弱尾奏不裁。
+- USA Today -> Believe In Me 真实计划：235.23 秒开始、239.171 秒后淡出 A、240 秒交接，不再进入 245.705 秒文件尾静音。
+- 开始时间向后取毫秒、可用时长向下取毫秒；10 万组随机规划无提前切、越界交接或时间线超窗。
+- 最低收听时间前移到规划请求，写入 `protectedUntil`；不再先选早切点、再由播放器事后硬拖到陌生旋律位置。
+- `effectiveSourceEnd` 已透传 API、浏览器反馈、本地/远端反馈记录。
+- 红队复查封面/音频身份锁、未缓存预载、智能 10-20 选歌、DJ 操作执行和反馈契约，未发现其他可复现回归。
+- 全量 397 tests、语法、diff、HTTP、Playwright 与真实缓存 API 验证通过；本地运行于 `http://127.0.0.1:3000`。
 
 ## 未做 / 下一步
-- 用户复听 A/B/C v2 并评分；按新记录决定是否保留参数。
+- 用户复听 USA Today -> Believe In Me 及普通结构过渡，重点确认尾部淡出和新切点是否自然。
 
 ## 关键约束 / 红线
-- A 优先级高于 B；C 不能因“曾等待过歌词”误判为 A。
-- 保留 `desktop/main.js` 的用户本地 Metal edit；不得提交。
+- 保留已认可的 A/B 参数；不凭空重调。保留 `desktop/main.js` 用户 Metal edit，不提交。
 
 ## 关键路径 / 文件
-- `cuefield/transition-window-planner.js`, `cuefield/mineradio-bridge.js`, `cuefield/feedback-log.js`, `public/index.html`
+- `cuefield/transition-window-planner.js`, `cuefield/mineradio-bridge.js`, `public/cuefield-automix.js`, `public/index.html`

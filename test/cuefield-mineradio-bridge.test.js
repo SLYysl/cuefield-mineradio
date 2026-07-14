@@ -204,6 +204,8 @@ test('plans a Cuefield transition directly from Mineradio beatmap cache keys', (
   assert.equal(result.chosen.rescueReason, 'limited-transition-window');
   assert.equal(result.diagnostics.terminalRescueClass, 'C');
   assert.equal(result.diagnostics.terminalRescueReason, 'limited-transition-window');
+  assert.equal(result.chosen.effectiveSourceEnd, 128);
+  assert.equal(result.diagnostics.effectiveSourceEnd, 128);
   assert.equal(result.candidates.length, 0);
   assert.equal(Array.isArray(result.chosen.timeline), true);
   assert.equal(result.chosen.timeline.length > 0, true);
@@ -237,6 +239,24 @@ test('plans only after the protected first hook when paired lyrics are available
   assert.equal(result.chosen.entry.time === 0 || result.chosen.entry.source !== 'fallback', true);
   assert.equal(result.diagnostics.structureSource, 'lyric+beat');
   assert.equal(result.diagnostics.exitCandidateCount > 0, true);
+});
+
+test('plans against the listening floor instead of shifting an earlier transition at runtime', () => {
+  const cache = {
+    'song:a': { key: 'song:a', meta: { title: 'A' }, map: makeCompressedMap(128) },
+    'song:b': { key: 'song:b', meta: { title: 'B' }, map: makeCompressedMap(96) },
+  };
+
+  const result = planCuefieldTransitionFromCache({
+    fromKey: 'song:a',
+    toKey: 'song:b',
+    minimumListenUntil: 72,
+    readBeatMapCache: (key) => cache[key] || null,
+  });
+
+  assert.equal(result.chosen.protectedUntil, 72);
+  assert.equal(result.chosen.mixStart >= 72, true);
+  assert.equal(result.diagnostics.protectedUntil, 72);
 });
 
 test('exposes the validated transition window and sanitized diagnostics', () => {

@@ -788,7 +788,7 @@ test('transition requests snapshot and bound recent recipes across refinement', 
   await harness.context.planCuefieldSongPair(
     harness.songs.from,
     harness.songs.to,
-    { refineMusical: true },
+    { refineMusical: true, minimumListenUntil: 72 },
   );
 
   assert.equal(harness.apiCalls.length, 2);
@@ -796,9 +796,10 @@ test('transition requests snapshot and bound recent recipes across refinement', 
     const body = JSON.parse(call.options.body);
     assert.deepEqual(body.recentRecipes, ['older', 'tease-roll-double-drop']);
     assert.equal(body.recentRecipes.length <= 2, true);
+    assert.equal(body.minimumListenUntil, 72);
   });
   assert.equal(
-    harness.context.cuefieldPairPlanCache.has('selected-from->selected-to:refined:impact-blocked'),
+    harness.context.cuefieldPairPlanCache.has('selected-from->selected-to:refined:impact-blocked:floor-72000'),
     true,
   );
 });
@@ -970,6 +971,7 @@ test('server bounds recent recipe identifiers before the bridge call', () => {
 
   assert.deepEqual(Array.from(result), ['x'.repeat(80), 'tease-roll-double-drop']);
   assert.match(route, /recentRecipes:\s*normalizeCuefieldRecentRecipes\(body\.recentRecipes\)/);
+  assert.match(route, /minimumListenUntil:\s*body\.minimumListenUntil/);
 });
 
 test('thrown refined transition request returns and caches the initial usable plan', async () => {
