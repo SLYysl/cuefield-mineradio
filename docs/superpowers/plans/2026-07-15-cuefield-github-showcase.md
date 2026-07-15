@@ -118,7 +118,7 @@ Expected: source `1254×1254 PNG`; hero `1600×760 PNG`.
 
 - [ ] **Step 1: Draw the static pipeline**
 
-Create an SVG with a 1600×360 viewBox, charcoal background, warm silver labels, and one cool-blue signal line. Include these nodes in order:
+Create an SVG with a 1600×360 viewBox, white background, and seven high-saturation red, orange, yellow, green, cyan, blue, and purple cards connected by a rainbow signal line. Include these nodes in order:
 
 ```text
 HOST DATA
