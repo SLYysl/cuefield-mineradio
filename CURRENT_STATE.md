@@ -1,5 +1,5 @@
 # CURRENT_STATE - Cuefield transition hardening
-> 更新时间: 2026-07-15 | 线程: 反馈小修与全功能红蓝对抗
+> 更新时间: 2026-07-15 | 线程: AutoMix busy 并发修复
 
 ## 目标
 - 让规划时间和实际执行位置一致，并避开歌曲文件末尾的无声区域。
@@ -11,10 +11,12 @@
 - 最低收听时间前移到规划请求，写入 `protectedUntil`；不再先选早切点、再由播放器事后硬拖到陌生旋律位置。
 - `effectiveSourceEnd` 已透传 API、浏览器反馈、本地/远端反馈记录。
 - 红队复查封面/音频身份锁、未缓存预载、智能 10-20 选歌、DJ 操作执行和反馈契约，未发现其他可复现回归。
-- 全量 397 tests、语法、diff、HTTP、Playwright 与真实缓存 API 验证通过；本地运行于 `http://127.0.0.1:3000`。
+- AutoMix 同一歌曲对的并发准备会共享正在执行的 Promise，不再返回 `busy` 或重复分析。
+- 重置后的旧准备任务不能清除新任务的 `preparing` 状态；竞态模拟验证 `stale -> preparing -> ready` 状态正确。
+- 全量 398 tests、语法与 diff 检查通过；本地运行于 `http://127.0.0.1:3000`。
 
 ## 未做 / 下一步
-- 用户复听 USA Today -> Believe In Me 及普通结构过渡，重点确认尾部淡出和新切点是否自然。
+- 用户复听智能/顺序 AutoMix，确认不再反复显示 `busy`。
 
 ## 关键约束 / 红线
 - 保留已认可的 A/B 参数；不凭空重调。保留 `desktop/main.js` 用户 Metal edit，不提交。

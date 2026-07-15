@@ -145,6 +145,8 @@
     var state = {
       enabled: false,
       preparing: false,
+      preparingKey: '',
+      preparingPromise: null,
       pending: null,
       lastStatus: 'idle',
       serial: 0,
@@ -153,6 +155,8 @@
     function reset(status) {
       state.pending = null;
       state.preparing = false;
+      state.preparingKey = '';
+      state.preparingPromise = null;
       state.lastStatus = status || 'idle';
       state.serial++;
     }
@@ -163,29 +167,7 @@
       return state.enabled;
     }
 
-    async function prepare(ctx) {
-      ctx = ctx || {};
-      if (!state.enabled) return { status: 'disabled' };
-      if (state.preparing) return { status: 'busy' };
-      var currentSong = ctx.currentSong;
-      var nextSong = ctx.nextSong;
-      if (!currentSong || !nextSong) {
-        reset('missing-queue');
-        return { status: 'missing-queue' };
-      }
-      var getKey = deps.getKey || function(song) { return song && song.key || ''; };
-      var listenFloor = minimumListenUntil(ctx.durationSec);
-      ctx.minimumListenUntil = listenFloor;
-      var fromKey = getKey(currentSong);
-      var toKey = getKey(nextSong);
-      if (!fromKey || !toKey || fromKey === toKey) {
-        reset('missing-key');
-        return { status: 'missing-key' };
-      }
-
-      var serial = ++state.serial;
-      state.preparing = true;
-      state.lastStatus = 'preparing';
+    async function performPrepare(ctx, currentSong, nextSong, fromKey, toKey, listenFloor, serial) {
       try {
         if (deps.ensureBeatMap) {
           var fromReady = await deps.ensureBeatMap(currentSong, fromKey, ctx);
@@ -267,9 +249,49 @@
       } catch (err) {
         reset('error');
         return { status: 'error', error: err && err.message ? err.message : String(err) };
-      } finally {
-        state.preparing = false;
       }
+    }
+
+    function prepare(ctx) {
+      ctx = ctx || {};
+      if (!state.enabled) return Promise.resolve({ status: 'disabled' });
+      var currentSong = ctx.currentSong;
+      var nextSong = ctx.nextSong;
+      if (!currentSong || !nextSong) {
+        reset('missing-queue');
+        return Promise.resolve({ status: 'missing-queue' });
+      }
+      var getKey = deps.getKey || function(song) { return song && song.key || ''; };
+      var listenFloor = minimumListenUntil(ctx.durationSec);
+      ctx.minimumListenUntil = listenFloor;
+      var fromKey = getKey(currentSong);
+      var toKey = getKey(nextSong);
+      if (!fromKey || !toKey || fromKey === toKey) {
+        reset('missing-key');
+        return Promise.resolve({ status: 'missing-key' });
+      }
+      var preparingKey = [ctx.token, ctx.currentIndex, ctx.nextIndex, fromKey, toKey].join('|');
+      if (state.preparingPromise) {
+        if (state.preparingKey === preparingKey) return state.preparingPromise;
+        return Promise.resolve({ status: 'busy' });
+      }
+
+      var serial = ++state.serial;
+      state.preparing = true;
+      state.preparingKey = preparingKey;
+      state.lastStatus = 'preparing';
+      var promise = Promise.resolve()
+        .then(function() {
+          return performPrepare(ctx, currentSong, nextSong, fromKey, toKey, listenFloor, serial);
+        })
+        .finally(function() {
+          if (serial !== state.serial || state.preparingPromise !== promise) return;
+          state.preparing = false;
+          state.preparingKey = '';
+          state.preparingPromise = null;
+        });
+      state.preparingPromise = promise;
+      return promise;
     }
 
     function shouldTrigger(ctx) {

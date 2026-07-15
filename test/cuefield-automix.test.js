@@ -51,6 +51,47 @@ test('prepares a transition for the current and next queue items before playback
   assert.equal(automix.shouldTrigger({ token: 7, currentIndex: 1, currentTime: 41 }), true);
 });
 
+test('shares an in-flight preparation for the same queue pair instead of returning busy', async () => {
+  let releaseFirstBeatMap;
+  const firstBeatMap = new Promise((resolve) => { releaseFirstBeatMap = resolve; });
+  let beatMapCalls = 0;
+  const automix = createCuefieldAutoMix({
+    getKey: (song) => song.key,
+    ensureBeatMap: async () => {
+      beatMapCalls += 1;
+      if (beatMapCalls === 1) await firstBeatMap;
+      return true;
+    },
+    planTransition: async () => ({
+      ok: true,
+      chosen: {
+        recipe: 'section-jump',
+        exit: { time: 42 },
+        evaluation: { tier: 'usable', risks: [] },
+      },
+    }),
+    prepareAudioUrl: async () => '/api/audio?url=b',
+  });
+  const context = {
+    token: 7,
+    currentIndex: 0,
+    nextIndex: 1,
+    currentSong: { key: 'a' },
+    nextSong: { key: 'b' },
+  };
+
+  automix.setEnabled(true);
+  const first = automix.prepare(context);
+  await Promise.resolve();
+  const duplicate = automix.prepare(context);
+  releaseFirstBeatMap();
+  const [firstResult, duplicateResult] = await Promise.all([first, duplicate]);
+
+  assert.equal(firstResult.status, 'ready');
+  assert.equal(duplicateResult.status, 'ready');
+  assert.equal(beatMapCalls, 2);
+});
+
 test('holds automatic transitions until a dynamic minimum listening floor', async () => {
   let planningContext = null;
   const automix = createCuefieldAutoMix({
