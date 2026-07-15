@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 360" role="img" aria-labelledby="title desc">
+  <title id="title">Cuefield architecture</title>
+  <desc id="desc">Host data passes through musical analysis, structure mapping, transition routing, recipe planning, timeline execution, and feedback.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#080a0d"/>
+      <stop offset="1" stop-color="#15110e"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5f8fff"/>
+      <stop offset="0.52" stop-color="#9db8ff"/>
+      <stop offset="1" stop-color="#c9a77d"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="360" rx="32" fill="url(#bg)"/>
+  <text x="48" y="58" fill="#c9b8a2" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="18" letter-spacing="4">CUEFIELD SIGNAL PATH</text>
+  <text x="1552" y="58" fill="#666d78" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">ANALYZE → CHOOSE → EXECUTE → LEARN</text>
+
+  <path d="M136 212 H1464" fill="none" stroke="#252a33" stroke-width="8" stroke-linecap="round"/>
+  <path d="M136 212 H1464" fill="none" stroke="url(#signal)" stroke-width="3" stroke-linecap="round"/>
+
+  <g filter="url(#shadow)" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+    <g transform="translate(40 134)">
+      <rect width="190" height="154" rx="18" fill="#10141a" stroke="#303846"/>
+      <circle cx="96" cy="78" r="8" fill="#5f8fff"/>
+      <text x="95" y="42" fill="#7d8796" text-anchor="middle" font-size="12" letter-spacing="2">01</text>
+      <text x="95" y="114" fill="#ece7df" text-anchor="middle" font-size="17" font-weight="650">HOST DATA</text>
+      <text x="95" y="137" fill="#6e7785" text-anchor="middle" font-size="11">queue · beatmap · lyrics</text>
+    </g>
+    <g transform="translate(260 134)">
+      <rect width="190" height="154" rx="18" fill="#10141a" stroke="#303846"/>
+      <circle cx="96" cy="78" r="8" fill="#7199ff"/>
+      <text x="95" y="42" fill="#7d8796" text-anchor="middle" font-size="12" letter-spacing="2">02</text>
+      <text x="95" y="108" fill="#ece7df" text-anchor="middle" font-size="16" font-weight="650">MUSICAL</text>
+      <text x="95" y="129" fill="#ece7df" text-anchor="middle" font-size="16" font-weight="650">ANALYSIS</text>
+    </g>
+    <g transform="translate(480 134)">
+      <rect width="190" height="154" rx="18" fill="#10141a" stroke="#303846"/>
+      <circle cx="96" cy="78" r="8" fill="#86a8ff"/>
+      <text x="95" y="42" fill="#7d8796" text-anchor="middle" font-size="12" letter-spacing="2">03</text>
+      <text x="95" y="114" fill="#ece7df" text-anchor="middle" font-size="16" font-weight="650">STRUCTURE MAP</text>
+      <text x="95" y="137" fill="#6e7785" text-anchor="middle" font-size="11">exit · entry · protection</text>
+    </g>
+    <g transform="translate(700 134)">
+      <rect width="190" height="154" rx="18" fill="#12151a" stroke="#5b6270"/>
+      <circle cx="96" cy="78" r="10" fill="#a7baff"/>
+      <text x="95" y="42" fill="#8d94a0" text-anchor="middle" font-size="12" letter-spacing="2">04</text>
+      <text x="95" y="108" fill="#ffffff" text-anchor="middle" font-size="16" font-weight="700">TRANSITION</text>
+      <text x="95" y="129" fill="#ffffff" text-anchor="middle" font-size="16" font-weight="700">ROUTER</text>
+    </g>
+    <g transform="translate(920 134)">
+      <rect width="190" height="154" rx="18" fill="#141414" stroke="#51483e"/>
+      <circle cx="96" cy="78" r="8" fill="#bfb4a5"/>
+      <text x="95" y="42" fill="#8d847a" text-anchor="middle" font-size="12" letter-spacing="2">05</text>
+      <text x="95" y="108" fill="#f0e7db" text-anchor="middle" font-size="16" font-weight="650">RECIPE</text>
+      <text x="95" y="129" fill="#f0e7db" text-anchor="middle" font-size="16" font-weight="650">PLANNER</text>
+    </g>
+    <g transform="translate(1140 134)">
+      <rect width="190" height="154" rx="18" fill="#151310" stroke="#51483e"/>
+      <circle cx="96" cy="78" r="8" fill="#c8a982"/>
+      <text x="95" y="42" fill="#8d847a" text-anchor="middle" font-size="12" letter-spacing="2">06</text>
+      <text x="95" y="108" fill="#f0e7db" text-anchor="middle" font-size="16" font-weight="650">TIMELINE</text>
+      <text x="95" y="129" fill="#f0e7db" text-anchor="middle" font-size="16" font-weight="650">EXECUTOR</text>
+    </g>
+    <g transform="translate(1360 134)">
+      <rect width="200" height="154" rx="18" fill="#17130f" stroke="#5c4936"/>
+      <circle cx="101" cy="78" r="8" fill="#d3a36d"/>
+      <text x="100" y="42" fill="#948171" text-anchor="middle" font-size="12" letter-spacing="2">07</text>
+      <text x="100" y="114" fill="#f2e5d6" text-anchor="middle" font-size="17" font-weight="650">FEEDBACK</text>
+      <text x="100" y="137" fill="#766b61" text-anchor="middle" font-size="11">ratings · diagnostics</text>
+    </g>
+  </g>
+
+  <text x="48" y="330" fill="#5f6774" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">REAL PLAYER INPUT</text>
+  <text x="1552" y="330" fill="#8b735a" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">EXPLAINABLE HANDOFF</text>
+</svg>

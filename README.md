@@ -1,139 +1,169 @@
-# Cuefield AutoMix for Mineradio
+<p align="center">
+  <img src="./docs/assets/readme/cuefield-mobius-hero.png" alt="Cuefield metallic Möbius cube" width="100%">
+</p>
 
-Cuefield is an experimental AutoMix layer for Mineradio. It listens to Mineradio's local beatmap cache, plans a DJ-style transition recipe, prepares the next deck, and executes a conservative handoff before the current track ends.
+<h1 align="center">Cuefield</h1>
 
-This repository is a public MVP fork for discussion with the Mineradio author. The goal is to prove the transition layer first, not to replace Mineradio or redistribute a separate music player.
+<p align="center"><strong>An explainable AutoMix engine for real music players.</strong></p>
 
-## Cuefield MVP
+<p align="center">
+  <img alt="11 transition recipes" src="https://img.shields.io/badge/transition_recipes-11-c7a67d?style=flat-square">
+  <img alt="398 tests passing" src="https://img.shields.io/badge/tests-398_passing-5f8fff?style=flat-square">
+  <img alt="Node.js" src="https://img.shields.io/badge/runtime-Node.js-6f8f72?style=flat-square">
+  <img alt="Electron host" src="https://img.shields.io/badge/host-Electron-8d86b8?style=flat-square">
+  <img alt="GPL 3.0 license" src="https://img.shields.io/badge/license-GPL--3.0-b9a896?style=flat-square">
+</p>
 
-- Planner output: explainable transition recipes, not just a crossfade duration.
-- Current safe recipe: `safety-long-blend`, a conservative long blend for weak/reject pairs.
-- Current listening checkpoint: 57 real playlist tests, `1=54 / 2=2 / 3=1`.
-- Current `safety-long-blend` pass rate: 94.7%.
-- Feedback loop: in-app 1/2/3 rating, local stats panel, and optional multi-tester remote feedback mirroring.
-- Data boundary: no music files, cookies, playback URLs, raw beatmap cache, or private feedback logs are committed.
+<p align="center">
+  <a href="#why-cuefield">Why Cuefield</a> ·
+  <a href="#how-it-works">Signal path</a> ·
+  <a href="#11-transition-recipes">Recipes</a> ·
+  <a href="#engineering-evidence">Evidence</a> ·
+  <a href="#offline-preview-cli">Preview CLI</a>
+</p>
 
-Read the MVP handoff: [docs/CUEFIELD_MVP.md](./docs/CUEFIELD_MVP.md)
+Cuefield reads structural evidence from two tracks, chooses a guarded DJ transition recipe, and executes the handoff inside [Mineradio](https://github.com/XxHuberrr/Mineradio). Every decision stays inspectable: route, anchors, recipe, timeline, fallbacks, and listening feedback.
 
-## Relationship To Mineradio
+> Free, non-commercial portfolio engineering project. Cuefield does not ship music, playback URLs, account cookies, or private listening data.
 
-Cuefield currently ships as a fork because the MVP needs Mineradio's real player, queue, beat analysis, and UI runtime to prove whether the transition layer feels usable. The intended long-term shape is cleaner:
+## 中文速览
 
-- `adapter`: read host beatmaps, queue state, and audio URLs
-- `planner`: choose transition anchors and recipe timelines
-- `runtime`: prepare the next deck and execute the handoff
-- `feedback`: collect ratings for recipe tuning
+Cuefield 是嵌入 Mineradio 的自动 DJ 过渡引擎。它读取节拍、重拍、能量窗口、调性与旋律轮廓，判断两首歌应该在哪里交接、适合哪种过渡配方，再由双 Deck runtime 执行。这个仓库展示的是可解释的音乐分析、路由、配方和失败降级系统；Mineradio 是验证它的真实播放器宿主。
 
-Mineradio remains the host application in this MVP. Cuefield is the transition brain being tested inside it.
+## Why Cuefield
 
----
+A fixed crossfade knows duration. Cuefield knows why a handoff is allowed.
 
-# Mineradio
+- **It listens for structure.** Beat grids, downbeats, phrase candidates, energy windows, key evidence, melody contour, lyrics, and local musical compatibility shape the transition window.
+- **It chooses a route before a sound.** `structure-mix`, `late-contrast-rise`, `late-contrast-release`, and `terminal-rescue` constrain where and how a recipe may run.
+- **It fails closed.** Missing structure, unsafe overlap, vocal interruption, bass collision, stale queue state, or late runtime actions trigger rejection, downgrade, or a protected fallback.
 
-![Mineradio 暗场启动页](./docs/assets/readme/cinema-beat-smoke.png)
+## How It Works
 
-Mineradio 是一款 Windows 桌面沉浸式音乐播放器，把天气电台、搜索播放、歌词舞台、粒子视觉和 3D 歌单架组合成一个更接近现场感的私人音乐空间。
+![Cuefield signal path](./docs/assets/readme/cuefield-architecture.svg)
 
-## 立即下载 Windows 安装包
-
-> 国内 GitHub 小白用户：优先使用蓝奏云下载，打开链接后直接下载 `Mineradio-1.1.1-Setup.exe`，速度通常比 GitHub Release 更稳、更接近满速。
-
-| 下载入口 | 推荐人群 | 链接 |
+| Stage | Responsibility | Implementation |
 | --- | --- | --- |
-| 蓝奏云满速下载 | 国内用户优先 | [下载 Mineradio 1.1.1 安装包](https://xxhuber.lanzout.com/s/Mineradio) |
-| GitHub Release 备用 | 能稳定访问 GitHub 的用户 | [v1.1.1 Release](https://github.com/XxHuberrr/Mineradio/releases/tag/v1.1.1) |
+| Host data | Read queue state, track identity, lyrics, and Mineradio beatmap cache | [`cuefield/adapter-mineradio.js`](./cuefield/adapter-mineradio.js) |
+| Musical analysis | Normalize rhythm evidence and derive compact musical profiles | [`cuefield/musical-profile.js`](./cuefield/musical-profile.js) |
+| Structure map | Locate protected exits, entries, releases, hooks, and local windows | [`cuefield/structure-map.js`](./cuefield/structure-map.js) · [`cuefield/section-candidates.js`](./cuefield/section-candidates.js) |
+| Transition router | Select a compatible, rising, falling, or rescue route | [`cuefield/transition-router.js`](./cuefield/transition-router.js) |
+| Recipe planner | Score eligible recipes and reject unsafe candidates | [`cuefield/recipe-planner.js`](./cuefield/recipe-planner.js) |
+| Timeline executor | Schedule Deck A/B playback, EQ, filters, loops, echo, ducking, and handoff | [`public/cuefield-timeline-executor.js`](./public/cuefield-timeline-executor.js) |
+| Feedback | Store compact ratings and diagnostics without audio URLs | [`cuefield/feedback-log.js`](./cuefield/feedback-log.js) |
 
-安装时只需要下载并运行 `Mineradio-1.1.1-Setup.exe`。不要下载 `Source code`、`.blockmap`、`latest.yml`，也不要把 `win-unpacked` 当成正式安装包。
+### Route policy
 
-## 下载或安装被拦截怎么办
+| Route | When it is used | Window policy |
+| --- | --- | --- |
+| `structure-mix` | Compatible tracks with usable structural evidence | Adaptive overlap at the best supported exit and entry |
+| `late-contrast-rise` | B enters with a strong snap or energy rise | Late exit, short filtered runway |
+| `late-contrast-release` | A releases into a quieter or lower-energy B | Late exit, short or medium quiet runway |
+| `terminal-rescue` | Structure, duration, tempo, or runway evidence is unsafe | Protected late fallback with bounded execution |
 
-小众 Electron 桌面软件、未签名安装包有时会被浏览器、Windows Defender 或 SmartScreen 提示风险。请先确认安装包来自上面的蓝奏云或 GitHub Release 官方入口，文件名是 `Mineradio-1.1.1-Setup.exe`。
+## 11 Transition Recipes
 
-1. 浏览器下载栏提示风险时，打开下载列表，点这条下载右侧的 `...` 三个点，选择 `保留` / `仍要保留` / `显示更多` 后继续保留。
-2. Windows SmartScreen 弹出蓝色拦截窗口时，点 `更多信息`，再点 `仍要运行`。
-3. 如果杀毒软件明确显示木马、高危或已经隔离，不要强行运行；删除该文件后重新从蓝奏云或 GitHub Release 下载，仍然异常请带截图反馈给作者。
+The planner creates candidates, scores their evidence, applies route and safety gates, then emits one executable timeline. A recipe name describes sound design; the router still controls whether that sound is allowed for the pair.
 
-## 作者支持
+| Recipe | What it does | Guardrail or fallback |
+| --- | --- | --- |
+| `safety-long-blend` | Uses a conservative intro or low-density entry with delayed low end | Universal fallback for weak or rejected pairs; masks risky bass and aggressive intros |
+| `intro-outro-long-blend` | Beds B's intro under a supported A outro before the anchor | Requires enough safe overlap; flags weak bass compatibility |
+| `filtered-pickup` | Introduces B through a high-pass filter before its downbeat | Shortens for rising contrast and clears A's low end before handoff |
+| `bass-eq-handoff` | Exchanges bass ownership instead of stacking both low ends | Ducks A and restores B's bass around the landing |
+| `spectral-emergence` | Reveals B in three spectrum stages before the full mix arrives | Limited to structure-supported, musically compatible overlaps; carries a safety timeline |
+| `quick-safe-fade` | Performs a short, bounded handoff when sustained overlap is risky | Keeps the transition brief and avoids unsupported effects |
+| `echo-out` | Sends A into a controlled echo tail while B enters on a short runway | Requires usable Web Audio execution; falls back to a short safety timeline |
+| `source-loop-roll` | Tightens A from four beats to two to one before release | Requires stable source looping and slip-safe cleanup |
+| `hook-teaser` | Previews an isolated B hook, clears it, then returns for the final entry | Requires a trusted hook; carries a safety fallback |
+| `harmonic-double-drop` | Lands matched A and B hooks together with immediate bass exchange | Local harmonic clash removes the candidate; intended for high-confidence pairs |
+| `tease-roll-double-drop` | Combines a B teaser, an A loop roll, a brief fake-out, and a double drop | Requires trusted impact evidence, observes recipe cooldown, and falls back to `bass-eq-handoff` |
 
-如果 Mineradio 陪你多听了一首歌，也欢迎请作者一杯咖啡。
+## Engineering Evidence
 
-[查看完整支持页](./docs/SUPPORT.md)
+Baseline measured on public `main` at commit [`643b955`](https://github.com/SLYysl/cuefield-mineradio/commit/643b955):
 
-![Mineradio 作者支持渠道](./docs/assets/support/mineradio-author-support-poster.png)
+| Evidence | Current baseline | How to reproduce |
+| --- | ---: | --- |
+| Transition recipes | 11 | Inspect `baseCandidate(...)` IDs in [`recipe-planner.js`](./cuefield/recipe-planner.js) |
+| Automated tests | 398 passing, 0 failing | `node --test test/*.test.js` |
+| Cuefield core + browser runtime | 7,646 lines | `git ls-files -z 'cuefield/*.js' 'public/cuefield*.js' \| xargs -0 wc -l` |
+| Test code | 9,105 lines | `git ls-files -z 'test/*.js' \| xargs -0 wc -l` |
+| Public repository history | 209 commits | `git rev-list --count 643b955` |
 
-1.1.1 的核心目标是把 Mineradio 重新整理成一份可公开下载的纯净安装版：默认视觉参数来自内置「默认测试」用户存档，首次启动就进入统一的视觉手感；3D 歌单架、歌词层级、用户存档和后台性能策略都在同一轮里收口。
+The original listening checkpoint covered 57 real playlist transitions: `54 positive / 2 neutral / 1 negative`, a 94.7% positive rate for the then-current `safety-long-blend` path. That number is a historical listening checkpoint, not model accuracy and not a claim that every current recipe passes at 94.7%.
 
-## 当前版本
+### What the tests protect
 
-当前版本：`1.1.1`
+- Queue identity, stale preparation, concurrent preparation, and handoff lifecycle
+- Protected listening floors, lyric boundaries, structural anchors, and effective source end
+- Beat/downbeat alignment, local musical compatibility, vocal collision, and bass clash
+- Recipe eligibility, cooldown, route constraints, fallbacks, and volume-only downgrades
+- Compact feedback records that strip audio URLs, raw lyrics, and bulk musical profiles
+- Offline preview plans and ffmpeg argument construction
 
-状态：1.1.1 纯净安装发布版。
+## Architecture & Repository Map
 
-> 安全提示：`v1.0.10` 及更早旧安装包不再建议继续安装或传播，请先隔离旧安装包。请使用本页提供的 `Mineradio-1.1.1-Setup.exe` 进行纯净安装。
-
-## 核心特性
-
-- Open-Meteo 天气电台，根据当前位置、城市和天气 mood 生成更合适的播放队列
-- Cuefield AutoMix MVP：实验性自动过渡层，支持 `safety-long-blend` 保守长混、1/2/3 听感反馈和可选多人反馈收集。详见 [Cuefield AutoMix MVP](./docs/CUEFIELD_MVP.md)。
-- 首页包含天气电台、每日推荐、私人电台、继续听、听歌画像和我的歌单入口
-- Wallpaper 银河首页背景，未播放状态保持干净的星河氛围
-- 播放后切换到 Emily / 默认播放态视觉，歌词舞台与粒子舞台同步工作
-- 基于节奏的电影镜头视觉系统
-- 面向长播客和 DJ 曲目的专属视觉模式
-- 歌词舞台、自定义歌词、歌词位置与视觉控制
-- 自定义专辑封面上传与裁剪
-- 右键唤起 3D 歌单架，支持歌单队列浏览
-- 网易云音乐账号、搜索、歌单、播客等体验接入
-- QQ 音乐搜索、登录态与音源补充接入
-- GitHub Releases 更新检测与下载入口
-- 首次启动内置「默认测试」视觉用户存档，软件内默认视觉参数与该存档一致
-
-## 使用说明
-
-Windows 用户可以在 GitHub Releases 中下载安装包。
-
-正式分发以 `Mineradio-1.1.1-Setup.exe` 为准，不建议直接下载 `win-unpacked` 目录作为正式分发包。安装包会创建桌面快捷方式；直接运行打包版 `Mineradio.exe` 时，应用也会在首次启动时补创建桌面快捷方式。
-
-已经安装过旧版本的用户，建议卸载旧版本、隔离旧安装包后，再使用 `v1.1.1` 安装包纯净安装。
-
-## 开发运行
-
-```bash
-npm install
-npm start
-npm run build:win
+```text
+cuefield-mineradio/
+├── cuefield/                 analysis, routing, recipes, evaluation, preview rendering
+├── public/
+│   ├── cuefield-automix.js   player integration and preparation lifecycle
+│   └── cuefield-*.js         Deck A/B execution, buffering, source loops, feedback UI
+├── test/                     planner, runtime, safety, privacy, and integration tests
+├── docs/                     design records, listening checkpoints, and project boundaries
+├── server.js                 Mineradio host API and Cuefield endpoints
+└── public/index.html         real Electron player UI host
 ```
 
-桌面版入口由 Electron 主进程加载本地服务。`npm run build:win` 会生成 Windows NSIS 安装包，产物位于 `dist/`。
+Cuefield currently lives in a Mineradio fork because AutoMix needs a real queue, player clock, audio graph, and UI runtime. The intended boundary is still clean: Mineradio owns playback and presentation; Cuefield owns analysis, transition choice, execution timeline, and feedback diagnostics.
 
-## 更新机制
+## Offline Preview CLI
 
-Mineradio 会请求 GitHub Releases latest 检测新版本。远端版本高于本地版本时，应用内更新入口会展示 Release 内容、下载安装包到本机用户数据目录，并通过系统打开安装包。
+Cuefield can render transition plans through ffmpeg before they enter the live player. Supply your own local audio, fixture data, and evaluation report:
 
-本地验证更新链路时，可以通过 `MINERADIO_UPDATE_MANIFEST` 指向一个本地 manifest JSON 或 HTTP 地址来模拟线上 Release。
+```bash
+node cuefield/render-preview-cli.js \
+  --report /path/to/cuefield-eval.tsv \
+  --row 1 \
+  --mode bass-swap \
+  --audio-dir /path/to/local-audio \
+  --fixtures-dir /path/to/track-fixtures \
+  --out /tmp/cuefield-previews
+```
 
-## 第三方音乐平台说明
+Useful options include `--full`, `--auto-sections`, `--lrc-dir`, and `--exit-bias`. The CLI writes an MP3 preview and prints the chosen mode, track pair, recipe, section choice, and segment durations as JSON.
 
-Mineradio 不是网易云音乐、QQ 音乐或腾讯音乐娱乐集团的官方客户端，也不隶属于任何音乐平台。
+The repository contains no demo songs. Preview inputs must be music you are authorized to use locally.
 
-项目中的第三方平台接入仅用于个人学习、本地客户端体验和用户自有账号的播放辅助。请遵守对应平台的用户协议、版权规则和会员权益规则。项目不会提供绕过付费、绕过会员、破解音质或重新分发音乐内容的能力。
+## Safety & Data Boundary
 
-## 用户数据与隐私
+Cuefield keeps the public repository useful without turning listening sessions into a data leak.
 
-登录 Cookie、搜索历史、自定义封面、自定义歌词、节奏分析缓存等数据只应保存在本机用户数据目录或浏览器本地存储中，不应提交到仓库。
+**Never committed:**
 
-更多说明见 [PRIVACY.md](./PRIVACY.md)。
+- Music files or rendered previews
+- Account cookies or authentication files
+- Playback URLs
+- Raw Mineradio beatmap cache
+- Raw lyrics collected for a listening session
+- Private feedback JSONL or remote feedback credentials
 
-## 致谢
+**Allowed public evidence:**
 
-Mineradio 由 XxHuberrr 主要设计与打造。emily 作为早期视觉底层想法与 `emily` 视觉预设改进方向的共创者和灵感来源之一，特此感谢。
+- Compact fixtures created for tests
+- Aggregate listening counts
+- Bounded diagnostics such as recipe, route, timing class, score tier, and rejection reason
+- Code and tests that show how raw inputs are reduced or discarded
 
-同时感谢小天才e宝、应春日、锋将军、軌跡、林中、骊、风痕、花椰菜🥦在早期体验、测试反馈和发布准备中的帮助。
+See [`PRIVACY.md`](./PRIVACY.md) and the Cuefield MVP handoff in [`docs/CUEFIELD_MVP.md`](./docs/CUEFIELD_MVP.md).
 
-## 版权与授权
+## Mineradio: The Real-World Host
 
-Copyright (C) 2026 XxHuberrr.
+[Mineradio](https://github.com/XxHuberrr/Mineradio) is a Windows Electron music player created by **XxHuberrr**. It supplies the real queue, playback engine, beatmap cache, lyrics, and UI environment used to test Cuefield. Cuefield does not replace Mineradio or redistribute it as a separate player.
 
-本项目采用 GPL-3.0 授权。详见 [LICENSE](./LICENSE)。
+This repository is not affiliated with NetEase Cloud Music, QQ Music, Tencent Music Entertainment, or their parent companies. Third-party service access remains subject to each platform's terms, copyright rules, and account entitlements.
 
-MR Logo、Mineradio 名称、界面视觉设计与原创视觉表达归作者所有；第三方依赖和第三方服务分别遵循其各自授权与服务条款。
+## License & Attribution
+
+Code is available under [GPL-3.0](./LICENSE). Mineradio, its name, and its original visual system remain attributed to XxHuberrr. The metallic Möbius showcase artwork was supplied by the repository maintainer for this public presentation.
